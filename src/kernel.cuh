@@ -123,7 +123,8 @@ struct __align__(16) RayState
 	int        objectIdx;           // intersection object idx
 	bool       hit;                 // hit or miss
 	bool       terminated;
-	Int2       pad3;
+	int        mutex;
+	int        pad3;
 
 	RandState  rdState[3];          // quasi rand state
 };
@@ -170,7 +171,7 @@ struct IndexBuffers
 	void memsetZero(uint renderBufferSize, cudaStream_t stream) {
 		for (uint i = 0; i < IndexBufferCount; ++i) {
 			GpuErrorCheck(cudaMemsetAsync(buffers[i], 0u, renderBufferSize * sizeof(uint), stream));
-			GpuErrorCheck(cudaMemsetAsync(bufferTops[i], 0u, sizeof(uint)));
+			//GpuErrorCheck(cudaMemsetAsync(bufferTops[i], 0u, sizeof(uint), stream));
 		}
 	}
 
@@ -271,7 +272,12 @@ private:
 	// terrain
 	Terrain                     terrain;
 
-	static const uint NumStreams = 8;
+	static const uint NumStreams = 4;
 	cudaStream_t streams[NumStreams];
+	Float3  cameraFocusPos;
+	Sphere* spheres;
+	Sphere* sphereLights;
+	int numSpheres;
+	int numSphereLights;
 };
 

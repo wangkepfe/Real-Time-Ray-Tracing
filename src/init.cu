@@ -12,29 +12,47 @@ void RayTracer::init()
 	AABB* aabbs = terrain.generateAabbs(numAabbs);
 
 	// sphere
-	const int numSpheres  = 1;
-	Sphere* spheres       = new Sphere[numSpheres];
-	Float3 cameraFocusPos = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
+	numSpheres  = 3;
+	spheres       = new Sphere[numSpheres];
+	cameraFocusPos = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
 	spheres[0]            = Sphere(cameraFocusPos, 0.005f);
+	spheres[1] = Sphere(Float3(0.09f, terrain.getHeightAt(0.09f) + 0.005f, 0.0f) , 0.005f);
+	spheres[2] = Sphere(Float3(-0.1f, terrain.getHeightAt(-0.1f) + 0.005f, 0.0f) , 0.005f);
 
 	// surface materials
-	const int numMaterials     = 3;
+	const int numMaterials     = 6;
 	SurfaceMaterial* materials = new SurfaceMaterial[numMaterials];
 	materials[0].type          = LAMBERTIAN_DIFFUSE;
-	materials[0].albedo        = Float3(0.9f, 0.2f, 0.1f);
+	materials[0].albedo        = Float3(0.8f, 0.8f, 0.8f);
 	materials[1].type          = EMISSIVE;
 	materials[1].albedo        = Float3(1.0f, 1.0f, 1.0f);
+	materials[2].type          = EMISSIVE;
+	materials[2].albedo        = Float3(0.9f, 0.2f, 0.1f);
+	materials[3].type          = EMISSIVE;
+	materials[3].albedo        = Float3(0.1f, 0.2f, 0.9f);
+	materials[4].type          = MICROFACET_REFLECTION;
+	materials[4].albedo        = Float3(1.0f, 1.0f, 1.0f);
+	materials[5].type          = PERFECT_FRESNEL_REFLECTION_REFRACTION;
+	materials[5].albedo        = Float3(1.0f, 1.0f, 1.0f);
 
 	// material index for each object
 	const int numObjects = numAabbs + numSpheres;
 	int* materialsIdx    = new int[numObjects];
-	materialsIdx[0]      = 1;
-	for (int i = 1; i < numObjects; ++i) { materialsIdx[i] = 0; }
+	materialsIdx[0] = 1;
+	materialsIdx[1] = 2;
+	materialsIdx[2] = 3;
+	for (int i = numSpheres; i < numObjects; ++i)
+	{
+		if (i < numSpheres + numAabbs / 2 + 10) materialsIdx[i] = 0;
+		else materialsIdx[i] = 4;
+	}
 
 	// light source
-	const int numSphereLights = 1;
-	Sphere* sphereLights      = new Sphere[numSphereLights];
+	numSphereLights = 3;
+	sphereLights      = new Sphere[numSphereLights];
 	sphereLights[0]           = spheres[0];
+	sphereLights[0] = spheres[1];
+	sphereLights[0] = spheres[2];
 
 	// init cuda
 	gpuDeviceInit(0);
@@ -119,10 +137,10 @@ void RayTracer::init()
 	d_sceneMaterial.materialsIdx    = d_materialsIdx;
 	d_sceneMaterial.numMaterials    = numMaterials;
 
-	delete[] spheres;
+
 	delete[] materials;
 	delete[] materialsIdx;
-	delete[] sphereLights;
+
 
 	// cuda random
 	GpuErrorCheck(cudaMalloc((void**)& d_randInitVec, 3 * sizeof(RandInitVec)));
@@ -155,6 +173,9 @@ void RayTracer::init()
 
 void RayTracer::cleanup()
 {
+	delete[] spheres;
+	delete[] sphereLights;
+
 	// Destroy surface objects
     cudaDestroySurfaceObject(colorBufferA);
 	cudaDestroySurfaceObject(colorBufferB);
