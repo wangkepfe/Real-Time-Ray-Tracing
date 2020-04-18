@@ -294,24 +294,24 @@ void RayTracer::draw(SurfObj* renderTarget)
 	cbo.sunDir        = sunDir;
 	cbo.frameNum      = cbo.frameNum + 1;
 
-	indexBuffers.memsetZero(renderBufferSize);
+	indexBuffers.memsetZero(renderBufferSize, streams[1]);
 
 	// ---------------- ray tracing ----------------
 	Int2 bufferDim(renderWidth , renderHeight);
 	Int2 outputDim(screenWidth , screenHeight);
 
-	RayGen <<<gridDim, blockDim, sizeof(ullint)>>> (cbo, rayState, d_randInitVec, d_sceneGeometry, normalBuffer, positionBuffer, gHitMask, 5);
-	PathTracing <<<dim3(divRoundUp(gridDim.x, blockDim.x), divRoundUp(gridDim.y, blockDim.y), 1), blockDim>>> (cbo, rayState, colorBufferA, d_randInitVec, d_sceneGeometry, d_sceneMaterial, gHitMask, indexBuffers);
+	RayGen <<<gridDim, blockDim, sizeof(ullint), streams[0]>>> (cbo, rayState, d_randInitVec, d_sceneGeometry, normalBuffer, positionBuffer, gHitMask, 5);
+	PathTracing <<<dim3(divRoundUp(gridDim.x, blockDim.x), divRoundUp(gridDim.y, blockDim.y), 1), blockDim, 0, streams[0]>>> (cbo, rayState, colorBufferA, d_randInitVec, d_sceneGeometry, d_sceneMaterial, gHitMask, indexBuffers);
 
-	//GpuErrorCheck(cudaDeviceSynchronize());
-	//GpuErrorCheck(cudaPeekAtLastError());
+	GpuErrorCheck(cudaDeviceSynchronize());
+	GpuErrorCheck(cudaPeekAtLastError());
 
 	// ---------------- post processing ----------------
-	ToneMapping<<<gridDim, blockDim>>>(/*io*/colorBufferA , bufferDim , /*exposure*/1.0);
-	Denoise    <<<gridDim, blockDim>>>(/*io*/colorBufferA , /*in*/normalBuffer , /*in*/positionBuffer, bufferDim, cbDenoise);
+	ToneMapping<<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferA , bufferDim , /*exposure*/1.0);
+	Denoise    <<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferA , /*in*/normalBuffer , /*in*/positionBuffer, bufferDim, cbDenoise);
 
-	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim>>>(/*out*/colorBufferB , /*in*/colorBufferA , bufferDim); }
-	else                   { TAA       <<<gridDim, blockDim>>>(/*io*/colorBufferB  , /*in*/colorBufferA , bufferDim); }
+	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(/*out*/colorBufferB , /*in*/colorBufferA , bufferDim); }
+	else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferB  , /*in*/colorBufferA , bufferDim); }
 
-	FilterScale<<<scaleGridDim, scaleBlockDim>>>(/*out*/renderTarget, /*in*/colorBufferB, outputDim, bufferDim);
+	FilterScale<<<scaleGridDim, scaleBlockDim, 0, streams[0]>>>(/*out*/renderTarget, /*in*/colorBufferB, outputDim, bufferDim);
 }

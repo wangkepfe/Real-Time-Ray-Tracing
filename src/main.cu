@@ -504,6 +504,8 @@ private:
 
         // glfw terminate
         glfwTerminate();
+
+        cudaDeviceReset();
     }
 
     // create instance

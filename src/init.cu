@@ -39,6 +39,11 @@ void RayTracer::init()
 	// init cuda
 	gpuDeviceInit(0);
 
+	// init stream
+	for (uint i = 0; i < NumStreams; i++) {
+        cudaStreamCreate(&streams[i]);
+	}
+
 	// constant buffer
 	cbo.maxSceneLoop = 4;
 	cbo.frameNum = 0;

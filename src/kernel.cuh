@@ -167,9 +167,9 @@ struct IndexBuffers
 		}
 	}
 
-	void memsetZero(uint renderBufferSize) {
+	void memsetZero(uint renderBufferSize, cudaStream_t stream) {
 		for (uint i = 0; i < IndexBufferCount; ++i) {
-			GpuErrorCheck(cudaMemsetAsync(buffers[i], 0u, renderBufferSize * sizeof(uint)));
+			GpuErrorCheck(cudaMemsetAsync(buffers[i], 0u, renderBufferSize * sizeof(uint), stream));
 			GpuErrorCheck(cudaMemsetAsync(bufferTops[i], 0u, sizeof(uint)));
 		}
 	}
@@ -270,5 +270,8 @@ private:
 
 	// terrain
 	Terrain                     terrain;
+
+	static const uint NumStreams = 8;
+	cudaStream_t streams[NumStreams];
 };
 
