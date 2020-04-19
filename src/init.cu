@@ -43,16 +43,17 @@ void RayTracer::init()
 	materialsIdx[2] = 3;
 	for (int i = numSpheres; i < numObjects; ++i)
 	{
-		if (i < numSpheres + numAabbs / 2 + 10) materialsIdx[i] = 0;
-		else materialsIdx[i] = 4;
+		//if (i < numSpheres + numAabbs / 2 + 10) materialsIdx[i] = 0;
+		//else materialsIdx[i] = 4;
+		materialsIdx[i] = 0;
 	}
 
 	// light source
 	numSphereLights = 3;
 	sphereLights      = new Sphere[numSphereLights];
 	sphereLights[0]           = spheres[0];
-	sphereLights[0] = spheres[1];
-	sphereLights[0] = spheres[2];
+	sphereLights[1] = spheres[1];
+	sphereLights[2] = spheres[2];
 
 	// init cuda
 	gpuDeviceInit(0);
@@ -130,8 +131,8 @@ void RayTracer::init()
 	d_sceneGeometry.numAabbs        = numAabbs;
 	d_sceneGeometry.aabbs           = d_aabbs;
 
-	d_sceneGeometry.numSphereLights = numSphereLights;
-	d_sceneGeometry.sphereLights    = d_sphereLights;
+	d_sceneMaterial.numSphereLights = numSphereLights;
+	d_sceneMaterial.sphereLights    = d_sphereLights;
 
 	d_sceneMaterial.materials       = d_surfaceMaterials;
 	d_sceneMaterial.materialsIdx    = d_materialsIdx;

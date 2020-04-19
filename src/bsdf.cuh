@@ -60,7 +60,7 @@ __device__  Float3 CosineSampleHemisphere(Float2 u, const Float3& x, const Float
 	return x * d.x + y * d.y + z * dz;
 }
 
-__device__  void LambertianReflection(
+__device__  void LambertianSample(
 	Float2         randNum,
 	Float3&        wo,
 	const Float3&  n)
@@ -73,6 +73,10 @@ __device__  void LambertianReflection(
 	wo = s.x * u + s.z * v + s.y * n;
 	wo.normalize();
 }
+
+__device__ inline Float3 LambertianBsdf(const Float3& wo, const Float3& n, const Float3& albedo) { return max1f(dot(wo, n), 0) * albedo / PI; }
+__device__ inline float  LambertianPdf(const Float3& wo, const Float3& n) { return max1f(dot(wo, n), 0) / PI; }
+__device__ inline Float3 LambertianBsdfOverPdf(const Float3& albedo) { return albedo; }
 
 __device__ float FresnelDialetric(float etaI, float etaT, float cosThetaI, float cosThetaT)
 {

@@ -52,13 +52,8 @@ struct __align__(16) SceneGeometry
 {
 	Sphere* spheres;
 	AABB*   aabbs;
-	Sphere* sphereLights;
-	uint pad16;
-
 	int numAabbs;
 	int numSpheres;
-	int numSphereLights;
-	uint pad32;
 };
 
 enum SurfaceMaterialType
@@ -80,9 +75,9 @@ struct __align__(16) SceneMaterial
 {
 	SurfaceMaterial* materials;
 	int* materialsIdx;
-
+	Sphere* sphereLights;
 	int numMaterials;
-	uint pad16;
+	int numSphereLights;
 };
 
 struct __align__(16) ConstBuffer
@@ -123,8 +118,8 @@ struct __align__(16) RayState
 	int        objectIdx;           // intersection object idx
 	bool       hit;                 // hit or miss
 	bool       terminated;
-	int        mutex;
-	int        pad3;
+	bool       hasLightRay;
+	bool       isSunVisible;
 
 	RandState  rdState[3];          // quasi rand state
 };

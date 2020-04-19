@@ -56,6 +56,59 @@ __device__ inline void SkyShader(ConstBuffer& cbo, RayState* rayStates, SurfObj&
 	Store2D(Float4(outColor, 1.0), colorBuffer, idx);
 }
 
+__device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial& sceneMaterial, Float3& sampleLightDir, float& lightPdf)
+{
+	bool shouldSampleLight = false;
+
+	bool sunVisible = (cbo.sunDir.y > 0.0) && (dot(rayState.normal, cbo.sunDir) > 0);// is sun in the sky. is sun visible.
+
+	const int maxSphereLightNum = 4; // @todo
+	int sphereLightCandidateNum = 0;
+	int sphereLightCandidates[maxSphereLightNum];
+	for (int i = 0; i < sceneMaterial.numSphereLights; ++i) { // traverse all lights, collect light candidates
+		if (dot(rayState.normal, sceneMaterial.sphereLights[i].center - rayState.pos) > 0) { // if light is visible, push to candidate
+			sphereLightCandidates[sphereLightCandidateNum++] = i;
+		}
+	}
+
+	int totalLightNum = sphereLightCandidateNum + sunVisible?1:0;
+	int sampledIndex = rd(&rayState.rdState[2]) * totalLightNum;
+
+	if (sunVisible && sampledIndex == sphereLightCandidateNum)
+	{
+		Float3 lightDir = cbo.sunDir;
+		Float3 u, v;
+		LocalizeSample(lightDir, u, v);
+		const float cosSunLight = cosf(5.0f * Pi_over_180);
+		sampleLightDir = UniformSampleCone(rd2(&rayState.rdState[0], &rayState.rdState[1]), cosSunLight, u, v, lightDir);
+		lightPdf = UniformConePdf(cosSunLight);
+		shouldSampleLight = true;
+	}
+	else if (sphereLightCandidateNum > 0)
+	{
+		Sphere lightSphere = sceneMaterial.sphereLights[sphereLightCandidates[sampledIndex]];
+		Float3 lightVec = lightSphere.center - rayState.pos;
+		float lightDistance = lightVec.length();
+		Float3 lightDir = lightVec / lightDistance;
+		float cosThetaMax = sqrtf(max1f(lightDistance * lightDistance - lightSphere.radius * lightSphere.radius, 0)) / lightDistance;
+		Float3 u, v;
+		LocalizeSample(lightDir, u, v);
+		sampleLightDir = UniformSampleCone(rd2(&rayState.rdState[0], &rayState.rdState[1]), cosThetaMax, u, v, lightDir);
+		lightPdf = UniformConePdf(cosThetaMax);
+		shouldSampleLight = true;
+	}
+	return shouldSampleLight; // if no light availabe, don't do MIS
+}
+
+__device__ inline void MultipleImportanceSampling(float& surfaceSampleWeight, float& lightSampleWeight, float surfaceSamplePdf, float lightSamplePdf)
+{
+	float lightSamplePdf2 = lightSamplePdf * lightSamplePdf;
+	float surfaceSamplePdf2 = surfaceSamplePdf * surfaceSamplePdf;
+
+	lightSampleWeight = lightSamplePdf2 / (lightSamplePdf2 + surfaceSamplePdf2);
+	surfaceSampleWeight = 1.0 - lightSampleWeight;
+}
+
 __device__ inline void SurfaceShader(ConstBuffer& cbo, RayState* rayStates, SceneMaterial& sceneMaterial, SurfObj& colorBuffer, uint& i, Int2& idx, bool& shouldTerminate)
 {
 	RayState& rayState = rayStates[i];
@@ -87,11 +140,30 @@ __device__ inline void SurfaceShader(ConstBuffer& cbo, RayState* rayStates, Scen
 	bool isRayIntoSurface = normalDotRayDir < 0;     // ray shoot into surface, if dot < 0
 	if (isRayIntoSurface == false) { normal = -normal; normalDotRayDir = -normalDotRayDir; } // if ray not shoot into surface, convert the case to "ray shoot into surface" by flip the normal
 
+	float lightSamplePdf, surfaceSamplePdf, lightSampleWeight, surfaceSampleWeight;
+	Float3 surfaceSampleWo, lightSampleWo;
+
 	if (mat.type == LAMBERTIAN_DIFFUSE)
 	{
-		LambertianReflection(rd2(&rayState.rdState[0], &rayState.rdState[1]), nextRayDir, normal);
-		Float3 surfaceBsdfOverPdf = mat.albedo;
-		beta *= surfaceBsdfOverPdf;
+		// lambertian bsdf / pdf is constant
+		Float3 bsdfOverPdf = LambertianBsdfOverPdf(mat.albedo);
+
+		// surface sample
+		LambertianSample(rd2(&rayState.rdState[0], &rayState.rdState[1]), surfaceSampleWo, normal);
+		surfaceSamplePdf = LambertianPdf(surfaceSampleWo, normal);
+
+		// light sample
+		bool shouldSampleLight = SampleLight(cbo, rayState, sceneMaterial, lightSampleWo, lightSamplePdf);
+
+		// multiple importance sampling
+		MultipleImportanceSampling(surfaceSampleWeight, lightSampleWeight, surfaceSamplePdf, lightSamplePdf);
+
+		// pick a sample based on weight
+		bool pickLightSample = (rd(&rayState.rdState[2]) < lightSampleWeight && shouldSampleLight);
+
+		// update beta and next ray dir
+		beta *= bsdfOverPdf;
+		nextRayDir = (pickLightSample) ? (lightSampleWo) : (surfaceSampleWo);
 	}
 	else if (mat.type == PERFECT_REFLECTION)
 	{
@@ -101,13 +173,7 @@ __device__ inline void SurfaceShader(ConstBuffer& cbo, RayState* rayStates, Scen
 	{
 		const Float3 F0(0.56, 0.57, 0.58);
 		const float alpha = 0.05;
-		MacrofacetReflection(rd(&rayState.rdState[0]), rd(&rayState.rdState[1]),
-			ray.dir,
-			nextRayDir,
-			normal,
-			beta,
-			F0,
-			alpha);
+		MacrofacetReflection(rd(&rayState.rdState[0]), rd(&rayState.rdState[1]), ray.dir, nextRayDir, normal, beta, F0, alpha);
 	}
 	else if (mat.type == PERFECT_FRESNEL_REFLECTION_REFRACTION)
 	{
@@ -150,10 +216,10 @@ __device__ inline void SurfaceShader(ConstBuffer& cbo, RayState* rayStates, Scen
 	else if (mat.type == EMISSIVE)
 	{
 		outColor += mat.albedo * beta;
-		rayState.terminated = true;
+		shouldTerminate = true;
 	}
 
-	if (rayState.terminated || shouldTerminate)
+	if (shouldTerminate)
 	{
 		rayState.terminated = true;
 		Store2D(Float4(outColor, 1.0), colorBuffer, rayState.idx);
@@ -184,14 +250,6 @@ __global__ void RayTraverse2(ConstBuffer cbo, RayState* rayState, SceneGeometry 
 	}
 }
 
-__global__ void RayTraverse3(ConstBuffer cbo, RayState* rayState, SceneGeometry sceneGeometry, uint* uintBufferIn)
-{
-	uint i = uintBufferIn[blockIdx.x * 64 + threadIdx.y * 8 + threadIdx.x];
-	RayState& ray = rayState[i];
-	if (ray.terminated == true) { return; }
-	ray.hit = RaySceneIntersect(ray.ray, sceneGeometry, ray.pos, ray.normal, ray.objectIdx, ray.offset);
-}
-
 __global__ void SkyShaderLaunch2(ConstBuffer cbo, RayState* rayStates, SurfObj colorBuffer, uint* uintBuffer)
 {
 	uint i = uintBuffer[blockIdx.x * 64 + threadIdx.y * 8 + threadIdx.x];
@@ -218,10 +276,6 @@ __global__ void RayTraverseLaunch(ConstBuffer cbo, RayState* rayStates, SceneGeo
 	RayTraverse2<<<dim3(divRoundUp(*bufferTop, 64u), 1, 1), dim3(8, 8, 1), 0>>> (cbo, rayStates, sceneGeometry, idxBuffer, hitBuffer, missBuffer, hitBufferTop, missBufferTop);
 }
 
-__global__ void RayTraverseLaunch2(ConstBuffer cbo, RayState* rayStates, SceneGeometry sceneGeometry, uint* bufferTop, uint* idxBuffer) {
-	RayTraverse3 <<<dim3(divRoundUp(*bufferTop, 64u), 1, 1), dim3(8, 8, 1), 0 >>> (cbo, rayStates, sceneGeometry, idxBuffer);
-}
-
 void RayTracer::draw(SurfObj* renderTarget)
 {
 	// ---------------- frame update ------------------
@@ -241,12 +295,15 @@ void RayTracer::draw(SurfObj* renderTarget)
 	cameraFocusPos        = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
 	spheres[0]            = Sphere(spherePos, 0.005f);
 	sphereLights[0]           = spheres[0];
+
 	GpuErrorCheck(cudaMemcpyAsync(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice, streams[2]));
 	GpuErrorCheck(cudaMemcpyAsync(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice, streams[2]));
+
 	d_sceneGeometry.numSpheres      = numSpheres;
 	d_sceneGeometry.spheres         = d_spheres;
-	d_sceneGeometry.numSphereLights = numSphereLights;
-	d_sceneGeometry.sphereLights    = d_sphereLights;
+
+	d_sceneMaterial.numSphereLights = numSphereLights;
+	d_sceneMaterial.sphereLights    = d_sphereLights;
 
 	// camera
 	Camera& camera = cbo.camera;
@@ -267,10 +324,10 @@ void RayTracer::draw(SurfObj* renderTarget)
 	cudaStreamSynchronize(streams[1]);
 
 	// ------------------ Scene Traverse Loop -------------------
-	for (int i = 0; i < 2; ++i)
+	for (int i = 0; i < 4; ++i)
 	{
-		//bool terminate = (i == 1);
-		bool terminate = false;
+		bool terminate = (i == 3);
+		//bool terminate = false;
 
 		// ----------------- in: A, out: B --------------------
 		cudaMemsetAsync(indexBuffers.hitBufferTopB, 0u, sizeof(uint), streams[0]);
@@ -288,7 +345,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 		cudaStreamSynchronize(streams[3]);
 
 		// traverse
-		RayTraverseLaunch << < dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[1] >> > (cbo, rayState, d_sceneGeometry,
+		RayTraverseLaunch <<< dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[1] >>> (cbo, rayState, d_sceneGeometry,
 			/*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA, /*out*/indexBuffers.hitBufferB, /*out*/indexBuffers.missBufferB, /*out*/indexBuffers.hitBufferTopB, /*out*/indexBuffers.missBufferTopB);
 		cudaStreamSynchronize(streams[1]);
 
@@ -312,33 +369,6 @@ void RayTracer::draw(SurfObj* renderTarget)
 		{
 			RayTraverseLaunch << < dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[1] >> > (cbo, rayState, d_sceneGeometry,
 				/*in*/indexBuffers.hitBufferTopB, /*in*/indexBuffers.hitBufferB, /*out*/indexBuffers.hitBufferA, /*out*/indexBuffers.missBufferA, /*out*/indexBuffers.hitBufferTopA, /*out*/indexBuffers.missBufferTopA);
-			cudaStreamSynchronize(streams[1]);
-		}
-	}
-
-	for (int i = 0; i < 4; ++i)
-	{
-		if (i == 0)
-		{
-			SkyShaderLaunch << <dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[2] >> > (cbo, rayState, colorBufferA, /*in*/indexBuffers.missBufferTopA, /*in*/indexBuffers.missBufferA);
-			SurfaceShaderLaunch << <dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[3] >> > (cbo, rayState, d_sceneMaterial, colorBufferA, /*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA);
-		}
-		else if (i == 3)
-		{
-			SkyShaderLaunch << <dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[2] >> > (cbo, rayState, colorBufferA, /*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA);
-			SurfaceShaderLaunch << <dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[3] >> > (cbo, rayState, d_sceneMaterial, colorBufferA, /*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA, /*terminate*/true);
-		}
-		else
-		{
-			SkyShaderLaunch << <dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[2] >> > (cbo, rayState, colorBufferA, /*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA);
-			SurfaceShaderLaunch << <dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[3] >> > (cbo, rayState, d_sceneMaterial, colorBufferA, /*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA);
-		}
-		cudaStreamSynchronize(streams[2]);
-		cudaStreamSynchronize(streams[3]);
-		if (i != 3)
-		{
-			RayTraverseLaunch2 << < dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[1] >> > (cbo, rayState, d_sceneGeometry,
-				/*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA);
 			cudaStreamSynchronize(streams[1]);
 		}
 	}

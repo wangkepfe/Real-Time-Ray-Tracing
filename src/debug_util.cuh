@@ -92,5 +92,7 @@ __device__ void DebugPrint(const char* name, const Int2& vec)
 	}
 }
 
+__device__ void Print(const char* name, int& n) { printf("%s = %d\n", name, n); }
 __device__ void Print(const char* name, uint& n) { printf("%s = %d\n", name, n); }
+__device__ void Print(const char* name, float& n) { printf("%s = %f\n", name, n); }
 __device__ void Print(const char* name, Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }
