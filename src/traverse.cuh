@@ -10,7 +10,8 @@ __device__ bool RaySceneIntersect(
 	Float3&              intersectPoint,     // [out]
 	Float3&              intersectNormal,    // [out]
 	int&                 objectIdx,          // [out]
-	float&               rayOffset)          // [out]
+	float&               rayOffset,          // [out]
+	float&               rayDist)
 {
 	// init t with max distance
 	float t = RayMax;
@@ -86,6 +87,8 @@ __device__ bool RaySceneIntersect(
             }
         }
     }
+
+	rayDist += distance(intersectPoint, ray.orig);
 
 	// return true if hit
 	return (t < RayMax);

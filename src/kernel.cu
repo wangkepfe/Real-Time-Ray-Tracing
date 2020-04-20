@@ -21,10 +21,11 @@ __global__ void RayGen(ConstBuffer cbo, RayState* rayState, RandInitVec* randIni
 	ray.idx        = idx;
 	ray.bounce     = 0;
 	ray.terminated = false;
+	ray.distance   = 0;
 	const uint seed = (idx.x << 16) ^ (idx.y);
 	for (int k = 0; k < 3; ++k) { curand_init(randInitVec[k], CURAND_2POW32 * 0.5f, WangHash(seed) + cbo.frameNum, &ray.rdState[k]); }
 	ray.ray = GenerateRay(cbo.camera, idx, rd2(&ray.rdState[0], &ray.rdState[1]));
-	ray.hit = RaySceneIntersect(ray.ray, sceneGeometry, ray.pos, ray.normal, ray.objectIdx, ray.offset);
+	ray.hit = RaySceneIntersect(ray.ray, sceneGeometry, ray.pos, ray.normal, ray.objectIdx, ray.offset, ray.distance);
 	Store2D(Float4(ray.normal, 1.0), normalBuffer, idx);
 	Store2D(Float4(ray.pos, 1.0), positionBuffer, idx);
 	rayState[i] = ray;
@@ -56,23 +57,24 @@ __device__ inline void SkyShader(ConstBuffer& cbo, RayState* rayStates, SurfObj&
 	Store2D(Float4(outColor, 1.0), colorBuffer, idx);
 }
 
-__device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial& sceneMaterial, Float3& sampleLightDir, float& lightPdf)
+__device__ inline bool SampleLight(ConstBuffer& cbo, Float3& normal, Float3& pos, float& rayDist, RandState* rdStates, SceneMaterial& sceneMaterial, Float3& sampleLightDir, float& lightPdf)
 {
 	bool shouldSampleLight = false;
 
-	bool sunVisible = (cbo.sunDir.y > 0.0) && (dot(rayState.normal, cbo.sunDir) > 0);// is sun in the sky. is sun visible.
+	bool sunVisible = (cbo.sunDir.y > 0.0) && (dot(normal, cbo.sunDir) > 0);// is sun in the sky. is sun visible.
 
 	const int maxSphereLightNum = 4; // @todo
 	int sphereLightCandidateNum = 0;
 	int sphereLightCandidates[maxSphereLightNum];
 	for (int i = 0; i < sceneMaterial.numSphereLights; ++i) { // traverse all lights, collect light candidates
-		if (dot(rayState.normal, sceneMaterial.sphereLights[i].center - rayState.pos) > 0) { // if light is visible, push to candidate
+		Float3 lightColor = sceneMaterial.materials[sceneMaterial.materialsIdx[i]].albedo / (rayDist * rayDist);
+		if ((dot(normal, sceneMaterial.sphereLights[i].center - pos) > 0)) { // if light is visible, push to candidate
 			sphereLightCandidates[sphereLightCandidateNum++] = i;
 		}
 	}
 
 	int totalLightNum = sphereLightCandidateNum + sunVisible?1:0;
-	int sampledIndex = rd(&rayState.rdState[2]) * totalLightNum;
+	int sampledIndex = rd(&rdStates[2]) * totalLightNum;
 
 	if (sunVisible && sampledIndex == sphereLightCandidateNum)
 	{
@@ -80,21 +82,21 @@ __device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 		Float3 u, v;
 		LocalizeSample(lightDir, u, v);
 		const float cosSunLight = cosf(5.0f * Pi_over_180);
-		sampleLightDir = UniformSampleCone(rd2(&rayState.rdState[0], &rayState.rdState[1]), cosSunLight, u, v, lightDir);
+		sampleLightDir = UniformSampleCone(rd2(&rdStates[0], &rdStates[1]), cosSunLight, u, v, lightDir);
 		lightPdf = UniformConePdf(cosSunLight);
 		shouldSampleLight = true;
 	}
 	else if (sphereLightCandidateNum > 0)
 	{
 		Sphere lightSphere = sceneMaterial.sphereLights[sphereLightCandidates[sampledIndex]];
-		Float3 lightVec = lightSphere.center - rayState.pos;
+		Float3 lightVec = lightSphere.center - pos;
 		float lightDistance = lightVec.length();
 		Float3 lightDir = lightVec / lightDistance;
 		float cosThetaMax = sqrtf(max1f(lightDistance * lightDistance - lightSphere.radius * lightSphere.radius, 0)) / lightDistance;
 		Float3 u, v;
 		LocalizeSample(lightDir, u, v);
-		sampleLightDir = UniformSampleCone(rd2(&rayState.rdState[0], &rayState.rdState[1]), cosThetaMax, u, v, lightDir);
-		lightPdf = UniformConePdf(cosThetaMax);
+		sampleLightDir = UniformSampleCone(rd2(&rdStates[0], &rdStates[1]), cosThetaMax, u, v, lightDir);
+		lightPdf = UniformConePdf(cosThetaMax) / (rayDist * rayDist);
 		shouldSampleLight = true;
 	}
 	return shouldSampleLight; // if no light availabe, don't do MIS
@@ -119,6 +121,7 @@ __device__ inline void SurfaceShader(ConstBuffer& cbo, RayState* rayStates, Scen
 	float rayoffset = rayState.offset;
 	Ray ray = rayState.ray;
 	Float3 nextRayDir(0, 1, 0);
+	float rayDist = rayState.distance;
 
 	Float3& beta = rayState.beta;
 	Float3& outColor = rayState.L;
@@ -153,7 +156,7 @@ __device__ inline void SurfaceShader(ConstBuffer& cbo, RayState* rayStates, Scen
 		surfaceSamplePdf = LambertianPdf(surfaceSampleWo, normal);
 
 		// light sample
-		bool shouldSampleLight = SampleLight(cbo, rayState, sceneMaterial, lightSampleWo, lightSamplePdf);
+		bool shouldSampleLight = SampleLight(cbo, normal, pos, rayDist, rayState.rdState, sceneMaterial, lightSampleWo, lightSamplePdf);
 
 		// multiple importance sampling
 		MultipleImportanceSampling(surfaceSampleWeight, lightSampleWeight, surfaceSamplePdf, lightSamplePdf);
@@ -215,7 +218,7 @@ __device__ inline void SurfaceShader(ConstBuffer& cbo, RayState* rayStates, Scen
 	}
 	else if (mat.type == EMISSIVE)
 	{
-		outColor += mat.albedo * beta;
+		outColor += mat.albedo * beta / (rayDist * rayDist);
 		shouldTerminate = true;
 	}
 
@@ -236,7 +239,7 @@ __global__ void RayTraverse2(ConstBuffer cbo, RayState* rayState, SceneGeometry 
 	uint i = uintBufferIn[blockIdx.x * 64 + threadIdx.y * 8 + threadIdx.x];
 	RayState& ray = rayState[i];
 	if (ray.terminated == true) { return; }
-	ray.hit = RaySceneIntersect(ray.ray, sceneGeometry, ray.pos, ray.normal, ray.objectIdx, ray.offset);
+	ray.hit = RaySceneIntersect(ray.ray, sceneGeometry, ray.pos, ray.normal, ray.objectIdx, ray.offset, ray.distance);
 
 	if (ray.hit && ray.terminated == false)
 	{

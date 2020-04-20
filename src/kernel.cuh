@@ -107,7 +107,7 @@ struct __align__(16) RayState
 	Float3     L;                   // current light contribution
 	float      offset;              // ray offset
 	Float3     beta;                // color mask
-	float      pad0;
+	float      distance;
 	Float3     pos;                 // ray intersect point
 	float      pad1;
 	Float3     normal;              // ray intersect normal
