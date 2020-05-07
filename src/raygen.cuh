@@ -3,15 +3,15 @@
 #include "kernel.cuh"
 
 // generate ray
-__device__ Ray GenerateRay(
+__device__ void GenerateRay(
+	Float3& orig,
+	Float3& dir,
 	Camera camera,
 	Int2   idx,
 	Float2 randNum)
 {
-	Ray ray;
-
 	// ray origin
-	ray.orig = camera.pos.xyz;
+	orig = camera.pos.xyz;
 
 	// [0, 1] coordinates
 	Float2 xy = Float2(idx.x, idx.y);
@@ -26,10 +26,8 @@ __device__ Ray GenerateRay(
 	Float3 up = Float3(0, 1, 0) * uv.y * camera.fov.w;
 
 	// ray direction
-	ray.dir = camera.dir.xyz + left + up;
+	dir = camera.dir.xyz + left + up;
 
 	// normalize ray direction
-	ray.dir.normalize();
-
-	return ray;
+	dir.normalize();
 }

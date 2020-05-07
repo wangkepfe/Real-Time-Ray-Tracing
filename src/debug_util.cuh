@@ -5,8 +5,8 @@
 
 __device__ bool IsCenterPixel()
 {
-	int centerx = gridDim.x * blockDim.x * 0.5;
-	int centery = gridDim.y * blockDim.y * 0.55;
+	int centerx = gridDim.x * blockDim.x * 0.12;
+	int centery = gridDim.y * blockDim.y * 0.6;
 
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -92,7 +92,9 @@ __device__ void DebugPrint(const char* name, const Int2& vec)
 	}
 }
 
-__device__ void Print(const char* name, int& n) { printf("%s = %d\n", name, n); }
-__device__ void Print(const char* name, uint& n) { printf("%s = %d\n", name, n); }
-__device__ void Print(const char* name, float& n) { printf("%s = %f\n", name, n); }
-__device__ void Print(const char* name, Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }
+__device__ void Print(const char* name, const int& n) { printf("%s = %d\n", name, n); }
+__device__ void Print(const char* name, const bool& n) { printf("%s = %s\n", name, n ? "true" : "false"); }
+__device__ void Print(const char* name, const uint& n) { printf("%s = %d\n", name, n); }
+__device__ void Print(const char* name, const uint3& n) { printf("%s = (%d, %d, %d)\n", name, n.x, n.y, n.z); }
+__device__ void Print(const char* name, const float& n) { printf("%s = %f\n", name, n); }
+__device__ void Print(const char* name, const Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }

@@ -104,6 +104,43 @@ __device__ inline float FresnelShlick(float F0, float cosTheta) {
 	return F0 + (1.0f - F0) * pow5(1.0f - cosTheta);
 }
 
+__device__ void PerfectReflectionRefraction(float etaI, float etaT, bool isRayIntoSurface, Float3 normal, float normalDotRayDir, float uniformRandNum, Float3 rayDir, Float3& nextRayDir, float& rayoffset)
+{
+	// eta
+	if (isRayIntoSurface == false) swap(etaI, etaT);
+	const float eta = etaI/etaT;
+
+	// trigonometry
+	float cosThetaI  = -normalDotRayDir;
+	float sin2ThetaI = max1f(0, 1.0 - cosThetaI * cosThetaI);
+	float sin2ThetaT = eta * eta * sin2ThetaI;
+	float cosThetaT = sqrt(max1f(0, 1.0 - sin2ThetaT));
+
+	// total internal reflection
+	if (sin2ThetaT >= 1.0)
+	{
+		nextRayDir = rayDir - normal * normalDotRayDir * 2.0;
+	}
+	else
+	{
+		// Fresnel for dialectric
+		float fresnel = FresnelDialetric(etaI, etaT, cosThetaI, cosThetaT);
+
+		// reflection or transmittance
+		if (uniformRandNum < fresnel)
+		{
+			nextRayDir = rayDir - normal * normalDotRayDir * 2.0;
+		}
+		else
+		{
+			nextRayDir = eta * rayDir + (eta * cosThetaI - cosThetaT) * normal;
+			rayoffset *= -1.0;
+		}
+	}
+
+	nextRayDir.normalize();
+}
+
 __device__ void MacrofacetReflection(
 	float r1,
 	float r2,

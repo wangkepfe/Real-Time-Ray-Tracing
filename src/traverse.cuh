@@ -11,7 +11,9 @@ __device__ bool RaySceneIntersect(
 	Float3&              intersectNormal,    // [out]
 	int&                 objectIdx,          // [out]
 	float&               rayOffset,          // [out]
-	float&               rayDist)
+	float&               rayDist,
+	bool&                isRayIntoSurface,
+	float&               normalDotRayDir)
 {
 	// init t with max distance
 	float t = RayMax;
@@ -89,6 +91,15 @@ __device__ bool RaySceneIntersect(
     }
 
 	rayDist += distance(intersectPoint, ray.orig);
+
+	// Is ray into surface? If no, flip normal
+	normalDotRayDir = dot(intersectNormal, ray.dir);    // ray dot geometry normal
+	isRayIntoSurface = normalDotRayDir < 0;     // ray shoot into surface, if dot < 0
+	if (isRayIntoSurface == false)
+	{
+		intersectNormal = -intersectNormal; // if ray not shoot into surface, convert the case to "ray shoot into surface" by flip the normal
+		normalDotRayDir = -normalDotRayDir;
+	}
 
 	// return true if hit
 	return (t < RayMax);

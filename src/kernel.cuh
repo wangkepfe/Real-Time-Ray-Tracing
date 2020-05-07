@@ -56,19 +56,20 @@ struct __align__(16) SceneGeometry
 	int numSpheres;
 };
 
-enum SurfaceMaterialType
+enum SurfaceMaterialType : uint
 {
 	LAMBERTIAN_DIFFUSE                    = 0,
 	PERFECT_REFLECTION                    = 1,
 	PERFECT_FRESNEL_REFLECTION_REFRACTION = 2,
 	MICROFACET_REFLECTION                 = 3,
 	EMISSIVE                              = 4,
+	MAT_SKY                               = 5,
 };
 
 struct __align__(16) SurfaceMaterial
 {
 	Float3 albedo;
-	float  type;
+	uint  type;
 };
 
 struct __align__(16) SceneMaterial
@@ -102,26 +103,42 @@ struct __align__(16) ConstBuffer
 
 struct __align__(16) RayState
 {
-	Ray        ray;                 // ray orig, dir
+	Float3     orig;
+	int        sampleId;
 
-	Float3     L;                   // current light contribution
-	float      offset;              // ray offset
-	Float3     beta;                // color mask
+	Float3     dir;
+	int        matId;
+
+	Float3     probeDir;
+	int        objectIdx;
+
+	Float3     L;
+	float      offset;
+
+	Float3     beta;
 	float      distance;
-	Float3     pos;                 // ray intersect point
-	float      pad1;
-	Float3     normal;              // ray intersect normal
-	float      pad2;
 
-	Int2       idx;                 // pixel idx
-	int        bounce;              // how many bounces
-	int        objectIdx;           // intersection object idx
-	bool       hit;                 // hit or miss
+	Float3     pos;
+	int        matType;
+
+	Float3     normal;
+	bool       hitLight;
+
+	Int2       idx;
+	int        i;
+	int        bounce;
+
 	bool       terminated;
-	bool       hasLightRay;
+	bool       hasProbeRay;
 	bool       isSunVisible;
+	bool       isDiffuse;
 
-	RandState  rdState[3];          // quasi rand state
+	bool       isRayIntoSurface;
+	bool       hit;
+	float      normalDotRayDir;
+	float      unused2;
+
+	RandState  rdState[3];
 };
 
 
