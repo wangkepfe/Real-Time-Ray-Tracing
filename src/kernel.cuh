@@ -124,6 +124,9 @@ struct __align__(16) RayState
 	Float3     normal;
 	bool       hitLight;
 
+	Float3     lightBeta;
+	bool       hasBsdfRay;
+
 	Int2       idx;
 	int        i;
 	int        bounce;
@@ -135,8 +138,13 @@ struct __align__(16) RayState
 
 	bool       isRayIntoSurface;
 	bool       hit;
+	bool       isDeltaLight;
+	bool u0;
+
+	float      surfaceBetaWeight;
 	float      normalDotRayDir;
-	float      unused2;
+	float u1;
+	float u2;
 
 	RandState  rdState[3];
 };
