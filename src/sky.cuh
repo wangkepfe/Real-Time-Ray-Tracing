@@ -96,6 +96,11 @@ __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3& sunDir
 
 		float t1 = SphereRayIntersect(atmosphereSphere, lightRay, errorSphereRayIntersect);
 
+		if (t1 == RayMax)
+		{
+			continue;
+		}
+
 		float sunLightMarchPos = 0.;
 		float sunLightMarchStep = t1 / float(numSamplesLight + 1);
 
@@ -125,12 +130,36 @@ __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3& sunDir
 	}
 
 	Float3 result = sunPower * (sumR * phaseR * betaR + sumM * phaseM * betaM);
-	//result = lerp3f(Float3(0.4f), result, clampf(abs(raydir.y) * 10.0f, 0, 1));
+
+	Float3 scat = Float3(1.0f) - clamp3f(opticalDepthM * 1e-5f, Float3(0), Float3(1));
+
+	//result += scat;
 
 	return result;
 }
 
 __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir)
 {
-	return GetEnvIncidentLight(raydir, sunDir);
+	Float3 sunOrMoonDir = sunDir;
+
+	if (sunOrMoonDir.y > 0.2)
+	{
+		Float3 sunColor = GetEnvIncidentLight(raydir, sunOrMoonDir);
+		return sunColor;
+	}
+	else if (sunOrMoonDir.y < 0.2 && sunOrMoonDir.y > -0.2)
+	{
+		Float3 sunColor = GetEnvIncidentLight(raydir, sunOrMoonDir);
+		sunOrMoonDir.x *= -1;
+		sunOrMoonDir.y *= -1;
+		Float3 moonColor = GetEnvIncidentLight(raydir, sunOrMoonDir);
+		return sunColor + moonColor * 0.05;
+	}
+	else
+	{
+		sunOrMoonDir.x *= -1;
+		sunOrMoonDir.y *= -1;
+		Float3 moonColor = GetEnvIncidentLight(raydir, sunOrMoonDir);
+		return moonColor * 0.05;
+	}
 }

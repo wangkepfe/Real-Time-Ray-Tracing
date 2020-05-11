@@ -43,14 +43,14 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? 10000.0 : 0.0;
+	lightInfluenceHeuristicTemp = rayState.isSunVisible ? 10000.0 : (rayState.isMoonVisible ? 500.0 : 0);
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
 	++i;
 
 	// env
-	lightInfluenceHeuristicTemp = (cbo.sunDir.y > 0.0) ? 1000.0 : 0.0;
+	lightInfluenceHeuristicTemp = (cbo.sunDir.y > 0.0) ? 1000.0 : 50.0;
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
@@ -74,7 +74,10 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	// sample a direction
 	if (sampledIdx == sunLightIdx)
 	{
-		lightSampleDir = cbo.sunDir;
+		Float3 moonDir = cbo.sunDir;
+		moonDir.x *= -1;
+		moonDir.y *= -1;
+		lightSampleDir = cbo.sunDir.y > 0 ? cbo.sunDir : moonDir;
 		lightSamplePdf = 1.0;
 		isDeltaLight = true;
 	}
@@ -127,7 +130,10 @@ __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMa
 	{
 		// env light
 		Float3 envLightColor = EnvLight(lightDir, cbo.sunDir);
-		if (dot(lightDir, cbo.sunDir) > 1.0 - 1e-6)
+		Float3 moonDir = cbo.sunDir;
+		moonDir.x *= -1;
+		moonDir.y *= -1;
+		if (((cbo.sunDir.y > 0) && (dot(lightDir, cbo.sunDir) > (1.0 - 1e-6))) || ((moonDir.y > 0) && (dot(lightDir, moonDir) > (1.0 - 1e-3))))
 		{
 			envLightColor *= 10;
 		}
@@ -231,6 +237,7 @@ __device__ inline void UpdateMaterial(ConstBuffer cbo, RayState& rayState, Scene
 		rayState.matType = (rayState.hit == false) ? MAT_SKY : mat.type;
 	}
 	rayState.isSunVisible = (cbo.sunDir.y > 0.0) && (dot(rayState.normal, cbo.sunDir) > 0.0);
+	rayState.isMoonVisible = (cbo.sunDir.y < 0.0) && (dot(rayState.normal, Float3(-cbo.sunDir.x, -cbo.sunDir.y, cbo.sunDir.z)) > 0.0);
 	rayState.hitLight = (rayState.matType == MAT_SKY) || (rayState.matType == EMISSIVE);
 	rayState.isDiffuse = (rayState.matType == LAMBERTIAN_DIFFUSE) || (rayState.matType == MICROFACET_REFLECTION);
 }
@@ -307,7 +314,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	//clockTime = 1;
 
 	const Float3 axis = normalize(Float3(0.0, 0.0, 1.0));
-	const float angle = fmodf(clockTime * TWO_PI / 60, TWO_PI);
+	const float angle = fmodf(clockTime * TWO_PI / 10, TWO_PI);
 	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
 
 	cbo.sunDir        = sunDir;

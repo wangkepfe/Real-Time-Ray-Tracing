@@ -139,7 +139,7 @@ struct __align__(16) RayState
 	bool       isRayIntoSurface;
 	bool       hit;
 	bool       isDeltaLight;
-	bool u0;
+	bool       isMoonVisible;
 
 	float      surfaceBetaWeight;
 	float      normalDotRayDir;

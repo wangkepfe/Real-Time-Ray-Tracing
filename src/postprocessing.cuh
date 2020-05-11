@@ -61,7 +61,7 @@ __global__ void TAA(
 	Float3 currentColor = Load2D(currentBuffer, idx).xyz;
 	Float3 historyColor = Load2D(finalBuffer, idx).xyz;
 
-	float blendFactor = 0.1f;
+	float blendFactor = 0.5f;
 	Float3 outColor = currentColor * blendFactor + historyColor * (1.0f - blendFactor);
 
     Store2D(Float4(outColor, 1.0), finalBuffer, idx);

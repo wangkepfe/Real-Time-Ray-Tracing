@@ -25,11 +25,11 @@ void RayTracer::init()
 	materials[0].type          = LAMBERTIAN_DIFFUSE;
 	materials[0].albedo        = Float3(0.8f, 0.8f, 0.8f);
 	materials[1].type          = EMISSIVE;
-	materials[1].albedo        = Float3(0.9f, 0.9f, 0.9f) * 10;
+	materials[1].albedo        = Float3(2.0f);
 	materials[2].type          = EMISSIVE;
-	materials[2].albedo        = Float3(0.9f, 0.2f, 0.1f) * 10;
+	materials[2].albedo        = Float3(0.9f, 0.2f, 0.1f) * 2;
 	materials[3].type          = EMISSIVE;
-	materials[3].albedo        = Float3(0.1f, 0.2f, 0.9f) * 10;
+	materials[3].albedo        = Float3(0.1f, 0.2f, 0.9f) * 2;
 	materials[4].type          = MICROFACET_REFLECTION;
 	materials[4].albedo        = Float3(1.0f, 1.0f, 1.0f);
 	materials[5].type          = PERFECT_FRESNEL_REFLECTION_REFRACTION;
