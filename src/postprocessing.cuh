@@ -309,6 +309,77 @@ __global__ void DenoiseKernel(
 	float     c_phi,
 	float     n_phi)
 {
+	// index for pixel 28 x 28
+	Int2 idx2;
+	idx2.x = blockIdx.x * 28 + threadIdx.x - 2;
+	idx2.y = blockIdx.y * 28 + threadIdx.y - 2;
+
+	// index for shared memory buffer
+	Int2 idx3;
+	idx3.x = threadIdx.x;
+	idx3.y = threadIdx.y;
+
+	// read global memory buffer. One-to-one mapping
+	Float4 bufferRead = Load2D(colorBuffer, idx2);
+	Float3 colorValue = bufferRead.xyz;
+	Float3 normalValue = DecodeNormal_R11_G10_B11(bufferRead.w);
+
+	// Save global memory to shared memory. One-to-one mapping
+	__shared__ Float4 sharedBuffer[32][32];
+	sharedBuffer[threadIdx.x][threadIdx.y] = bufferRead;
+	__syncthreads();
+
+	// Border margin pixel finish work
+	if (idx3.x < 2 || idx3.y < 2 || idx3.x > 29 || idx3.y > 29) { return; }
+
+	// Early return for background pixel
+	if (fabsf(normalValue.x) < 0.01 && fabsf(normalValue.y) < 0.01 && fabsf(normalValue.z) < 0.01) { return; }
+
+#if 1
+
+	// gather 5x5 average
+	Float3 average = Float3(0.0);
+	for (int i = -2; i <= 2; ++i)
+	{
+		for (int j = -2; j <= 2; ++j)
+		{
+			Float3 color = sharedBuffer[idx3.x + i][idx3.y + j].xyz;
+			average += color;
+		}
+	}
+	average /= 25.0;
+
+	// gather 5x5 standard deviation
+	Float3 stddev = Float3(0.0);
+	for (int i = -2; i <= 2; ++i)
+	{
+		for (int j = -2; j <= 2; ++j)
+		{
+			Float3 color = sharedBuffer[idx3.x + i][idx3.y + j].xyz;
+			Float3 temp = color - average;
+			stddev += temp * temp;
+		}
+	}
+	stddev = sqrt3f(stddev / 24.0);
+
+	// set outliers to average
+	Float3 diff = abs(colorValue - average);
+	Float3 isNoise = diff - stddev;
+	Float3 averageAround = (average * 25.0 - colorValue) / 24.0;
+	colorValue = Float3(
+		isNoise.x > 0 ? averageAround.x : colorValue.x,
+		isNoise.y > 0 ? averageAround.y : colorValue.y,
+		isNoise.z > 0 ? averageAround.z : colorValue.z);
+
+	sharedBuffer[threadIdx.x][threadIdx.y] = Float4(colorValue, bufferRead.w);
+
+#endif
+
+	//Store2D(Float4(outlier, 1.0), colorBuffer, idx2);
+
+#if 1
+
+	// 5x5 atrous filter
 	const float filterKernel[25] = {
 		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0,
 		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
@@ -323,74 +394,38 @@ __global__ void DenoiseKernel(
 		Int2(-2, 1), Int2(-1, 1), Int2(0, 1), Int2(1, 1), Int2(2, 1),
 		Int2(-2, 2), Int2(-1, 2), Int2(0, 2), Int2(1, 2), Int2(2, 2) };
 
-	Int2 idx2;
-	idx2.x = blockIdx.x * 28 + threadIdx.x - 2;
-	idx2.y = blockIdx.y * 28 + threadIdx.y - 2;
+	Float3 sumOfColor = Float3(0.0);
+	float sumOfWeight = 0.0;
 
-	Int2 idx3;
-	idx3.x = threadIdx.x;
-	idx3.y = threadIdx.y;
-
-	Float4 bufferRead = Load2D(colorBuffer, idx2);
-	Float3 colorValue = bufferRead.xyz;
-	Float3 normalValue = DecodeNormal_R11_G10_B11(bufferRead.w);
-
-	__shared__ Float4 sharedBuffer[32][32];
-	sharedBuffer[threadIdx.x][threadIdx.y] = bufferRead;
-
-	if (idx3.x < 2 || idx3.y < 2 || idx3.x > 29 || idx3.y > 29) { return; }
-	if (fabsf(normalValue.x) < 0.01 && fabsf(normalValue.y) < 0.01 && fabsf(normalValue.z) < 0.01) { return; }
-
-	Float3 out = Float3(0.0);
-	float cum_w = 0.0;
-
-	Float3 out2 = Float3(0.0);
-	float cum_w2 = 0.0;
-
-	float sum = 0.0;
-	float stddev = 0.0;
-
+	__syncthreads();
 	for (int i = 0; i < 25; ++i)
 	{
+		// index
 		Int2 uv = idx3 + uvOffset[i];
 
+		// read color and normal
 		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
 		Float3 ctmp = bufferReadTmp.xyz;
 		Float3 ntmp = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
 
+		// color distance and weight
         Float3 t = colorValue - ctmp;
         float dist2 = dot(t,t);
-        float c_w = min1f(expf(-(dist2)/c_phi), 1.0);
+        float colorWeight = min1f(expf(-(dist2) / c_phi), 1.0);
 
+		// normal distance and weight
         t = normalValue - ntmp;
         dist2 = max1f(dot(t,t), 0.0);
-        float n_w = min1f(expf(-(dist2)/n_phi), 1.0);
+        float normalWeight = min1f(expf(-(dist2) / n_phi), 1.0);
 
-        out += ctmp * c_w * n_w * filterKernel[i];
-        cum_w += c_w * n_w * filterKernel[i];
-
-		out2 += ctmp * n_w * filterKernel[i];
-		cum_w2 += n_w * filterKernel[i];
-
-		float lum = ctmp.max();
-		sum += lum;
-		float stddev_i = lum - sum / (i + 1);
-		stddev += stddev_i * stddev_i;
+		// sum
+		float weight = colorWeight * normalWeight;
+        sumOfColor += ctmp * weight * filterKernel[i];
+        sumOfWeight += weight * filterKernel[i];
 	}
 
-	float delta = colorValue.max() - (sum / 25.0);
-	bool isNoise = (delta * delta > (stddev / 25.0) * 5.0);
-	float weightNoCenter = cum_w2 - (9.0 / 64.0);
+	// final output
+	Store2D(Float4(sumOfColor / sumOfWeight, 1.0), colorBuffer, idx2);
 
-	if (isNoise && weightNoCenter > 0.0001)
-	{
-		out = (out2 - 9.0 / 64.0 * colorValue) / weightNoCenter;
-		//out = Float3(0, 1, 0);
-	}
-	else
-	{
-		out = out / cum_w;
-	}
-
-	Store2D(Float4(out, 1.0), colorBuffer, idx2);
+#endif
 }

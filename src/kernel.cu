@@ -48,7 +48,7 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (1000.0 * cosTheta) : (rayState.isMoonVisible ? (50.0 * cosTheta) : 0);
+	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (2000.0 * cosTheta) : (rayState.isMoonVisible ? (100.0 * cosTheta) : 0);
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
