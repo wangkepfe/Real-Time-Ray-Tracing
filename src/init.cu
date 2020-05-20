@@ -25,11 +25,11 @@ void RayTracer::init()
 	materials[0].type          = LAMBERTIAN_DIFFUSE;
 	materials[0].albedo        = Float3(0.8f, 0.8f, 0.8f);
 	materials[1].type          = EMISSIVE;
-	materials[1].albedo        = Float3(2.0f);
+	materials[1].albedo        = Float3(0.9f);
 	materials[2].type          = EMISSIVE;
-	materials[2].albedo        = Float3(0.9f, 0.2f, 0.1f) * 2;
+	materials[2].albedo        = Float3(9.0f, 0.2f, 0.1f);
 	materials[3].type          = EMISSIVE;
-	materials[3].albedo        = Float3(0.1f, 0.2f, 0.9f) * 2;
+	materials[3].albedo        = Float3(0.1f, 0.2f, 0.9f);
 	materials[4].type          = MICROFACET_REFLECTION;
 	materials[4].albedo        = Float3(1.0f, 1.0f, 1.0f);
 	materials[5].type          = PERFECT_FRESNEL_REFLECTION_REFRACTION;
@@ -82,22 +82,25 @@ void RayTracer::init()
 
 	// surface object
 	cudaChannelFormatDesc surfaceChannelFormatDesc = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
+	cudaChannelFormatDesc surfaceChannelFormatDescHalf = cudaCreateChannelDesc(16, 16, 16, 16, cudaChannelFormatKindUnsigned);
 
 	GpuErrorCheck(cudaMallocArray(&colorBufferArrayA, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
 	GpuErrorCheck(cudaMallocArray(&colorBufferArrayB, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
 	GpuErrorCheck(cudaMallocArray(&colorBufferArrayC, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	GpuErrorCheck(cudaMallocArray(&normalBufferArray, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	GpuErrorCheck(cudaMallocArray(&positionBufferArray, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+
+	GpuErrorCheck(cudaMallocArray(&normalBufferArray, &surfaceChannelFormatDescHalf, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&positionBufferArray, &surfaceChannelFormatDescHalf, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
 
 	cudaResourceDesc resDesc = {};
 	resDesc.resType = cudaResourceTypeArray;
 
 	resDesc.res.array.array = colorBufferArrayA;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferA, &resDesc));
-	resDesc.res.array.array = colorBufferArrayC;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferC, &resDesc));
 	resDesc.res.array.array = colorBufferArrayB;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferB, &resDesc));
+	resDesc.res.array.array = colorBufferArrayC;
+	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferC, &resDesc));
+
 	resDesc.res.array.array = normalBufferArray;
 	GpuErrorCheck(cudaCreateSurfaceObject(&normalBuffer, &resDesc));
 	resDesc.res.array.array = positionBufferArray;
@@ -181,6 +184,7 @@ void RayTracer::cleanup()
     cudaDestroySurfaceObject(colorBufferA);
 	cudaDestroySurfaceObject(colorBufferB);
 	cudaDestroySurfaceObject(colorBufferC);
+
 	cudaDestroySurfaceObject(normalBuffer);
 	cudaDestroySurfaceObject(positionBuffer);
 
@@ -188,6 +192,7 @@ void RayTracer::cleanup()
     cudaFreeArray(colorBufferArrayA);
 	cudaFreeArray(colorBufferArrayB);
 	cudaFreeArray(colorBufferArrayC);
+
 	cudaFreeArray(normalBufferArray);
 	cudaFreeArray(positionBufferArray);
 

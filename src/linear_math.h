@@ -170,6 +170,8 @@ struct Float3
 	__host__ __device__ Float3(float _x)                     : x(_x), y(_x), z(_x)    {}
 	__host__ __device__ Float3(float _x, float _y, float _z) : x(_x), y(_y), z(_z)    {}
 
+	inline __host__ __device__ Float2 xz() const { return Float2(x, z); }
+
 	inline __host__ __device__ Float3  operator+(const Float3& v) const { return Float3(x + v.x, y + v.y, z + v.z); }
 	inline __host__ __device__ Float3  operator-(const Float3& v) const { return Float3(x - v.x, y - v.y, z - v.z); }
 	inline __host__ __device__ Float3  operator*(const Float3& v) const { return Float3(x * v.x, y * v.y, z * v.z); }
@@ -303,6 +305,7 @@ inline __host__ __device__ Float4 operator / (float a, const Float4& v) { return
 
 inline __host__ __device__ Float3 abs(const Float3& v)                                { return Float3(fabsf(v.x), fabsf(v.y), fabsf(v.z)); }
 inline __host__ __device__ Float3 max(const Float3& v1, const Float3& v2)             { return Float3(max1f(v1.x, v2.x), max1f(v1.y, v2.y), max1f(v1.z, v2.z)); }
+inline __host__ __device__ Float2 normalize(const Float2& v)                          { float norm = sqrtf(v.x * v.x + v.y * v.y); return Float2(v.x / norm, v.y / norm); }
 inline __host__ __device__ Float3 normalize(const Float3& v)                          { float norm = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); return Float3(v.x / norm, v.y / norm, v.z / norm); }
 inline __host__ __device__ Float3 sqrt3f(const Float3& v)                             { return Float3(sqrtf(v.x), sqrtf(v.y), sqrtf(v.z)); }
 inline __host__ __device__ Float3 min3f(const Float3 & v1, const Float3 & v2)         { return Float3(v1.x < v2.x ? v1.x : v2.x, v1.y < v2.y ? v1.y : v2.y, v1.z < v2.z ? v1.z : v2.z); }
@@ -312,6 +315,7 @@ inline __host__ __device__ Float3 powf(const Float3 & v1, const Float3 & v2)    
 inline __host__ __device__ Float3 exp3f(const Float3 & v)                             { return Float3(expf(v.x), expf(v.y), expf(v.z)); }
 inline __host__ __device__ Float3 pow3f(const Float3& v, float a)                     { return Float3(powf(v.x, a), powf(v.y, a), powf(v.z, a)); }
 inline __host__ __device__ Float3 mixf(const Float3 & v1, const Float3 & v2, float a) { return v1 * (1.0f - a) + v2 * a; }
+inline __host__ __device__ float  mix1f(float v1, float v2, float a)                  { return v1 * (1.0f - a) + v2 * a; }
 inline __host__ __device__ Float3 minf3f(const float a, const Float3 & v)             { return Float3(v.x < a ? v.x : a, v.y < a ? v.y : a, v.y < a ? v.y : a); }
 inline __host__ __device__ void   swap(float& v1, float& v2)                          { float tmp = v1; v1 = v2; v2 = tmp; }
 inline __host__ __device__ void   swap(Float3 & v1, Float3 & v2)                      { Float3 tmp = v1; v1 = v2; v2 = tmp; }
@@ -319,11 +323,13 @@ inline __host__ __device__ float  clampf(float a, float lo, float hi)           
 inline __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo, Float3 hi)             { return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
 
 //inline __host__ __device__ float  smoothstep(float edge0, float edge1, float x)       { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
+inline __host__ __device__ float  dot(const Float2 & v1, const Float2 & v2)           { return v1.x * v2.x + v1.y * v2.y; }
 inline __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z; }
 inline __host__ __device__ float  dot(const Float4 & v1, const Float4 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z + v1.w * v2.w; }
 inline __host__ __device__ float  distancesq(const Float3 & v1, const Float3 & v2)    { return (v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y) + (v1.z - v2.z) * (v1.z - v2.z); }
 inline __host__ __device__ float  distance(const Float3 & v1, const Float3 & v2)      { return sqrtf((v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y) + (v1.z - v2.z) * (v1.z - v2.z)); }
-inline __host__ __device__ Float3 lerp3f(Float3 a, Float3 b, float w) { return a + w * (b - a); }
+inline __host__ __device__ Float3 lerp3f(Float3 a, Float3 b, float w)                 { return a + w * (b - a); }
+inline __host__ __device__ Float3 reflect3f(Float3 i, Float3 n)                         { return i - 2.0f * n * dot(n,i); }
 
 inline __host__ __device__ unsigned int divRoundUp(unsigned int dividend, unsigned int divisor) { return (dividend + divisor - 1) / divisor; }
 

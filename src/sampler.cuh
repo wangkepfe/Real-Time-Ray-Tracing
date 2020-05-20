@@ -3,21 +3,54 @@
 #include <cuda_runtime.h>
 #include <surface_indirect_functions.h>
 #include "morton.cuh"
+#include "cuda_fp16.h"
 
 __device__ Float4 Load2D(
 	SurfObj tex,
-	Int2                uv)
+	Int2    uv)
 {
     float4 ret = surf2Dread<float4>(tex, uv.x * 16, uv.y, cudaBoundaryModeClamp);
 	return Float4(ret.x, ret.y, ret.z, ret.w);
 }
 
 __device__ void Store2D(
-    Float4              val,
+    Float4  val,
 	SurfObj tex,
-	Int2                uv)
+	Int2    uv)
 {
     surf2Dwrite(make_float4(val.x, val.y, val.z, val.w), tex, uv.x * 16, uv.y, cudaBoundaryModeClamp);
+}
+
+union UShortHalf { ushort1 us1; __half h; __device__ UShortHalf() : h(0) {} };
+
+__device__ Float4 Load2Dfp16(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 us4 = surf2Dread<ushort4>(tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
+	UShortHalf Cvt[4];
+	Cvt[0].us1 = make_ushort1(us4.x);
+	Cvt[1].us1 = make_ushort1(us4.y);
+	Cvt[2].us1 = make_ushort1(us4.z);
+	Cvt[3].us1 = make_ushort1(us4.w);
+	return Float4(
+		__half2float(Cvt[0].h),
+		__half2float(Cvt[1].h),
+		__half2float(Cvt[2].h),
+		__half2float(Cvt[3].h));
+}
+
+__device__ void Store2Dfp16(
+    Float4  val,
+	SurfObj tex,
+	Int2    uv)
+{
+	UShortHalf Cvt[4];
+	Cvt[0].h = __float2half(val.x);
+	Cvt[1].h = __float2half(val.y);
+	Cvt[2].h = __float2half(val.z);
+	Cvt[3].h = __float2half(val.w);
+    surf2Dwrite(make_ushort4(Cvt[0].us1.x, Cvt[1].us1.x, Cvt[2].us1.x, Cvt[3].us1.x), tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
 }
 
 __device__ Float4 SampleBicubicSmoothStep(
@@ -114,4 +147,41 @@ __device__ Float4 SampleBicubicCatmullRom(
 	OutColor /= sumWeight;
 
     return OutColor;
+}
+
+union UintFloatConverter { uint ui; float f; __device__ UintFloatConverter() : ui(0) {} };
+
+// [x sign] [x] [y sign] [y] [z sign] [z]
+//    1     10     1      9     1     10
+
+__device__ __inline__ float EncodeNormal_R11_G10_B11(Float3 normal)
+{
+    const uint max9 = (0x1 << 9) - 1;
+    const uint max10 = (0x1 << 10) - 1;
+
+    UintFloatConverter converter;
+    converter.ui =
+		((normal.x < 0) ? (0x1 << 31) : 0) | ((uint)(fabsf(normal.x) * max10) << 21) |
+		((normal.y < 0) ? (0x1 << 20) : 0) | ((uint)(fabsf(normal.y) * max9) << 11)  |
+		((normal.z < 0) ? (0x1 << 10) : 0) | ((uint)(fabsf(normal.z) * max10));
+    return converter.f;
+}
+
+__device__ __inline__ Float3 DecodeNormal_R11_G10_B11(float fcode)
+{
+	const uint max9 = (0x1 << 9) - 1;
+	const uint max10 = (0x1 << 10) - 1;
+
+    const uint maskX = 0x7fe00000; // 0111 1111 1110 0000 0000 0000 0000 0000
+    const uint maskY = 0x000ff800; // 0000 0000 0000 1111 1111 1000 0000 0000
+    const uint maskZ = 0x000003ff; // 0000 0000 0000 0000 0000 0011 1111 1111
+
+    UintFloatConverter converter;
+    converter.f = fcode;
+	uint code = converter.ui;
+
+    return Float3(
+		((code & (0x1 << 31) != 0) ? (-1) : 1) * (float)((code & maskX) >> 21) / (float)max10,
+		((code & (0x1 << 20) != 0) ? (-1) : 1) * (float)((code & maskY) >> 11) / (float)max9,
+		((code & (0x1 << 10) != 0) ? (-1) : 1) * (float)((code & maskZ)) / (float)max10);
 }

@@ -181,7 +181,7 @@ __device__ void GetAabbRayIntersectPointNormal(
 // --------------------------- Ray Plane Intersect -------------------------
 // ray plane intersect, return distance, RayMax if no hit
 // -------------------------------------------------------------------------
-__device__ float RayPlaneIntersect(
+__device__ float RayPlaneIntersect( // N dot P = w
 	const Float4& plane,
 	const Ray&    ray,
 	float&        tError)

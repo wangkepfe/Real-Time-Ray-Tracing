@@ -19,7 +19,7 @@ __device__ bool RaySceneIntersect(
 	float t = RayMax;
 	rayOffset = 1e-7f;
 	objectIdx = 0;
-	intersectNormal = Float3(0, 1, 0);
+	intersectNormal = Float3(0, 0, 0);
 	intersectPoint = Float3(RayMax);
 
 	// get spheres
@@ -66,29 +66,6 @@ __device__ bool RaySceneIntersect(
 			rayOffset       = errorT + errorP;
 		}
 	}
-
-    // plane
-    Float4 planes[1];
-    planes[0] = Float4(0, 1, 0, 0);
-
-    for (int i = 0; i < 1; ++i)
-    {
-        Float4& plane = planes[i];
-
-        if (dot(plane.xyz, ray.dir) < 0)
-        {
-            float t_temp = RayPlaneIntersect(plane, ray, errorT);
-
-            if (t_temp < t)
-            {
-                t               = t_temp;
-                objectIdx       = 998;
-                intersectPoint  = GetRayPlaneIntersectPoint(plane, ray, t, errorP);
-                intersectNormal = plane.xyz;
-                rayOffset       = errorT + errorP;
-            }
-        }
-    }
 
 	rayDist += distance(intersectPoint, ray.orig);
 

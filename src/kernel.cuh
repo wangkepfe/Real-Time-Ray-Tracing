@@ -86,7 +86,7 @@ struct __align__(16) ConstBuffer
 	Camera camera;
 
 	Float3 sunDir;
-	float  pad0;
+	float  clockTime;
 
 	int maxSceneLoop;
 	int frameNum;
@@ -143,7 +143,7 @@ struct __align__(16) RayState
 
 	float      surfaceBetaWeight;
 	float      normalDotRayDir;
-	float u1;
+	bool       isDiffuseRay;
 	float u2;
 
 	RandState  rdState[3];
@@ -271,17 +271,26 @@ private:
 	cudaArray*                  colorBufferArrayA;
 	cudaArray*                  colorBufferArrayB;
 	cudaArray*                  colorBufferArrayC;
+
 	cudaArray*                  normalBufferArray;
 	cudaArray*                  positionBufferArray;
 
 	SurfObj         colorBufferA;
 	SurfObj         colorBufferB;
 	SurfObj         colorBufferC;
+
 	SurfObj         normalBuffer;
 	SurfObj         positionBuffer;
 
 	IndexBuffers indexBuffers;
 	ullint* gHitMask;
+
+	//
+	SurfObj colorBuffer4;
+	SurfObj colorBuffer16;
+	SurfObj colorBuffer64;
+	float* d_exposure;
+	float* d_histogram;
 
 	// rand init
 	RandInitVec*                d_randInitVec;

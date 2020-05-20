@@ -16,6 +16,13 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	const int numSphereLight = sceneMaterial.numSphereLights;
 	Sphere* sphereLights = sceneMaterial.sphereLights;
 
+	isDeltaLight = false;
+
+	float lightChoosePdf;
+	int sampledIdx;
+
+#if 1
+
 	const int numLight = numSphereLight + 2;
 
 	const int sunLightIdx = numSphereLight;
@@ -25,14 +32,12 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	float lightInfluenceHeuristicTemp;
 	float lightInfluenceHeuristicSum[5];
 	float lightInfluenceHeuristicSumTemp = 0;
-	float lightChoosePdf;
 
-	isDeltaLight = false;
+	float cosTheta = abs(dot(rayState.normal, cbo.sunDir));
 
 	int i = 0;
 
 	// light
-	#pragma unroll
 	for (;i < numSphereLight; ++i)
 	{
 		Float3 vec = sphereLights[i].center - rayState.pos;
@@ -43,23 +48,22 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? 10000.0 : (rayState.isMoonVisible ? 500.0 : 0);
+	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (1000.0 * cosTheta) : (rayState.isMoonVisible ? (50.0 * cosTheta) : 0);
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
 	++i;
 
 	// env
-	lightInfluenceHeuristicTemp = (cbo.sunDir.y > 0.0) ? 1000.0 : 50.0;
+	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 100.0 : 1.0;
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
 
 	// choose a light
 	float sampledValue = rd(&rayState.rdState[2]) * lightInfluenceHeuristicSumTemp;
-	int sampledIdx = 0;
+	sampledIdx = 0;
 
-	#pragma unroll
 	for (int j = 0; j < numLight; ++j)
 	{
 		if (sampledValue < lightInfluenceHeuristicSum[j])
@@ -71,13 +75,45 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 
 	lightChoosePdf = lightInfluenceHeuristic[sampledIdx] / lightInfluenceHeuristicSumTemp;
 
+#else
+
+	int indexRemap[8] = {};
+	int i = 0;
+	int idx = 0;
+
+	const int sunLightIdx = numSphereLight;
+	const int envLightIdx = numSphereLight + 1;
+
+	// sphere light
+	for (; i < numSphereLight; ++i)
+	{
+		Float3 vec = sphereLights[i].center - rayState.pos;
+
+		if (dot(rayState.normal, vec) > 0 && vec.length2() < 1.0)
+		{
+			indexRemap[idx++] = i;
+		}
+	}
+
+	// sun light
+	indexRemap[idx++] = i++;
+
+	// env light
+	indexRemap[idx++] = i;
+
+	// choose light
+	int sampledValue = rd(&rayState.rdState[2]) * idx;
+	sampledIdx = indexRemap[sampledValue];
+	lightChoosePdf = 1.0 / idx;
+
+#endif
+
 	// sample a direction
 	if (sampledIdx == sunLightIdx)
 	{
 		Float3 moonDir = cbo.sunDir;
-		moonDir.x *= -1;
-		moonDir.y *= -1;
-		lightSampleDir = cbo.sunDir.y > 0 ? cbo.sunDir : moonDir;
+		moonDir = -moonDir;
+		lightSampleDir = cbo.sunDir.y > -0.05 ? cbo.sunDir : moonDir;
 		lightSamplePdf = 1.0;
 		isDeltaLight = true;
 	}
@@ -129,15 +165,8 @@ __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMa
 	if (rayState.matType == MAT_SKY)
 	{
 		// env light
-		Float3 envLightColor = EnvLight(lightDir, cbo.sunDir);
-		Float3 moonDir = cbo.sunDir;
-		moonDir.x *= -1;
-		moonDir.y *= -1;
-		if (((cbo.sunDir.y > 0) && (dot(lightDir, cbo.sunDir) > (1.0 - 1e-6))) || ((moonDir.y > 0) && (dot(lightDir, moonDir) > (1.0 - 1e-3))))
-		{
-			envLightColor *= 10;
-		}
-		rayState.L += envLightColor * 2 * beta;
+		Float3 envLightColor = EnvLight(lightDir, cbo.sunDir, cbo.clockTime, rayState.isDiffuseRay);
+		rayState.L += envLightColor * beta;
 	}
 	else if (rayState.matType == EMISSIVE)
 	{
@@ -182,6 +211,7 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 
 	rayState.hasBsdfRay = true;
 	rayState.hasProbeRay = false;
+	rayState.isDiffuseRay = true;
 
 	// get mat
 	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
@@ -226,23 +256,16 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 
 __device__ inline void UpdateMaterial(ConstBuffer cbo, RayState& rayState, SceneMaterial sceneMaterial)
 {
-	if (rayState.objectIdx == 998)
-	{
-		rayState.matType = PERFECT_REFLECTION;
-	}
-	else
-	{
-		rayState.matId = sceneMaterial.materialsIdx[rayState.objectIdx];
-		SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
-		rayState.matType = (rayState.hit == false) ? MAT_SKY : mat.type;
-	}
+	rayState.matId = sceneMaterial.materialsIdx[rayState.objectIdx];
+	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
+	rayState.matType = (rayState.hit == false) ? MAT_SKY : mat.type;
 	rayState.isSunVisible = (cbo.sunDir.y > 0.0) && (dot(rayState.normal, cbo.sunDir) > 0.0);
-	rayState.isMoonVisible = (cbo.sunDir.y < 0.0) && (dot(rayState.normal, Float3(-cbo.sunDir.x, -cbo.sunDir.y, cbo.sunDir.z)) > 0.0);
+	rayState.isMoonVisible = (cbo.sunDir.y < 0.0) && (dot(rayState.normal, -cbo.sunDir) > 0.0);
 	rayState.hitLight = (rayState.matType == MAT_SKY) || (rayState.matType == EMISSIVE);
 	rayState.isDiffuse = (rayState.matType == LAMBERTIAN_DIFFUSE) || (rayState.matType == MICROFACET_REFLECTION);
 }
 
-__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer, SurfObj normalBuffer, SurfObj positionBuffer)
+__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer)
 {
 	// index
 	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
@@ -258,6 +281,7 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	rayState.terminated = false;
 	rayState.distance   = 0;
 	rayState.hasProbeRay = false;
+	rayState.isDiffuseRay = false;
 
 	// init rand state
 	const uint seed = (idx.x << 16) ^ (idx.y);
@@ -270,8 +294,7 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir);
 
 	// store normal, pos
-	Store2D(Float4(rayState.normal, 1.0), normalBuffer, idx);
-	Store2D(Float4(rayState.pos, 1.0), positionBuffer, idx);
+	Float3 screenNormal = rayState.normal;
 
 	// update mat id
 	UpdateMaterial(cbo, rayState, sceneMaterial);
@@ -303,7 +326,7 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	}
 
 	// write to buffer
-	Store2D(Float4(rayState.L, 1.0), colorBuffer, idx);
+	Store2D(Float4(rayState.L, EncodeNormal_R11_G10_B11(screenNormal)), colorBuffer, idx);
 }
 
 void RayTracer::draw(SurfObj* renderTarget)
@@ -311,11 +334,17 @@ void RayTracer::draw(SurfObj* renderTarget)
 	// ---------------- frame update ------------------
 	timer.update();
 	float clockTime   = timer.getTime();
+	//clockTime = 7;
+	cbo.clockTime     = clockTime;
 	//clockTime = 1;
 
-	const Float3 axis = normalize(Float3(0.0, 0.0, 1.0));
-	const float angle = fmodf(clockTime * TWO_PI / 10, TWO_PI);
-	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
+	// const Float3 axis = normalize(Float3(0.0, 0.0, 1.0));
+	// const float angle = fmodf(clockTime * TWO_PI / 30, TWO_PI);
+	// Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
+
+    const Float3 axis = normalize(Float3(1.0, 0.0, -0.4));
+	const float angle = fmodf(clockTime * TWO_PI / 30, TWO_PI);
+	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 0.0)).normalized();
 
 	cbo.sunDir        = sunDir;
 	cbo.frameNum      = cbo.frameNum + 1;
@@ -347,14 +376,24 @@ void RayTracer::draw(SurfObj* renderTarget)
 	Int2 outputDim(screenWidth, screenHeight);
 
 	// ------------------ Ray Gen -------------------
-	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA, normalBuffer, positionBuffer);
+	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA);
 
 	// ---------------- post processing ----------------
-	ToneMapping<<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferA , bufferDim , /*exposure*/1.0);
-	Denoise    <<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferA , /*in*/normalBuffer , /*in*/positionBuffer, bufferDim, cbDenoise);
 
-	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(/*out*/colorBufferB , /*in*/colorBufferA , bufferDim); }
-	else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferB  , /*in*/colorBufferA , bufferDim); }
+	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
+	else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
 
-	FilterScale<<<scaleGridDim, scaleBlockDim, 0, streams[0]>>>(/*out*/renderTarget, /*in*/colorBufferB, outputDim, bufferDim);
+	//Histogram<<<gridDim, dim3(8, 8, 1), 0, streams[0]>>>(/*out*/d_histogram, /*in*/colorBufferB , bufferDim);
+	//AutoExposure<<<64, 1, 0, streams[0]>>>(/*out*/d_exposure, /*in*/d_histogram);
+
+	//Denoise    <<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferA , /*in*/normalBuffer , /*in*/positionBuffer, bufferDim, cbDenoise);
+
+	DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim, 10.0, 0.1);
+
+	//GpuErrorCheck(cudaDeviceSynchronize());
+	//GpuErrorCheck(cudaPeekAtLastError());
+
+	ToneMapping<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA , bufferDim , 1);
+
+	FilterScale<<<scaleGridDim, scaleBlockDim, 0, streams[0]>>>(/*out*/renderTarget, /*in*/colorBufferA, outputDim, bufferDim);
 }
