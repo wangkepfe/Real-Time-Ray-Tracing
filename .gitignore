@@ -2,3 +2,4 @@ build
 *.vscode
 settings.json
 ref
+bin

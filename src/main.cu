@@ -35,8 +35,8 @@
 // ----------------------------------------------------------------------- global constants
 
 // resolution
-const int WIDTH = 2560;
-const int HEIGHT = 1440;
+const int WIDTH = 1920;
+const int HEIGHT = 1080;
 
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
@@ -188,7 +188,7 @@ public:
         initVulkan();
         initCuda();
 
-        m_rayTracer = new RayTracer(WIDTH, HEIGHT, WIDTH / 2, HEIGHT / 2);
+        m_rayTracer = new RayTracer(WIDTH, HEIGHT, WIDTH * 0.5, HEIGHT * 0.5);
         m_rayTracer->init();
 
         mainLoop();

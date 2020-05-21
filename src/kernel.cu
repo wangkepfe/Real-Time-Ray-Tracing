@@ -4,7 +4,6 @@
 #include "bsdf.cuh"
 #include "morton.cuh"
 #include "sampler.cuh"
-#include "denoise.cuh"
 #include "sky.cuh"
 #include "postprocessing.cuh"
 #include "raygen.cuh"
@@ -48,14 +47,14 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (2000.0 * cosTheta) : (rayState.isMoonVisible ? (100.0 * cosTheta) : 0);
+	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (4000.0 * cosTheta) : (rayState.isMoonVisible ? (200.0 * cosTheta) : 0);
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
 	++i;
 
 	// env
-	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 100.0 : 1.0;
+	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 400.0 : 4.0;
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
