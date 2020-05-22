@@ -22,7 +22,7 @@ __device__ Float3 Uncharted2Tonemap(Float3 x)
 __global__ void ToneMapping(
 	SurfObj   colorBuffer,
 	Int2                  size,
-	float                 exposure)
+	float* exposure)
 {
 	Int2 idx;
 	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -34,7 +34,7 @@ __global__ void ToneMapping(
 	const float W = 11.2;
 
 	Float3 texColor = Load2D(colorBuffer, idx).xyz;
-	texColor *= exposure;
+	texColor *= exposure[0];
 
 	float ExposureBias = 2.0f;
 	Float3 curr = Uncharted2Tonemap(ExposureBias * texColor);
@@ -187,7 +187,8 @@ __global__ void Histogram(
 	// shared histogram of 8x8 block
 	Float3 color = Load2D(InBuffer, threadId).xyz;
 
-	float luminance = color.max();
+	//float luminance = color.max();
+	float luminance = color.x * 0.3 + color.y * 0.6 + color.z * 0.1;
 	float logLuminance = log2f(luminance) * 0.1 + 0.9;
 
 	float fBucket = clampf(logLuminance, 0.0, 1.0) * 63 * 0.99999;
@@ -269,9 +270,111 @@ __global__ void Histogram2(
 
 	Float3 color = Load2D(InBuffer, idx).xyz;
 	float luminance = color.max();
-	float logLuminance = log2f(luminance) * 0.1 + 0.9;
+	float logLuminance = log2f(luminance) * 0.1 + 0.75;
 	uint fBucket = (uint)rintf(clampf(logLuminance, 0.0, 1.0) * 63 * 0.99999);
 	atomicInc(&histogram[fBucket], size.x * size.y);
+}
+
+__device__ __inline__ float BinToLum(int i) { return exp2f(((float)i / (63 * 0.99999) - 0.75) / 0.1); }
+
+__global__ void AutoExposure(float* exposure, uint* histogram, float area, float deltaTime)
+{
+	const float darkThreshold = 0.5;
+	const float brightThreshold = 0.8;
+
+	float lumiSum = 0;
+	float lumiSumArea = 0;
+
+	float accuHistArea = 0;
+
+	int i = 0;
+	for (; i < 64; ++i)
+	{
+		uint hist = histogram[i];
+		float fHist = (float)hist / area;
+		float lum = BinToLum(i);
+
+		// Print("i", i);
+		// Print("hist", hist);
+		// Print("fHist", fHist);
+		// Print("lum", lum);
+
+		accuHistArea += fHist;
+		float dark = accuHistArea - darkThreshold;
+
+		// Print("accuHistArea", accuHistArea);
+		// Print("dark", dark);
+
+		if (dark > 0)
+		{
+			lumiSumArea += dark;
+			lumiSum += dark * lum;
+			// Print("lumiSumArea", lumiSumArea);
+			// Print("lumiSum", lumiSum);
+			break;
+		}
+	}
+
+	for (; i < 64; ++i)
+	{
+		uint hist = histogram[i];
+		float fHist = (float)hist / area;
+		float lum = BinToLum(i);
+
+		// 		Print("i", i);
+		// Print("hist", hist);
+		// Print("fHist", fHist);
+		// Print("lum", lum);
+
+		accuHistArea += fHist;
+		float bright = accuHistArea - brightThreshold;
+
+		// Print("accuHistArea", accuHistArea);
+		// Print("bright", bright);
+
+		if (bright > 0)
+		{
+			float partial = brightThreshold - (accuHistArea - fHist);
+			lumiSumArea += partial;
+			lumiSum += partial * lum;
+			// 			Print("lumiSumArea", lumiSumArea);
+			// Print("lumiSum", lumiSum);
+			break;
+		}
+		else
+		{
+			lumiSumArea += fHist;
+			lumiSum += fHist * lum;
+			// 			Print("lumiSumArea", lumiSumArea);
+			// Print("lumiSum", lumiSum);
+		}
+	}
+
+	float aveLum = lumiSum / lumiSumArea;
+	aveLum = clampf(aveLum, 0.1, 10.0);
+
+	float lumTemp = exposure[1];
+
+	// Print("lumTemp before", lumTemp);
+
+	lumTemp = lumTemp + (aveLum - lumTemp) * (1.0 - expf(-deltaTime * 0.001));
+
+	float EC = 1.03 - 2.0 / (log10f(lumTemp + 1.0) + 2.0);
+	//float EC = 1.0;
+	float EV = 7.0 * EC / lumTemp;
+
+	// Print("lumiSum", lumiSum);
+	// Print("lumiSumArea", lumiSumArea);
+	// Print("aveLum", aveLum);
+
+	// Print("deltaTime", deltaTime);
+	// Print("(1.0 - expf(-deltaTime * 1000.0))", (1.0f - expf(-deltaTime * 0.001f)));
+	// Print("aveLum", aveLum);
+	// Print("lumTemp", lumTemp);
+	// Print("EV", EV);
+
+	exposure[0] = EV;
+	exposure[1] = lumTemp;
 }
 
 __global__ void DownScale4(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)

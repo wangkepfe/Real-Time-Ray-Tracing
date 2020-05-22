@@ -409,8 +409,8 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 
 		if (isDiffuseRay == false)
 		{
-			Float2 uv = Float2((atan2f(rayDirOrRefl.x, rayDirOrRefl.z) + clockTime / 300) / TWO_PI, acosf(rayDirOrRefl.y) / PI) * 3840.0;
-			starColor = StableStarField(uv, 0.99f) * 0.5;
+			Float2 uv = Float2((atan2f(rayDirOrRefl.x, rayDirOrRefl.z) + clockTime / 100) / TWO_PI, acosf(rayDirOrRefl.y) / PI) * 6000.0;
+			starColor = StableStarField(uv, 0.999f) * 0.5;
 		}
 
 		return (moonColor + starColor) * beta;

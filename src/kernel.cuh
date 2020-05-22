@@ -244,8 +244,17 @@ private:
 	// kernel dimension
 	dim3                        blockDim;
 	dim3                        gridDim;
+
 	dim3                        scaleBlockDim;
 	dim3                        scaleGridDim;
+
+	dim3                        gridDim4;
+	dim3                        gridDim16;
+	dim3                        gridDim64;
+
+	UInt2                       bufferSize4;
+	UInt2                       bufferSize16;
+	UInt2                       bufferSize64;
 
 	// constant buffer
 	ConstBuffer                 cbo;
@@ -272,12 +281,20 @@ private:
 	cudaArray*                  colorBufferArrayB;
 	cudaArray*                  colorBufferArrayC;
 
+	cudaArray*                  colorBufferArray4;
+	cudaArray*                  colorBufferArray16;
+	cudaArray*                  colorBufferArray64;
+
 	cudaArray*                  normalBufferArray;
 	cudaArray*                  positionBufferArray;
 
 	SurfObj         colorBufferA;
 	SurfObj         colorBufferB;
 	SurfObj         colorBufferC;
+
+	SurfObj         colorBuffer4;
+	SurfObj         colorBuffer16;
+	SurfObj         colorBuffer64;
 
 	SurfObj         normalBuffer;
 	SurfObj         positionBuffer;
@@ -286,11 +303,8 @@ private:
 	ullint* gHitMask;
 
 	//
-	SurfObj colorBuffer4;
-	SurfObj colorBuffer16;
-	SurfObj colorBuffer64;
 	float* d_exposure;
-	float* d_histogram;
+	uint* d_histogram;
 
 	// rand init
 	RandInitVec*                d_randInitVec;

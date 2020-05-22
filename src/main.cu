@@ -35,8 +35,8 @@
 // ----------------------------------------------------------------------- global constants
 
 // resolution
-const int WIDTH = 1920;
-const int HEIGHT = 1080;
+const int WIDTH = 2560;
+const int HEIGHT = 1440;
 
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
