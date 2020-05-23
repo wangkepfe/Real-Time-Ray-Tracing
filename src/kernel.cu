@@ -47,7 +47,7 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (4000.0 * cosTheta) : (rayState.isMoonVisible ? (200.0 * cosTheta) : 0);
+	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (4000.0 * cosTheta) : (rayState.isMoonVisible ? (40.0 * cosTheta) : 0);
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
@@ -288,6 +288,7 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 
 	// generate ray
 	GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, rd2(&rayState.rdState[0], &rayState.rdState[1]));
+	//GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, Float2(0.4f) + 0.2f * rd2(&rayState.rdState[0], &rayState.rdState[1]));
 
 	// scene traverse
 	rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir);
@@ -298,7 +299,7 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	// update mat id
 	UpdateMaterial(cbo, rayState, sceneMaterial);
 
-	for (int bounce = 0; bounce < 4; ++bounce)
+	for (int bounce = 0; bounce < 2; ++bounce)
 	{
 		LightShader(cbo, rayState, sceneMaterial);
 		GlossyShader(cbo, rayState, sceneMaterial);
@@ -345,7 +346,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	// Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
 
     const Float3 axis = normalize(Float3(1.0f, 0.0f, -0.4f));
-	const float angle = fmodf(clockTime * TWO_PI / 30, TWO_PI);
+	const float angle = fmodf(clockTime * TWO_PI / 300, TWO_PI);
 	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 0.0)).normalized();
 
 	cbo.sunDir        = sunDir;
@@ -386,49 +387,20 @@ void RayTracer::draw(SurfObj* renderTarget)
 
 	// ---------------- post processing ----------------
 
+
 	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
 	else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
 
-	DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim, 10.0f, 0.1f);
-
+	DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim);
 
 	DownScale4<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBuffer4, bufferDim);
-
-	// GpuErrorCheck(cudaDeviceSynchronize());
-	// GpuErrorCheck(cudaPeekAtLastError());
-
 	DownScale4<<<gridDim4, blockDim, 0, streams[0]>>>(colorBuffer4, colorBuffer16, bufferSize4);
-
-	// GpuErrorCheck(cudaDeviceSynchronize());
-	// GpuErrorCheck(cudaPeekAtLastError());
-
 	DownScale4<<<gridDim16, blockDim, 0, streams[0]>>>(colorBuffer16, colorBuffer64, bufferSize16);
-
-	// GpuErrorCheck(cudaDeviceSynchronize());
-	// GpuErrorCheck(cudaPeekAtLastError());
 
 	cudaStreamSynchronize(streams[2]);
 	Histogram2<<<1, dim3(bufferSize64.x, bufferSize64.y, 1), 0, streams[0]>>>(/*out*/d_histogram, /*in*/colorBuffer64 , bufferSize64);
 
-	// GpuErrorCheck(cudaDeviceSynchronize());
-	// GpuErrorCheck(cudaPeekAtLastError());
-
 	AutoExposure<<<1, 1, 0, streams[0]>>>(/*out*/d_exposure, /*in*/d_histogram, (float)(bufferSize64.x * bufferSize64.y), deltaTime);
-
-	// GpuErrorCheck(cudaDeviceSynchronize());
-	// GpuErrorCheck(cudaPeekAtLastError());
-
-	//Denoise    <<<gridDim, blockDim, 0, streams[0]>>>(/*io*/colorBufferA , /*in*/normalBuffer , /*in*/positionBuffer, bufferDim, cbDenoise);
-
-	// ToneMapping<<<gridDim64, blockDim, 0, streams[0]>>>(colorBuffer64 , bufferSize64 , 1);
-
-	// GpuErrorCheck(cudaDeviceSynchronize());
-	// GpuErrorCheck(cudaPeekAtLastError());
-
-	// FilterScale<<<scaleGridDim, scaleBlockDim, 0, streams[0]>>>(/*out*/renderTarget, /*in*/colorBuffer64, outputDim, bufferSize64);
-
-	// GpuErrorCheck(cudaDeviceSynchronize());
-	// GpuErrorCheck(cudaPeekAtLastError());
 
 	ToneMapping<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA , bufferDim , d_exposure);
 	FilterScale<<<scaleGridDim, scaleBlockDim, 0, streams[0]>>>(/*out*/renderTarget, /*in*/colorBufferA, outputDim, bufferDim);

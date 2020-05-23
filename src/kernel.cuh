@@ -153,11 +153,6 @@ struct __align__(16) RayState
 __device__ __inline__ float rd(RandState* rdState) { return curand_uniform(rdState); }
 __device__ __inline__ Float2 rd2(RandState* rdState1, RandState* rdState2) { return Float2(curand_uniform(rdState1), curand_uniform(rdState2)); }
 
-struct __align__(16) CbDenoise
-{
-	float c_phi, n_phi, p_phi, pad16;
-};
-
 struct IndexBuffers
 {
 	static const uint IndexBufferCount = 4;
@@ -258,7 +253,6 @@ private:
 
 	// constant buffer
 	ConstBuffer                 cbo;
-	CbDenoise                   cbDenoise;
 
 	// ray state, intersection
 	RayState*                   rayState;

@@ -194,11 +194,6 @@ void RayTracer::init()
 	camera.dir               = normalize(cameraLookAtPoint - camera.pos.xyz);
 	camera.left              = cross(Float3(0, 1, 0), camera.dir.xyz);
 
-	// denoise cbuffer
-	cbDenoise.c_phi = 1.0f;
-	cbDenoise.n_phi = 0.1f;
-	cbDenoise.p_phi = 0.1f;
-
 	timer.init();
 }
 

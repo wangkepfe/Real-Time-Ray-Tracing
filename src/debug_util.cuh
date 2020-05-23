@@ -32,6 +32,7 @@ __device__ void Print(const char* name) { printf("%\n", name); }
 __device__ void Print(const char* name, const int& n) { printf("%s = %d\n", name, n); }
 __device__ void Print(const char* name, const bool& n) { printf("%s = %s\n", name, n ? "true" : "false"); }
 __device__ void Print(const char* name, const uint& n) { printf("%s = %d\n", name, n); }
+__device__ void Print(const char* name, const Int2& n) { printf("%s = (%d, %d)\n", name, n.x, n.y); }
 __device__ void Print(const char* name, const uint3& n) { printf("%s = (%d, %d, %d)\n", name, n.x, n.y, n.z); }
 __device__ void Print(const char* name, const float& n) { printf("%s = %f\n", name, n); }
 __device__ void Print(const char* name, const Float2& f3) { printf("%s = (%f, %f)\n", name, f3[0], f3[1]); }

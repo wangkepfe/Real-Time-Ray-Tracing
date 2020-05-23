@@ -279,100 +279,87 @@ __device__ __inline__ float BinToLum(int i) { return exp2f(((float)i / (63 * 0.9
 
 __global__ void AutoExposure(float* exposure, uint* histogram, float area, float deltaTime)
 {
+	// Threshold for histogram cut
 	const float darkThreshold = 0.5;
 	const float brightThreshold = 0.8;
 
+	// sum of lum and area
 	float lumiSum = 0;
 	float lumiSumArea = 0;
 
+	// accumulate histogram area
 	float accuHistArea = 0;
 
+	// first loop for dark cut line
 	int i = 0;
 	for (; i < 64; ++i)
 	{
+		// read histogram value
 		uint hist = histogram[i];
+
+		// convert to float percentage
 		float fHist = (float)hist / area;
+
+		// find lum by bin index
 		float lum = BinToLum(i);
 
-		// Print("i", i);
-		// Print("hist", hist);
-		// Print("fHist", fHist);
-		// Print("lum", lum);
-
+		// add to accu hist area, test for dark cut line
 		accuHistArea += fHist;
 		float dark = accuHistArea - darkThreshold;
 
-		// Print("accuHistArea", accuHistArea);
-		// Print("dark", dark);
-
+		// add the part fall in the area we want
 		if (dark > 0)
 		{
 			lumiSumArea += dark;
 			lumiSum += dark * lum;
-			// Print("lumiSumArea", lumiSumArea);
-			// Print("lumiSum", lumiSum);
 			break;
 		}
 	}
 
+	// second part of loop for bright cut line
 	for (; i < 64; ++i)
 	{
+		// same as above
 		uint hist = histogram[i];
 		float fHist = (float)hist / area;
 		float lum = BinToLum(i);
 
-		// 		Print("i", i);
-		// Print("hist", hist);
-		// Print("fHist", fHist);
-		// Print("lum", lum);
-
 		accuHistArea += fHist;
 		float bright = accuHistArea - brightThreshold;
-
-		// Print("accuHistArea", accuHistArea);
-		// Print("bright", bright);
 
 		if (bright > 0)
 		{
 			float partial = brightThreshold - (accuHistArea - fHist);
 			lumiSumArea += partial;
 			lumiSum += partial * lum;
-			// 			Print("lumiSumArea", lumiSumArea);
-			// Print("lumiSum", lumiSum);
 			break;
 		}
 		else
 		{
 			lumiSumArea += fHist;
 			lumiSum += fHist * lum;
-			// 			Print("lumiSumArea", lumiSumArea);
-			// Print("lumiSum", lumiSum);
 		}
 	}
 
+	// get average lum
 	float aveLum = lumiSum / lumiSumArea;
+
+	// clamp to min and max. Note 0.1 is no good but for lower night EV value
 	aveLum = clampf(aveLum, 0.1, 10.0);
 
+	// read history lum
 	float lumTemp = exposure[1];
 
-	// Print("lumTemp before", lumTemp);
-
+	// perform eye adaption (smooth transit between EV)
 	lumTemp = lumTemp + (aveLum - lumTemp) * (1.0 - expf(-deltaTime * 0.001));
 
+	// Exposure compensation curve: Brigher for day, darker for night
 	float EC = 1.03 - 2.0 / (log10f(lumTemp + 1.0) + 2.0);
-	//float EC = 1.0;
+
+	// Standart exposure value compute with a constant gain
 	float EV = 7.0 * EC / lumTemp;
 
-	// Print("lumiSum", lumiSum);
-	// Print("lumiSumArea", lumiSumArea);
-	// Print("aveLum", aveLum);
-
-	// Print("deltaTime", deltaTime);
-	// Print("(1.0 - expf(-deltaTime * 1000.0))", (1.0f - expf(-deltaTime * 0.001f)));
-	// Print("aveLum", aveLum);
-	// Print("lumTemp", lumTemp);
-	// Print("EV", EV);
-
+	// write EV and lum
 	exposure[0] = EV;
 	exposure[1] = lumTemp;
 }
@@ -408,10 +395,23 @@ __global__ void DownScale4(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
 
 __global__ void DenoiseKernel(
 	SurfObj   colorBuffer, // [in/out]
-	Int2      size,
-	float     c_phi,
-	float     n_phi)
+	Int2      size)
 {
+	// 5x5 atrous filter
+	const float filterKernel[25] = {
+		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0,
+		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
+		3.0 / 128.0, 3.0 / 32.0, 9.0 / 64.0,  3.0 / 32.0, 3.0 / 128.0,
+		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
+		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0 };
+
+	const Int2 uvOffset[25] = {
+		Int2(-2,-2), Int2(-1,-2), Int2(0,-2), Int2(1,-2), Int2(2,-2),
+		Int2(-2,-1), Int2(-1,-1), Int2(0,-2), Int2(1,-1), Int2(2,-1),
+		Int2(-2, 0), Int2(-1, 0), Int2(0, 0), Int2(1, 0), Int2(2, 0),
+		Int2(-2, 1), Int2(-1, 1), Int2(0, 1), Int2(1, 1), Int2(2, 1),
+		Int2(-2, 2), Int2(-1, 2), Int2(0, 2), Int2(1, 2), Int2(2, 2) };
+
 	// index for pixel 28 x 28
 	Int2 idx2;
 	idx2.x = blockIdx.x * 28 + threadIdx.x - 2;
@@ -438,37 +438,50 @@ __global__ void DenoiseKernel(
 	// Early return for background pixel
 	if (fabsf(normalValue.x) < 0.01 && fabsf(normalValue.y) < 0.01 && fabsf(normalValue.z) < 0.01) { return; }
 
+	float sumOfWeight = 0.0;
+
 #if 1
 
 	// gather 5x5 average
 	Float3 average = Float3(0.0);
-	for (int i = -2; i <= 2; ++i)
+	for (int i = 0; i < 25; ++i)
 	{
-		for (int j = -2; j <= 2; ++j)
-		{
-			Float3 color = sharedBuffer[idx3.x + i][idx3.y + j].xyz;
-			average += color;
-		}
+		Int2 uv = idx3 + uvOffset[i];
+		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
+		Float3 color = bufferReadTmp.xyz;
+		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
+		Float3 t = normalValue - normal;
+        float dist2 = max1f(dot(t,t), 0.0);
+        float normalWeight = min1f(expf(-(dist2) / 1.0), 1.0);
+
+		float weight = normalWeight;
+		sumOfWeight += weight;
+		average += weight * color;
 	}
-	average /= 25.0;
+	average /= sumOfWeight;
 
 	// gather 5x5 standard deviation
 	Float3 stddev = Float3(0.0);
-	for (int i = -2; i <= 2; ++i)
+	for (int i = 0; i < 25; ++i)
 	{
-		for (int j = -2; j <= 2; ++j)
-		{
-			Float3 color = sharedBuffer[idx3.x + i][idx3.y + j].xyz;
-			Float3 temp = color - average;
-			stddev += temp * temp;
-		}
+		Int2 uv = idx3 + uvOffset[i];
+		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
+		Float3 color = bufferReadTmp.xyz;
+		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
+		Float3 t = normalValue - normal;
+        float dist2 = max1f(dot(t,t), 0.0);
+        float normalWeight = min1f(expf(-(dist2) / 1.0), 1.0);
+
+		Float3 temp = (color - average) * normalWeight;
+	 	stddev += temp * temp;
 	}
-	stddev = sqrt3f(stddev / 24.0);
+	stddev = sqrt3f(stddev / (sumOfWeight - 0.99));
 
 	// set outliers to average
 	Float3 diff = abs(colorValue - average);
 	Float3 isNoise = diff - stddev;
-	Float3 averageAround = (average * 25.0 - colorValue) / 24.0;
+	Float3 averageAround = (average * sumOfWeight - colorValue) / (sumOfWeight - 0.99);
+
 	colorValue = Float3(
 		isNoise.x > 0 ? averageAround.x : colorValue.x,
 		isNoise.y > 0 ? averageAround.y : colorValue.y,
@@ -478,57 +491,31 @@ __global__ void DenoiseKernel(
 
 #endif
 
-	//Store2D(Float4(outlier, 1.0), colorBuffer, idx2);
-
-#if 1
-
-	// 5x5 atrous filter
-	const float filterKernel[25] = {
-		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0,
-		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
-		3.0 / 128.0, 3.0 / 32.0, 9.0 / 64.0,  3.0 / 32.0, 3.0 / 128.0,
-		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
-		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0 };
-
-	const Int2 uvOffset[25] = {
-		Int2(-2,-2), Int2(-1,-2), Int2(0,-2), Int2(1,-2), Int2(2,-2),
-		Int2(-2,-1), Int2(-1,-1), Int2(0,-2), Int2(1,-1), Int2(2,-1),
-		Int2(-2, 0), Int2(-1, 0), Int2(0, 0), Int2(1, 0), Int2(2, 0),
-		Int2(-2, 1), Int2(-1, 1), Int2(0, 1), Int2(1, 1), Int2(2, 1),
-		Int2(-2, 2), Int2(-1, 2), Int2(0, 2), Int2(1, 2), Int2(2, 2) };
-
 	Float3 sumOfColor = Float3(0.0);
-	float sumOfWeight = 0.0;
+	sumOfWeight = 0.0;
 
+	// atrous
 	__syncthreads();
 	for (int i = 0; i < 25; ++i)
 	{
-		// index
 		Int2 uv = idx3 + uvOffset[i];
-
-		// read color and normal
 		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
-		Float3 ctmp = bufferReadTmp.xyz;
-		Float3 ntmp = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
+		Float3 color = bufferReadTmp.xyz;
+		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
 
-		// color distance and weight
-        Float3 t = colorValue - ctmp;
-        float dist2 = dot(t,t);
-        float colorWeight = min1f(expf(-(dist2) / c_phi), 1.0);
+		Float3 t = normalValue - normal;
+        float dist2 = max1f(dot(t,t), 0.0);
+        float normalWeight = min1f(expf(-(dist2) / 0.1), 1.0);
 
-		// normal distance and weight
-        t = normalValue - ntmp;
-        dist2 = max1f(dot(t,t), 0.0);
-        float normalWeight = min1f(expf(-(dist2) / n_phi), 1.0);
+        t = colorValue - color;
+        dist2 = dot(t,t);
+        float colorWeight = min1f(expf(-(dist2) / 10.0), 1.0);
 
-		// sum
-		float weight = colorWeight * normalWeight;
-        sumOfColor += ctmp * weight * filterKernel[i];
-        sumOfWeight += weight * filterKernel[i];
+		float weight = colorWeight * normalWeight * filterKernel[i];
+        sumOfColor += color * weight;
+        sumOfWeight += weight;
 	}
 
 	// final output
 	Store2D(Float4(sumOfColor / sumOfWeight, 1.0), colorBuffer, idx2);
-
-#endif
 }

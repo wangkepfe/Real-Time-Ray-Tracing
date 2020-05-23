@@ -402,7 +402,7 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 
 		if (dot(rayDirOrRefl, sunOrMoonDir) > 0.999)
 		{
-			moonColor = Float3(0.9608, 0.9529, 0.8078) * 0.5;
+			moonColor = Float3(0.9608, 0.9529, 0.8078) * 0.1;
 		}
 
 		float starColor = 0;
