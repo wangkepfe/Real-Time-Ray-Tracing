@@ -12,13 +12,14 @@ Physically based ray tracing / path tracing with CUDA. Real time rendering with 
 ### Variance reducing
 - Quasi Monte Carlo random
 - BRDF important sampling
-- Multiple important sampling (todo)
+- Multiple important sampling
 
 ### Acceleration
 - BVH (todo)
-- SIMD re-grouping
+- SIMD re-grouping (todo)
 
 ### Post-processing & denoising
+- Eye adaption, histogram based auto exposure
 - Tone-mapping
-- Atrous denoising
+- Atrous denoising with spike removal
 - TAA (temporal anti-aliasing)
