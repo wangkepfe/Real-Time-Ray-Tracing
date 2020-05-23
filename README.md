@@ -19,7 +19,12 @@ Physically based ray tracing / path tracing with CUDA. Real time rendering with 
 - SIMD re-grouping (todo)
 
 ### Post-processing & denoising
-- Eye adaption, histogram based auto exposure
+- Eye adaptive histogram based auto exposure
 - Tone-mapping
-- Atrous denoising with spike removal
+- Edge-aware atrous denoising with spike removal
 - TAA (temporal anti-aliasing)
+
+### Realistic world simulation
+- Procedual height field ocean
+- Procedual noise star field
+- Simulating sun and moon
