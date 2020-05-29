@@ -149,6 +149,56 @@ __device__ Float4 SampleBicubicCatmullRom(
     return OutColor;
 }
 
+#if 0
+__device__ Float4 SampleBicubicSmoothStepThreshold(
+    SurfObj tex,
+    const Float2&       uv,
+    const Int2&         texSize,
+    float threshold)
+{
+    Float2 UV         = uv * texSize;
+    Float2 invTexSize = 1.0f / texSize;
+    Float2 tc         = floor( UV - 0.5f ) + 0.5f;
+    Float2 f          = UV - tc;
+
+	Float2 f2 = f * f;
+	Float2 f3 = f2 * f;
+
+    Float2 w1 = -2.0f * f3 + 3.0f * f2;
+    Float2 w0 = 1.0f - w1;
+
+    Int2 tc0 = floori(UV - 0.5f);
+    Int2 tc1 = tc0 + 1;
+
+    Int2 sampleUV[4] = {
+        { tc0.x, tc0.y }, { tc1.x, tc0.y },
+        { tc0.x, tc1.y }, { tc1.x, tc1.y },
+    };
+
+    float weights[4] = {
+        w0.x * w0.y,  w1.x * w0.y,
+        w0.x * w1.y,  w1.x * w1.y,
+    };
+
+	Float4 OutColor;
+    float sumWeight = 0;
+
+	#pragma unroll
+	for (int i = 0; i < 4; i++)
+	{
+        sumWeight += weights[i];
+        Float4 color = Load2D(tex, sampleUV[i]);
+        //color = (dot(color.xyz, Float3(0.3, 0.6, 0.1)) > threshold) ? color : 0;
+        color = (color.xyz.max() > threshold) ? color : 0;
+		OutColor += color * weights[i];
+	}
+
+	OutColor /= sumWeight;
+
+    return OutColor;
+}
+#endif
+
 union UintFloatConverter { uint ui; float f; __device__ UintFloatConverter() : ui(0) {} };
 
 // [x sign] [x] [y sign] [y] [z sign] [z]

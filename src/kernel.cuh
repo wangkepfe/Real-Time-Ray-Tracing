@@ -279,6 +279,9 @@ private:
 	cudaArray*                  colorBufferArray16;
 	cudaArray*                  colorBufferArray64;
 
+	cudaArray*                  bloomBufferArray4;
+	cudaArray*                  bloomBufferArray16;
+
 	cudaArray*                  normalBufferArray;
 	cudaArray*                  positionBufferArray;
 
@@ -289,6 +292,9 @@ private:
 	SurfObj         colorBuffer4;
 	SurfObj         colorBuffer16;
 	SurfObj         colorBuffer64;
+
+	SurfObj         bloomBuffer4;
+	SurfObj         bloomBuffer16;
 
 	SurfObj         normalBuffer;
 	SurfObj         positionBuffer;

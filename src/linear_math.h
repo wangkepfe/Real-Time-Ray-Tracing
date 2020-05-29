@@ -55,12 +55,17 @@ struct Float2
 	inline __host__ __device__ float& operator[](int i)                 { return _v[i]; }
 	inline __host__ __device__ float  operator[](int i) const           { return _v[i]; }
 
+	inline __host__ __device__ float   length() const                   { return sqrtf(x*x + y*y); }
+	inline __host__ __device__ float   length2() const                  { return x*x + y*y; }
+
 };
 
 inline __host__ __device__ Float2 operator+(float a, const Float2& v)   { return Float2(v.x + a, v.y + a); }
 inline __host__ __device__ Float2 operator-(float a, const Float2& v)   { return Float2(a - v.x, a - v.y); }
 inline __host__ __device__ Float2 operator*(float a, const Float2& v)   { return Float2(v.x * a, v.y * a); }
 inline __host__ __device__ Float2 operator/(float a, const Float2& v)   { return Float2(a / v.x, a / v.y); }
+
+inline __host__ __device__ float length(const Float2& v) { return sqrtf(v.x * v.x + v.y * v.y); }
 
 struct Int2
 {
@@ -151,6 +156,7 @@ inline __host__ __device__ Float2 operator - (const Int2& vi, const Float2& vf) 
 inline __host__ __device__ Float2 operator * (const Int2& vi, const Float2& vf) { return Float2(vi.x * vf.x, vi.y * vf.y); }
 inline __host__ __device__ Float2 operator / (const Int2& vi, const Float2& vf) { return Float2(vi.x / vf.x, vi.y / vf.y); }
 
+inline __device__ float  fract (float a) { float intPart; return modff(a, &intPart); }
 inline __device__ Float2 floor (const Float2& v) { return Float2(floorf(v.x), floorf(v.y)); }
 inline __device__ Int2   floori(const Float2& v) { return Int2((int)(floorf(v.x)), (int)(floorf(v.y))); }
 inline __device__ Float2 fract (const Float2& v) { float intPart; return Float2(modff(v.x, &intPart), modff(v.y, &intPart)); }
@@ -163,6 +169,7 @@ struct Float3
 {
 	union {
 		struct { float x, y, z; };
+		struct { Float2 xy; float z; };
 		float _v[3];
 	};
 
@@ -250,6 +257,7 @@ struct Float4
 	union {
 		struct { float x, y, z, w; };
 		struct { Float3 xyz; float w; };
+		struct { Float2 xy; Float2 zw; };
 		float _v[4];
 	};
 
@@ -314,6 +322,8 @@ inline __host__ __device__ Float3 cross(const Float3 & v1, const Float3 & v2)   
 inline __host__ __device__ Float3 powf(const Float3 & v1, const Float3 & v2)          { return Float3(powf(v1.x, v2.x), powf(v1.y, v2.y), powf(v1.z, v2.z)); }
 inline __host__ __device__ Float3 exp3f(const Float3 & v)                             { return Float3(expf(v.x), expf(v.y), expf(v.z)); }
 inline __host__ __device__ Float3 pow3f(const Float3& v, float a)                     { return Float3(powf(v.x, a), powf(v.y, a), powf(v.z, a)); }
+inline __host__ __device__ Float3 sin3f(const Float3 & v)                             { return Float3(sinf(v.x), sinf(v.y), sinf(v.z)); }
+inline __host__ __device__ Float3 cos3f(const Float3 & v)                             { return Float3(cosf(v.x), cosf(v.y), cosf(v.z)); }
 inline __host__ __device__ Float3 mixf(const Float3 & v1, const Float3 & v2, float a) { return v1 * (1.0f - a) + v2 * a; }
 inline __host__ __device__ float  mix1f(float v1, float v2, float a)                  { return v1 * (1.0f - a) + v2 * a; }
 inline __host__ __device__ Float3 minf3f(const float a, const Float3 & v)             { return Float3(v.x < a ? v.x : a, v.y < a ? v.y : a, v.y < a ? v.y : a); }
@@ -321,8 +331,7 @@ inline __host__ __device__ void   swap(float& v1, float& v2)                    
 inline __host__ __device__ void   swap(Float3 & v1, Float3 & v2)                      { Float3 tmp = v1; v1 = v2; v2 = tmp; }
 inline __host__ __device__ float  clampf(float a, float lo, float hi)                 { return a < lo ? lo : a > hi ? hi : a; }
 inline __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo, Float3 hi)             { return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
-
-//inline __host__ __device__ float  smoothstep(float edge0, float edge1, float x)       { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
+inline __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)       { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
 inline __host__ __device__ float  dot(const Float2 & v1, const Float2 & v2)           { return v1.x * v2.x + v1.y * v2.y; }
 inline __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z; }
 inline __host__ __device__ float  dot(const Float4 & v1, const Float4 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z + v1.w * v2.w; }
@@ -333,33 +342,52 @@ inline __host__ __device__ Float3 reflect3f(Float3 i, Float3 n)                 
 
 inline __host__ __device__ unsigned int divRoundUp(unsigned int dividend, unsigned int divisor) { return (dividend + divisor - 1) / divisor; }
 
-// struct Mat4
-// {
-// 	union {
-// 		struct {
-// 			float m00, m10, m20, m30;
-// 			float m01, m11, m21, m31;
-// 			float m02, m12, m22, m32;
-// 			float m03, m13, m23, m33;
-// 		};
-// 		struct {
-// 			Float4 v0, v1, v2, v3;
-// 		};
-// 		Float4 _v4[4];
-// 		float _v[16];
-// 	};
-// 	Mat4() { for (int i = 0; i < 16; ++i) _v[i] = 0; }
-// 	Mat4(const Float4& v0, const Float4& v1, const Float4& v2, const Float4& v3) : v0{v0}, v1{v1}, v2{v2}, v3{v3} {}
-// 	Mat4(const Mat4& other) { for (int i = 0; i < 16; ++i) _v[i] = other._v[i]; }
+struct Mat3
+{
+	union {
+		struct {
+			float m00, m10, m20;
+			float m01, m11, m21;
+			float m02, m12, m22;
+		};
+		struct {
+			Float3 v0, v1, v2;
+		};
+		Float3 _v3[3];
+		float _v[9];
+	};
+	Mat3() { for (int i = 0; i < 9; ++i) _v[i] = 0; }
+	Mat3(const Float3& v0, const Float3& v1, const Float3& v2) : v0{v0}, v1{v1}, v2{v2} {}
 
-// 	inline __host__ __device__ Float4&       operator[](int i)       { return _v4[i]; }
-// 	inline __host__ __device__ const Float4& operator[](int i) const { return _v4[i]; }
+	inline __host__ __device__ Float3&       operator[](int i)       { return _v3[i]; }
+	inline __host__ __device__ const Float3& operator[](int i) const { return _v3[i]; }
 
-// 	inline __host__ __device__ Float4 GetColumn(int i) const { return Float4(v0[i], v1[i], v2[i], v3[i]); }
-// };
+	inline __host__ __device__ void transpose() { swap(m01, m10); swap(m20, m02); swap(m21, m12); }
+};
 
-// inline __host__ __device__ Float4 operator*(const Float4& v, const Mat4& m) { return Float4(dot(m.GetColumn(0), v), dot(m.GetColumn(1), v), dot(m.GetColumn(2), v), dot(m.GetColumn(3), v)); }
-// inline __host__ __device__ Float4 operator*(const Mat4& m, const Float4& v) { return Float4(dot(m.v0, v), dot(m.v1, v), dot(m.v2, v), dot(m.v3, v)); }
+inline __host__ __device__ Float3 operator*(const Float3& v, const Mat3& m) { return v.x * m.v0 +  v.y * m.v1 +  v.z * m.v2; }
+
+struct Mat4
+{
+	union {
+		struct {
+			float m00, m10, m20, m30;
+			float m01, m11, m21, m31;
+			float m02, m12, m22, m32;
+			float m03, m13, m23, m33;
+		};
+		struct {
+			Float4 v0, v1, v2, v3;
+		};
+		Float4 _v4[4];
+		float _v[16];
+	};
+	Mat4() { for (int i = 0; i < 16; ++i) _v[i] = 0; }
+	Mat4(const Float4& v0, const Float4& v1, const Float4& v2, const Float4& v3) : v0{v0}, v1{v1}, v2{v2}, v3{v3} {}
+
+	inline __host__ __device__ Float4&       operator[](int i)       { return _v4[i]; }
+	inline __host__ __device__ const Float4& operator[](int i) const { return _v4[i]; }
+};
 
 struct Quat
 {

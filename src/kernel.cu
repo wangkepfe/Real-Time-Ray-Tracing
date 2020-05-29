@@ -47,14 +47,14 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (4000.0 * cosTheta) : (rayState.isMoonVisible ? (40.0 * cosTheta) : 0);
+	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (4000.0 * cosTheta) : (rayState.isMoonVisible ? (200.0 * cosTheta) : 0);
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
 	++i;
 
 	// env
-	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 400.0 : 4.0;
+	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 800.0 : 8.0;
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
@@ -336,7 +336,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	float deltaTime = timer.getDeltaTime();
 	float clockTime = timer.getTime();
 
-	//clockTime = 1;
+	//clockTime = 6;
 
 	cbo.clockTime     = clockTime;
 
@@ -346,7 +346,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	// Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
 
     const Float3 axis = normalize(Float3(1.0f, 0.0f, -0.4f));
-	const float angle = fmodf(clockTime * TWO_PI / 300, TWO_PI);
+	const float angle = fmodf(clockTime * TWO_PI / 30, TWO_PI);
 	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 0.0)).normalized();
 
 	cbo.sunDir        = sunDir;
@@ -369,11 +369,20 @@ void RayTracer::draw(SurfObj* renderTarget)
 	d_sceneMaterial.sphereLights    = d_sphereLights;
 
 	// camera
-	// Camera& camera = cbo.camera;
+	Camera& camera = cbo.camera;
 	// Float3 cameraLookAtPoint = cameraFocusPos + Float3(0.0f, 0.01f, 0.0f);
 	// camera.pos               = cameraFocusPos + rotate3f(Float3(0, 1, 0), fmodf(clockTime * TWO_PI / 300, TWO_PI), Float3(0.0f, 0.0f, -0.1f)) + Float3(0, abs(sinf(clockTime * TWO_PI / 300)) * 0.05f, 0);
 	// camera.dir               = normalize(cameraLookAtPoint - camera.pos.xyz);
 	// camera.left              = cross(Float3(0, 1, 0), camera.dir.xyz);
+
+	Float3 camUp = normalize(cross(camera.dir.xyz, camera.left.xyz)); // up
+	Mat3 invCamMat(camera.left.xyz, camUp, camera.dir.xyz); // build view matrix
+	invCamMat.transpose(); // orthogonal matrix, inverse is transpose
+	Float3 sunPosViewSpace = sunDir * invCamMat; // transform sun dir to view space
+	Float2 sunPos = sunPosViewSpace.xy; // get xy
+	sunPos /= sunPosViewSpace.z; // get the x and y when z is 1
+	sunPos /= camera.fov.zw; // [-1, 1]
+	sunPos = Float2(0.5) - sunPos * Float2(0.5); // [0, 1]
 
 	Int2 bufferDim(renderWidth, renderHeight);
 	Int2 outputDim(screenWidth, screenHeight);
@@ -386,7 +395,6 @@ void RayTracer::draw(SurfObj* renderTarget)
 	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA);
 
 	// ---------------- post processing ----------------
-
 
 	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
 	else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
@@ -402,6 +410,21 @@ void RayTracer::draw(SurfObj* renderTarget)
 
 	AutoExposure<<<1, 1, 0, streams[0]>>>(/*out*/d_exposure, /*in*/d_histogram, (float)(bufferSize64.x * bufferSize64.y), deltaTime);
 
+	BloomGuassian<<<dim3(divRoundUp(bufferSize4.x, 12), divRoundUp(bufferSize4.y, 12), 1), dim3(16, 16, 1), 0, streams[0]>>>(bloomBuffer4, colorBuffer4, bufferSize4, d_exposure);
+	BloomGuassian<<<dim3(divRoundUp(bufferSize16.x, 12), divRoundUp(bufferSize16.y, 12), 1), dim3(16, 16, 1), 0, streams[0]>>>(bloomBuffer16, colorBuffer16, bufferSize16, d_exposure);
+
+	Bloom<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
+
+	if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.02 && dot(sunDir, camera.dir.xyz) > 0)
+	{
+		sunPos -= Float2(0.5);
+		sunPos.x *= (float)renderWidth / (float)renderHeight;
+		LensFlare<<<gridDim, blockDim, 0, streams[0]>>>(sunPos, colorBufferA, bufferDim);
+	}
+
 	ToneMapping<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA , bufferDim , d_exposure);
+
 	FilterScale<<<scaleGridDim, scaleBlockDim, 0, streams[0]>>>(/*out*/renderTarget, /*in*/colorBufferA, outputDim, bufferDim);
+
+	//FilterScale<<<scaleGridDim, scaleBlockDim, 0, streams[0]>>>(/*out*/renderTarget, /*in*/bloomBuffer4, outputDim, bufferSize4);
 }
