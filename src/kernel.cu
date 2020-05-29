@@ -2,7 +2,6 @@
 #include "debug_util.cuh"
 #include "geometry.cuh"
 #include "bsdf.cuh"
-#include "morton.cuh"
 #include "sampler.cuh"
 #include "sky.cuh"
 #include "postprocessing.cuh"
@@ -340,13 +339,12 @@ void RayTracer::draw(SurfObj* renderTarget)
 
 	cbo.clockTime     = clockTime;
 
-
 	// const Float3 axis = normalize(Float3(0.0, 0.0, 1.0));
 	// const float angle = fmodf(clockTime * TWO_PI / 30, TWO_PI);
 	// Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
 
     const Float3 axis = normalize(Float3(1.0f, 0.0f, -0.4f));
-	const float angle = fmodf(clockTime * TWO_PI / 30, TWO_PI);
+	const float angle = fmodf(clockTime * TWO_PI / 300, TWO_PI);
 	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 0.0)).normalized();
 
 	cbo.sunDir        = sunDir;
@@ -359,8 +357,8 @@ void RayTracer::draw(SurfObj* renderTarget)
 	spheres[0]            = Sphere(spherePos, 0.005f);
 	sphereLights[0]           = spheres[0];
 
-	GpuErrorCheck(cudaMemcpyAsync(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice, streams[1]));
-	GpuErrorCheck(cudaMemcpyAsync(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice, streams[1]));
+	GpuErrorCheck(cudaMemcpyAsync(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
+	GpuErrorCheck(cudaMemcpyAsync(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
 
 	d_sceneGeometry.numSpheres      = numSpheres;
 	d_sceneGeometry.spheres         = d_spheres;
@@ -387,9 +385,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	Int2 bufferDim(renderWidth, renderHeight);
 	Int2 outputDim(screenWidth, screenHeight);
 
-	GpuErrorCheck(cudaMemsetAsync(d_histogram, 0, 64 * sizeof(uint), streams[2]));
-
-	cudaStreamSynchronize(streams[1]);
+	GpuErrorCheck(cudaMemsetAsync(d_histogram, 0, 64 * sizeof(uint), streams[0]));
 
 	// ------------------ Ray Gen -------------------
 	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA);
@@ -405,7 +401,6 @@ void RayTracer::draw(SurfObj* renderTarget)
 	DownScale4<<<gridDim4, blockDim, 0, streams[0]>>>(colorBuffer4, colorBuffer16, bufferSize4);
 	DownScale4<<<gridDim16, blockDim, 0, streams[0]>>>(colorBuffer16, colorBuffer64, bufferSize16);
 
-	cudaStreamSynchronize(streams[2]);
 	Histogram2<<<1, dim3(bufferSize64.x, bufferSize64.y, 1), 0, streams[0]>>>(/*out*/d_histogram, /*in*/colorBuffer64 , bufferSize64);
 
 	AutoExposure<<<1, 1, 0, streams[0]>>>(/*out*/d_exposure, /*in*/d_histogram, (float)(bufferSize64.x * bufferSize64.y), deltaTime);

@@ -2,8 +2,8 @@
 
 #include <device_launch_parameters.h>
 #include <cuda.h>
-#include <curand.h>
-#include <curand_kernel.h>
+//#include <curand.h>
+//#include <curand_kernel.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 
@@ -14,6 +14,7 @@
 #include "geometry.h"
 #include "timer.h"
 #include "terrain.hpp"
+#include "hash.cuh"
 
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
@@ -220,11 +221,13 @@ public:
 		cleanup();
 	}
 
-	void init();
+	void init(cudaStream_t* streams);
 	void draw(SurfObj* d_renderTarget);
 	void cleanup();
 
 private:
+
+	void LoadTextures();
 
 	// resolution
 	const int                   screenWidth;
@@ -316,7 +319,7 @@ private:
 	Terrain                     terrain;
 
 	static const uint NumStreams = 4;
-	cudaStream_t streams[NumStreams];
+	cudaStream_t* streams;
 	Float3  cameraFocusPos;
 	Sphere* spheres;
 	Sphere* sphereLights;

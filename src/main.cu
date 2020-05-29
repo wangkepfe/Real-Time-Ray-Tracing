@@ -28,7 +28,7 @@
 #include <helper_cuda.h>
 #include <helper_image.h>
 #include <helper_math.h>
-#include "linmath.h"
+//#include "linmath.h"
 
 #include "kernel.cuh"
 
@@ -41,7 +41,7 @@ const int HEIGHT = 1440;
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
 // number too high - commands are queuing up - consume too much cpu side memory
-const int MAX_FRAMES_IN_FLIGHT = 1;
+const int MAX_FRAMES_IN_FLIGHT = 2;
 
 // validation layer
 const std::vector<const char*> validationLayers = {
@@ -173,11 +173,11 @@ WindowsSecurityAttributes::~WindowsSecurityAttributes() {
     free(m_winPSecurityDescriptor);
 }
 
-struct UniformBufferObject {
-    alignas(16) mat4x4 model;
-    alignas(16) mat4x4 view;
-    alignas(16) mat4x4 proj;
-};
+//struct UniformBufferObject {
+//    alignas(16) mat4x4 model;
+//    alignas(16) mat4x4 view;
+//    alignas(16) mat4x4 proj;
+//};
 
 // main structure
 class HelloTriangleApplication {
@@ -189,7 +189,7 @@ public:
         initCuda();
 
         m_rayTracer = new RayTracer(WIDTH, HEIGHT, WIDTH * 0.5, HEIGHT * 0.5);
-        m_rayTracer->init();
+        m_rayTracer->init(m_streams);
 
         mainLoop();
 
@@ -300,7 +300,8 @@ private:
     cudaMipmappedArray_t               m_cudaMipmappedImageArray;
     std::vector<SurfObj>   m_surfaceObjectList;
     SurfObj*               d_surfaceObjectList;
-    cudaStream_t                       m_streamToRun;
+
+    cudaStream_t                       m_streams[8];
 
     // vk semaphore
     VkSemaphore                        m_cudaUpdateVkSemaphore;
@@ -358,7 +359,7 @@ private:
         createTextureSampler();
 
         // uniform buffer
-        createUniformBuffers();
+        //createUniformBuffers();
 
         // descriptor pool, set
         createDescriptorPool();
@@ -378,7 +379,11 @@ private:
         int deviceId = setCudaVkDevice();
 
         // Create stream
-        checkCudaErrors(cudaStreamCreate(&m_streamToRun));
+        
+		// init stream
+		for (uint i = 0; i < 8; i++) {
+			checkCudaErrors(cudaStreamCreate(&m_streams[i]));
+		}
 
         // Create Cuda memory objects, imported from VK
         cudaVkImportImageMem();
@@ -390,7 +395,7 @@ private:
     // main loop
     void mainLoop() {
 
-        updateUniformBuffer();
+        //updateUniformBuffer();
 
         // glfw handles the loop
         while (!glfwWindowShouldClose(m_window)) {
@@ -425,10 +430,10 @@ private:
             vkDestroyImageView(m_device, imageView, nullptr);
         }
 
-        for (size_t i = 0; i < m_swapChainImages.size(); i++) {
+        /*for (size_t i = 0; i < m_swapChainImages.size(); i++) {
             vkDestroyBuffer(m_device, m_uniformBuffers[i], nullptr);
             vkFreeMemory(m_device, m_uniformBuffersMemory[i], nullptr);
-        }
+        }*/
 
         // swapchain itself
         vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
@@ -1194,7 +1199,7 @@ private:
         memset(&extSemaphoreWaitParams, 0, sizeof(extSemaphoreWaitParams));
         extSemaphoreWaitParams.params.fence.value = 0;
         extSemaphoreWaitParams.flags = 0;
-        checkCudaErrors(cudaWaitExternalSemaphoresAsync(&m_cudaExtVkUpdateCudaSemaphore, &extSemaphoreWaitParams, 1, m_streamToRun));
+        checkCudaErrors(cudaWaitExternalSemaphoresAsync(&m_cudaExtVkUpdateCudaSemaphore, &extSemaphoreWaitParams, 1, m_streams[0]));
 
         m_rayTracer->draw(d_surfaceObjectList);
 
@@ -1202,7 +1207,7 @@ private:
         memset(&extSemaphoreSignalParams, 0, sizeof(extSemaphoreSignalParams));
         extSemaphoreSignalParams.params.fence.value = 0;
         extSemaphoreSignalParams.flags = 0;
-        checkCudaErrors(cudaSignalExternalSemaphoresAsync(&m_cudaExtCudaUpdateVkSemaphore, &extSemaphoreSignalParams, 1, m_streamToRun));
+        checkCudaErrors(cudaSignalExternalSemaphoresAsync(&m_cudaExtCudaUpdateVkSemaphore, &extSemaphoreSignalParams, 1, m_streams[0]));
 
         // current in-flight frame number
         m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -1871,13 +1876,13 @@ private:
     void createDescriptorPool()
     {
         // size of pool = size of UBO + size of texture sampler
-        std::array<VkDescriptorPoolSize, 2> poolSizes = {};
+        std::array<VkDescriptorPoolSize, 1> poolSizes = {};
 
-        poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        //poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        //poolSizes[0].descriptorCount = static_cast<uint32_t>(m_swapChainImages.size());
+
+        poolSizes[0].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         poolSizes[0].descriptorCount = static_cast<uint32_t>(m_swapChainImages.size());
-
-        poolSizes[1].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(m_swapChainImages.size());
 
         // pool info
         VkDescriptorPoolCreateInfo poolInfo = {};
@@ -1898,23 +1903,23 @@ private:
     void createDescriptorSetLayout()
     {
         // layout binding
-        VkDescriptorSetLayoutBinding uboLayoutBinding = {};
-        uboLayoutBinding.binding            = 0;
-        uboLayoutBinding.descriptorCount    = 1;
-        uboLayoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboLayoutBinding.pImmutableSamplers = nullptr;
-        uboLayoutBinding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+        //VkDescriptorSetLayoutBinding uboLayoutBinding = {};
+        //uboLayoutBinding.binding            = 0;
+        //uboLayoutBinding.descriptorCount    = 1;
+        //uboLayoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        //uboLayoutBinding.pImmutableSamplers = nullptr;
+        //uboLayoutBinding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         // sampler layout binding
         VkDescriptorSetLayoutBinding samplerLayoutBinding = {};
-        samplerLayoutBinding.binding            = 1;
+        samplerLayoutBinding.binding            = 0;
         samplerLayoutBinding.descriptorCount    = 1;
         samplerLayoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerLayoutBinding.pImmutableSamplers = nullptr;
         samplerLayoutBinding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         // bindings
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
+        std::array<VkDescriptorSetLayoutBinding, 1> bindings = { samplerLayoutBinding };
 
         // create info
         VkDescriptorSetLayoutCreateInfo layoutInfo = {};
@@ -1955,10 +1960,10 @@ private:
         for (size_t i = 0; i < m_swapChainImages.size(); i++)
         {
             // descriptor buffer info
-            VkDescriptorBufferInfo bufferInfo = {};
+            /*VkDescriptorBufferInfo bufferInfo = {};
             bufferInfo.buffer = m_uniformBuffers[i];
             bufferInfo.offset = 0;
-            bufferInfo.range  = sizeof(UniformBufferObject);
+            bufferInfo.range  = sizeof(UniformBufferObject);*/
 
             // descriptor image info
             VkDescriptorImageInfo imageInfo = {};
@@ -1967,25 +1972,25 @@ private:
             imageInfo.sampler     = m_textureSampler;
 
             // descriptor write
-            std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
+            std::array<VkWriteDescriptorSet, 1> descriptorWrites = {};
+
+            // write descriptor set 0
+            //descriptorWrites[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            //descriptorWrites[0].dstSet          = m_descriptorSets[i];
+            //descriptorWrites[0].dstBinding      = 0;
+            //descriptorWrites[0].dstArrayElement = 0;
+            //descriptorWrites[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            //descriptorWrites[0].descriptorCount = 1;
+            //descriptorWrites[0].pBufferInfo     = &bufferInfo;
 
             // write descriptor set 0
             descriptorWrites[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet          = m_descriptorSets[i];
             descriptorWrites[0].dstBinding      = 0;
             descriptorWrites[0].dstArrayElement = 0;
-            descriptorWrites[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[0].descriptorCount = 1;
-            descriptorWrites[0].pBufferInfo     = &bufferInfo;
-
-            // write descriptor set 1
-            descriptorWrites[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstSet          = m_descriptorSets[i];
-            descriptorWrites[1].dstBinding      = 1;
-            descriptorWrites[1].dstArrayElement = 0;
-            descriptorWrites[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[1].descriptorCount = 1;
-            descriptorWrites[1].pImageInfo      = &imageInfo;
+            descriptorWrites[0].pImageInfo      = &imageInfo;
 
             // update descriptor sets
             vkUpdateDescriptorSets(
@@ -1997,7 +2002,7 @@ private:
         }
     }
 
-    void createUniformBuffers()
+    /*void createUniformBuffers()
     {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
@@ -2012,9 +2017,9 @@ private:
                 m_uniformBuffers[i],
                 m_uniformBuffersMemory[i]);
         }
-    }
+    }*/
 
-    void updateUniformBuffer()
+    /*void updateUniformBuffer()
     {
         UniformBufferObject ubo = {};
 
@@ -2037,7 +2042,7 @@ private:
             memcpy(data, &ubo, sizeof(ubo));
             vkUnmapMemory(m_device, m_uniformBuffersMemory[i]);
         }
-    }
+    }*/
 
     void createImage(
         uint32_t              width,

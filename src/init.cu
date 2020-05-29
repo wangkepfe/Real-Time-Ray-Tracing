@@ -1,9 +1,16 @@
 
 #include "kernel.cuh"
-//#include "textureLoader.h"
 
-void RayTracer::init()
+// stb image
+//#define STB_IMAGE_IMPLEMENTATION
+//#include "stb_image.h"
+
+#include <iostream>
+
+void RayTracer::init(cudaStream_t* cudaStreams)
 {
+	streams = cudaStreams;
+
 	// init terrain
 	terrain.generateHeightMap();
 
@@ -57,11 +64,6 @@ void RayTracer::init()
 
 	// init cuda
 	gpuDeviceInit(0);
-
-	// init stream
-	for (uint i = 0; i < NumStreams; i++) {
-        cudaStreamCreate(&streams[i]);
-	}
 
 	// constant buffer
 	cbo.maxSceneLoop = 4;
@@ -133,7 +135,7 @@ void RayTracer::init()
 	GpuErrorCheck(cudaCreateSurfaceObject(&positionBuffer, &resDesc));
 
 	// uint buffer
-	indexBuffers.init(renderBufferSize);
+	//indexBuffers.init(renderBufferSize);
 
 	GpuErrorCheck(cudaMalloc((void**)& gHitMask    , cbo.gridSize *      sizeof(ullint)));
 	GpuErrorCheck(cudaMemset(gHitMask              , 0  , cbo.gridSize * sizeof(ullint)));
@@ -173,18 +175,25 @@ void RayTracer::init()
 	d_sceneMaterial.materialsIdx    = d_materialsIdx;
 	d_sceneMaterial.numMaterials    = numMaterials;
 
-
 	delete[] materials;
 	delete[] materialsIdx;
-
 
 	// cuda random
 	GpuErrorCheck(cudaMalloc((void**)& d_randInitVec, 3 * sizeof(RandInitVec)));
 	{
-		RandInitVec* randDirvectors;
-		curandGetDirectionVectors32(&randDirvectors, CURAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6);
-		GpuErrorCheck(cudaMemcpy(d_randInitVec, randDirvectors, 3 * sizeof(RandInitVec), cudaMemcpyHostToDevice));
+		//RandInitVec* randDirvectors;
+		//curandGetDirectionVectors32(&randDirvectors, CURAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6);
+		//for (int i = 0; i < 3; ++i)
+		//{
+		//	for (int j = 0; j < 32; ++j)
+		//	{
+		//		std::cout << randDirvectors[i][j] << ", ";
+		//	}
+		//	std::cout << "\n";
+		//}
 	}
+	RandInitVec* randDirvectors = g_curandDirectionVectors32;
+	GpuErrorCheck(cudaMemcpy(d_randInitVec, randDirvectors, 3 * sizeof(RandInitVec), cudaMemcpyHostToDevice));
 
 	// camera
 	Camera& camera = cbo.camera;
@@ -202,6 +211,28 @@ void RayTracer::init()
 	camera.left              = cross(Float3(0, 1, 0), camera.dir.xyz);
 
 	timer.init();
+}
+
+void RayTracer::LoadTextures()
+{
+	// int texWidth, texHeight, texChannel, desiredChannel = STBI_rgb_alpha;
+	// unsigned char* buffer = stbi_load("resources/textures/tri.vert.spv", &texWidth, &texHeight, &texChannel, desiredChannel);
+
+	// // std::cout << "texture file loaded: " << textureFile << ", size = (" << texWidth << ", " << texHeight << "), channel = " << texChannel << "\n";
+
+	// // cpu texture buffer
+	// cpuTextureBuffer = new float4[texWidth * texHeight];
+	// for (int i = 0; i < texWidth * texHeight; ++i) {
+	// 	cpuTextureBuffer[i] = make_float4(buffer[i * 4] / 255.0f, buffer[i * 4 + 1] / 255.0f, buffer[i * 4 + 2] / 255.0f, 0.0f);
+	// }
+
+    // // Allocate array and copy image data
+    // cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>();
+    // cudaMallocArray(&gpuTextureArray, &channelDesc, texWidth, texHeight);
+    // cudaMemcpyToArray(gpuTextureArray, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(float4), cudaMemcpyHostToDevice);
+
+	// delete cpuTextureBuffer;
+	// stbi_image_free(buffer);
 }
 
 void RayTracer::cleanup()
@@ -233,7 +264,7 @@ void RayTracer::cleanup()
 	cudaFreeArray(normalBufferArray);
 	cudaFreeArray(positionBufferArray);
 
-	indexBuffers.cleanUp();
+	//indexBuffers.cleanUp();
 
 	cudaFree(d_exposure);
 	cudaFree(d_histogram);

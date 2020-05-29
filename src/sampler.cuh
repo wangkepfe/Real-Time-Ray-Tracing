@@ -2,8 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <surface_indirect_functions.h>
-#include "morton.cuh"
-#include "cuda_fp16.h"
+//#include "cuda_fp16.h"
 
 __device__ Float4 Load2D(
 	SurfObj tex,
@@ -21,37 +20,37 @@ __device__ void Store2D(
     surf2Dwrite(make_float4(val.x, val.y, val.z, val.w), tex, uv.x * 16, uv.y, cudaBoundaryModeClamp);
 }
 
-union UShortHalf { ushort1 us1; __half h; __device__ UShortHalf() : h(0) {} };
+//union UShortHalf { ushort1 us1; __half h; __device__ UShortHalf() : h(0) {} };
 
-__device__ Float4 Load2Dfp16(
-	SurfObj tex,
-	Int2    uv)
-{
-	ushort4 us4 = surf2Dread<ushort4>(tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
-	UShortHalf Cvt[4];
-	Cvt[0].us1 = make_ushort1(us4.x);
-	Cvt[1].us1 = make_ushort1(us4.y);
-	Cvt[2].us1 = make_ushort1(us4.z);
-	Cvt[3].us1 = make_ushort1(us4.w);
-	return Float4(
-		__half2float(Cvt[0].h),
-		__half2float(Cvt[1].h),
-		__half2float(Cvt[2].h),
-		__half2float(Cvt[3].h));
-}
-
-__device__ void Store2Dfp16(
-    Float4  val,
-	SurfObj tex,
-	Int2    uv)
-{
-	UShortHalf Cvt[4];
-	Cvt[0].h = __float2half(val.x);
-	Cvt[1].h = __float2half(val.y);
-	Cvt[2].h = __float2half(val.z);
-	Cvt[3].h = __float2half(val.w);
-    surf2Dwrite(make_ushort4(Cvt[0].us1.x, Cvt[1].us1.x, Cvt[2].us1.x, Cvt[3].us1.x), tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
-}
+//__device__ Float4 Load2Dfp16(
+//	SurfObj tex,
+//	Int2    uv)
+//{
+//	ushort4 us4 = surf2Dread<ushort4>(tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
+//	UShortHalf Cvt[4];
+//	Cvt[0].us1 = make_ushort1(us4.x);
+//	Cvt[1].us1 = make_ushort1(us4.y);
+//	Cvt[2].us1 = make_ushort1(us4.z);
+//	Cvt[3].us1 = make_ushort1(us4.w);
+//	return Float4(
+//		__half2float(Cvt[0].h),
+//		__half2float(Cvt[1].h),
+//		__half2float(Cvt[2].h),
+//		__half2float(Cvt[3].h));
+//}
+//
+//__device__ void Store2Dfp16(
+//    Float4  val,
+//	SurfObj tex,
+//	Int2    uv)
+//{
+//	UShortHalf Cvt[4];
+//	Cvt[0].h = __float2half(val.x);
+//	Cvt[1].h = __float2half(val.y);
+//	Cvt[2].h = __float2half(val.z);
+//	Cvt[3].h = __float2half(val.w);
+//    surf2Dwrite(make_ushort4(Cvt[0].us1.x, Cvt[1].us1.x, Cvt[2].us1.x, Cvt[3].us1.x), tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
+//}
 
 __device__ Float4 SampleBicubicSmoothStep(
     SurfObj tex,

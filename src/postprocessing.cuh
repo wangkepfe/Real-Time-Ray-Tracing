@@ -112,19 +112,19 @@ __global__ void BufferCopy(
     Store2D(Load2D(inBuffer, idx), OutBuffer, idx);
 }
 
-__global__ void BufferCopyFp16(
-	SurfObj   OutBuffer,
-	SurfObj   inBuffer,
-	Int2                  size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-    Store2D(Load2Dfp16(inBuffer, idx), OutBuffer, idx);
-}
+//__global__ void BufferCopyFp16(
+//	SurfObj   OutBuffer,
+//	SurfObj   inBuffer,
+//	Int2                  size)
+//{
+//	Int2 idx;
+//	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+//	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+//
+//	if (idx.x >= size.x || idx.y >= size.y) return;
+//
+//    Store2D(Load2Dfp16(inBuffer, idx), OutBuffer, idx);
+//}
 
 __global__ void BufferInit(
 	SurfObj   OutBuffer,
