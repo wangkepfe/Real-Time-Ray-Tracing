@@ -23,6 +23,8 @@ Physically based ray tracing / path tracing with CUDA. Real time rendering with 
 - Tone-mapping
 - Edge-aware atrous denoising with spike removal
 - TAA (temporal anti-aliasing)
+- Bloom effect
+- Lens flare
 
 ### Realistic world simulation
 - Procedual height field ocean
