@@ -401,24 +401,17 @@ __global__ void DownScale4(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
 	}
 }
 
-__global__ void DenoiseKernel(
-	SurfObj   colorBuffer, // [in/out]
-	Int2      size)
-{
-	const float filterKernel[25] = {
+__constant__ float filterKernel[25] = {
 		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0,
 		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
 		3.0 / 128.0, 3.0 / 32.0, 9.0 / 64.0,  3.0 / 32.0, 3.0 / 128.0,
 		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
 		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0 };
 
-	const Int2 uvOffset[25] = {
-		Int2(-2,-2), Int2(-1,-2), Int2(0,-2), Int2(1,-2), Int2(2,-2),
-		Int2(-2,-1), Int2(-1,-1), Int2(0,-2), Int2(1,-1), Int2(2,-1),
-		Int2(-2, 0), Int2(-1, 0), Int2(0, 0), Int2(1, 0), Int2(2, 0),
-		Int2(-2, 1), Int2(-1, 1), Int2(0, 1), Int2(1, 1), Int2(2, 1),
-		Int2(-2, 2), Int2(-1, 2), Int2(0, 2), Int2(1, 2), Int2(2, 2) };
-
+__global__ void DenoiseKernel(
+	SurfObj   colorBuffer, // [in/out]
+	Int2      size)
+{
 	// index for pixel 28 x 28
 	Int2 idx2;
 	idx2.x = blockIdx.x * 28 + threadIdx.x - 2;
@@ -453,7 +446,7 @@ __global__ void DenoiseKernel(
 	Float3 average = Float3(0.0);
 	for (int i = 0; i < 25; ++i)
 	{
-		Int2 uv = idx3 + uvOffset[i];
+		Int2 uv(threadIdx.x + (i % 5) - 2, threadIdx.y + (i / 5) - 2);
 		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
 		Float3 color = bufferReadTmp.xyz;
 		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
@@ -471,7 +464,7 @@ __global__ void DenoiseKernel(
 	Float3 stddev = Float3(0.0);
 	for (int i = 0; i < 25; ++i)
 	{
-		Int2 uv = idx3 + uvOffset[i];
+		Int2 uv(threadIdx.x + (i % 5) - 2, threadIdx.y + (i / 5) - 2);
 		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
 		Float3 color = bufferReadTmp.xyz;
 		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
@@ -505,7 +498,7 @@ __global__ void DenoiseKernel(
 	__syncthreads();
 	for (int i = 0; i < 25; ++i)
 	{
-		Int2 uv = idx3 + uvOffset[i];
+		Int2 uv(threadIdx.x + (i % 5) - 2, threadIdx.y + (i / 5) - 2);
 		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
 		Float3 color = bufferReadTmp.xyz;
 		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
@@ -529,13 +522,6 @@ __global__ void DenoiseKernel(
 
 __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, float* exposure)
 {
-	const float filterKernel[25] = {
-		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0,
-		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
-		3.0 / 128.0, 3.0 / 32.0, 9.0 / 64.0,  3.0 / 32.0, 3.0 / 128.0,
-		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
-		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0 };
-
 	// index for pixel 28 x 28
 	Int2 idx2;
 	idx2.x = blockIdx.x * 12 + threadIdx.x - 2;
@@ -603,10 +589,10 @@ __device__ Float3 LensFlareCircle(Float2 p, float size, float dist, Float2 mouse
 {
 	float l = length(p + mouse * (dist * 4.0)) + size / 2.0;
 
-	float c  = max(0.01 - powf(length(p + mouse * dist), size * 1.4), 0.0) * 40.0; // big circle
-	float c1 = max(0.001 - powf(l - 0.3, 1.0 / 40.0) + sinf(l * 30.0), 0.0) * 6.0; // ring
+	float c  = max(0.01 - powf(length(p + mouse * dist), size * 1.4), 0.0) * 30.0; // big circle
+	float c1 = max(0.001 - powf(l - 0.3, 1.0 / 40.0) + sinf(l * 30.0), 0.0) * 3.0; // ring
 	float c2 = max(0.04 / powf(length(p - mouse * dist / 2.0 + 0.09) * 1.0, 1.0), 0.0) / 20.0; // dot
-	float s  = max(0.01 - powf(LensFlareRegShape(p * 5.0 + mouse * dist * 5.0 + 0.9, 6), 1.0), 0.0) * 8.0; // Hexagon
+	float s  = max(0.01 - powf(LensFlareRegShape(p * 5.0 + mouse * dist * 5.0 + 0.9, 6), 1.0), 0.0) * 6.0; // Hexagon
 
 	Float3 color = cos3f(Float3(0.44, 0.24, 0.2) * 8.0 + dist * 4.0) * 0.5 + 0.5;
 
@@ -646,7 +632,7 @@ __global__ void LensFlare(Float2 sunPos, SurfObj colorBuffer, Int2 size)
     float angle = atan2f(vec.y, vec.x);
 
     // add the sun with the frill things
-    color += max(0.1 / powf(len * 50. , 5.0)       , 0.0) * abs(sinf(angle * 5.0 + cosf(angle * 9.0))) / 20.0;
+    //color += max(0.1 / powf(len * 50. , 5.0)       , 0.0) * abs(sinf(angle * 5.0 + cosf(angle * 9.0))) / 20.0;
     color += max(0.1 / powf(len * 10.0, 1.0 / 20.0), 0.0) + abs(sinf(angle * 3.0 + cosf(angle * 9.0))) / 16.0 * abs(sinf(angle * 9.0));
 
 	Store2D(Float4(color, 1.0), colorBuffer, idx);

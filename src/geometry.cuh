@@ -178,6 +178,64 @@ __device__ void GetAabbRayIntersectPointNormal(
 	}
 }
 
+// --------------------------- Get Aabb Ray Intersect Point Normal UV -------------------------
+//	Get Aabb Ray Intersect reprojected Point and Normal and uv
+// -----------------------------------------------------------------------------------------
+__device__ void GetAabbRayIntersectPointNormalUv(
+	const AABB& aabb,
+	const Ray&  ray,
+	float       t,
+	Float3&     point,
+	Float3&     normal,
+	Float2&     uv,
+	float&      pError)
+{
+	Float3 p      = ray.orig + ray.dir * t;
+
+	Float3 center = (aabb.max + aabb.min) / 2.0;
+	Float3 v2     = aabb.max - aabb.min;
+	Float3 v      = v2 / 2.0;
+
+	Float3 D      = p - center;
+	Float3 absD   = abs(D);
+	Float3 signD  = D / absD;
+
+	int maxDidx = 0;
+	if (absD.x >= absD.y) // x y
+	{
+		maxDidx = (absD.x >= absD.z) ? 0 : 2; // x yz, z x y
+	}
+	else // y x
+	{
+		maxDidx = (absD.y >= absD.z) ? 1 : 2; // y xz, z y x
+	}
+
+	if (maxDidx == 0)
+	{
+		normal = Float3(signD.x, 0, 0);
+		point  = Float3(center.x + signD.x * v.x, p.y, p.z);
+		//uv     = Float2((point.y - aabb.min.y) / v2.y, (point.z - aabb.min.z) / v2.z);
+		uv     = Float2(point.y, point.z);
+		pError = abs(point.x) * ErrGamma(5);
+	}
+	else if (maxDidx == 1)
+	{
+		normal = Float3(0, signD.y, 0);
+		point  = Float3(p.x, center.y + signD.y * v.y, p.z);
+		//uv     = Float2((point.x - aabb.min.x) / v2.x, (point.z - aabb.min.z) / v2.z);
+		uv     = Float2(point.x, point.z);
+		pError = abs(point.y) * ErrGamma(5);
+	}
+	else
+	{
+		normal = Float3(0, 0, signD.z);
+		point  = Float3(p.x, p.y, center.z + signD.z * v.z);
+		//uv     = Float2((point.x - aabb.min.x) / v2.x, (point.y - aabb.min.y) / v2.y);
+		uv     = Float2(point.x, point.y);
+		pError = abs(point.z) * ErrGamma(5);
+	}
+}
+
 // --------------------------- Ray Plane Intersect -------------------------
 // ray plane intersect, return distance, RayMax if no hit
 // -------------------------------------------------------------------------

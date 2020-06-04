@@ -46,14 +46,14 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? (4000.0 * cosTheta) : (rayState.isMoonVisible ? (200.0 * cosTheta) : 0);
+	lightInfluenceHeuristicTemp = rayState.isSunVisible ? 4000.0 : (rayState.isMoonVisible ? 40.0 : 0);
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
 	++i;
 
 	// env
-	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 800.0 : 8.0;
+	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 400.0 : 4.0;
 	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
 	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
@@ -94,10 +94,12 @@ __device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 
 	// sun light
-	indexRemap[idx++] = i++;
+	if (cbo.sunDir.y > -0.05 && rayState.isSunVisible)
+		indexRemap[idx++] = i++;
 
 	// env light
-	indexRemap[idx++] = i;
+	if (cbo.sunDir.y > -0.05)
+		indexRemap[idx++] = i;
 
 	// choose light
 	int sampledValue = rd(&rayState.rdState[2]) * idx;
@@ -202,7 +204,9 @@ __device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneM
 	}
 }
 
-__device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial)
+#define ENABLE_MIS 0
+
+__device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SceneTextures textures)
 {
 	// check for termination and hit light
 	if (rayState.terminated == true || rayState.hitLight == true || rayState.isDiffuse == false) { return; }
@@ -214,18 +218,55 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	// get mat
 	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
 
+	float uvScale = 60.0f;
+
+	Float3 albedo;
+	if (mat.useTex0)
+	{
+		float4 texColor = tex2D<float4>(textures.array[mat.texId0], rayState.uv.x * uvScale, rayState.uv.y * uvScale);
+		albedo = Float3(texColor.x, texColor.y, texColor.z);
+	}
+	else
+	{
+		albedo = mat.albedo;
+	}
+
+	Float3 normal = rayState.normal;
+	if (mat.useTex1)
+	{
+		float4 texColor = tex2D<float4>(textures.array[mat.texId1], rayState.uv.x * uvScale, rayState.uv.y * uvScale);
+		Float3 texNormal = Float3(texColor.x - 0.5, texColor.y - 0.5, texColor.z * 0.5);
+
+		Float3 tangent = Float3(0, 1, 0);
+
+		if (normal.y > 1.0f - 1e-3f)
+			tangent = Float3(1, 0, 0);
+
+		Float3 bitangent = cross(normal, tangent);
+		tangent = cross(normal, bitangent);
+
+		texNormal = normalize(tangent * texNormal.x + bitangent * texNormal.y + normal * texNormal.z);
+
+		normal = texNormal;
+		//normal = mixf(normal, texNormal, 0.0f);
+	}
+
+#if ENABLE_MIS
+	// light sample
+	Float3 lightSampleDir;
+	float lightSamplePdf;
+	SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, rayState.isDeltaLight);
+#endif
+
 	if (rayState.matType == LAMBERTIAN_DIFFUSE)
 	{
 		// surface sample
 		Float3 surfSampleDir;
-		LambertianSample(rd2(&rayState.rdState[0], &rayState.rdState[1]), surfSampleDir, rayState.normal);
-		Float3 surfaceBsdfOverPdf = LambertianBsdfOverPdf(mat.albedo);
-		float surfaceSamplePdf = LambertianPdf(surfSampleDir, rayState.normal);
+		LambertianSample(rd2(&rayState.rdState[0], &rayState.rdState[1]), surfSampleDir, normal);
 
-		// light sample
-		Float3 lightSampleDir;
-		float lightSamplePdf;
-		SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, rayState.isDeltaLight);
+#if ENABLE_MIS
+		Float3 surfaceBsdfOverPdf = LambertianBsdfOverPdf(albedo);
+		float surfaceSamplePdf = LambertianPdf(surfSampleDir, normal);
 
 		// MIS weight
 		float surfaceWeight = (surfaceSamplePdf * surfaceSamplePdf) / (surfaceSamplePdf * surfaceSamplePdf + lightSamplePdf * lightSamplePdf);
@@ -233,22 +274,45 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 
 		// multiple importance sampling
 		rayState.surfaceBetaWeight = surfaceWeight;
-		rayState.dir               = surfSampleDir;
 		rayState.probeDir          = lightSampleDir;
-		rayState.lightBeta         = rayState.beta * LambertianBsdf(lightSampleDir, rayState.normal, mat.albedo) / lightSamplePdf;
+		rayState.lightBeta         = rayState.beta * LambertianBsdf(albedo) * max1f(dot(lightSampleDir, normal), 0) / lightSamplePdf;
 		rayState.beta             *= surfaceBsdfOverPdf;
-		rayState.orig              = rayState.pos + rayState.offset * rayState.normal;
 		rayState.hasProbeRay       = surfaceWeight < 0.9;
+#endif
+
+		rayState.dir               = surfSampleDir;
+		rayState.orig              = rayState.pos + rayState.offset * normal;
 	}
 	else if (rayState.matType == MICROFACET_REFLECTION)
 	{
-		const Float3 F0(0.56, 0.57, 0.58);
-		const float alpha = 0.05;
+		Float3 F0 = mat.F0;
+		float alpha = mat.alpha;
 
-		Float3 nextRayDir;
-		MacrofacetReflection(rd(&rayState.rdState[0]), rd(&rayState.rdState[1]), rayState.dir, nextRayDir, rayState.normal, rayState.beta, F0, alpha);
-		rayState.dir = nextRayDir;
-		rayState.orig = rayState.pos + rayState.offset * rayState.normal;
+		Float3 surfSampleDir;
+		Float3 surfaceBrdf;
+		Float3 surfaceBrdfOverPdf;
+		float  surfacePdf;
+		MacrofacetReflectionSample(rd(&rayState.rdState[0]), rd(&rayState.rdState[1]), rayState.dir, surfSampleDir, normal, surfaceBrdfOverPdf, surfaceBrdf, surfacePdf, F0, albedo, alpha);
+
+#if ENABLE_MIS
+		// MIS weight
+		float surfaceWeight = (surfacePdf * surfacePdf) / (surfacePdf * surfacePdf + lightSamplePdf * lightSamplePdf);
+		surfaceWeight = (rayState.isDeltaLight) ? (0.0) : (surfaceWeight);
+
+		Float3 lightBrdf;
+		Float3 lightBrdfOverPdf;
+		float  lightPdf;
+		MacrofacetReflection(lightBrdfOverPdf, lightBrdf, lightPdf, normal, lightSampleDir, rayState.dir, F0, albedo, alpha);
+
+		rayState.surfaceBetaWeight = surfaceWeight;
+		rayState.probeDir          = lightSampleDir;
+		rayState.lightBeta         = rayState.beta * lightBrdf * max1f(dot(lightSampleDir, normal), 0) / lightSamplePdf;
+		rayState.beta             *= surfaceBrdfOverPdf;
+		rayState.hasProbeRay       = surfaceWeight < 0.9;
+#endif
+
+		rayState.orig              = rayState.pos + rayState.offset * normal;
+		rayState.dir               = surfSampleDir;
 	}
 }
 
@@ -263,7 +327,7 @@ __device__ inline void UpdateMaterial(ConstBuffer cbo, RayState& rayState, Scene
 	rayState.isDiffuse = (rayState.matType == LAMBERTIAN_DIFFUSE) || (rayState.matType == MICROFACET_REFLECTION);
 }
 
-__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer)
+__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer, SceneTextures textures)
 {
 	// index
 	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
@@ -290,7 +354,7 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	//GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, Float2(0.4f) + 0.2f * rd2(&rayState.rdState[0], &rayState.rdState[1]));
 
 	// scene traverse
-	rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir);
+	rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir, rayState.uv);
 
 	// store normal, pos
 	Float3 screenNormal = rayState.normal;
@@ -298,27 +362,27 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	// update mat id
 	UpdateMaterial(cbo, rayState, sceneMaterial);
 
-	for (int bounce = 0; bounce < 2; ++bounce)
+	for (int bounce = 0; bounce < 8; ++bounce)
 	{
 		LightShader(cbo, rayState, sceneMaterial);
 		GlossyShader(cbo, rayState, sceneMaterial);
-		DiffuseShader(cbo, rayState, sceneMaterial);
+		DiffuseShader(cbo, rayState, sceneMaterial, textures);
 
 		if (rayState.terminated == false)
 		{
 			if (rayState.hasProbeRay)
 			{
-				rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.probeDir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir);
+				rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.probeDir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir, rayState.uv);
 				UpdateMaterial(cbo, rayState, sceneMaterial);
 				LightShader(cbo, rayState, sceneMaterial);
 			}
 		}
 
-		if (bounce != 3)
+		if (bounce != 7)
 		{
 			if (rayState.terminated == false)
 			{
-				rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir);
+				rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir, rayState.uv);
 				UpdateMaterial(cbo, rayState, sceneMaterial);
 			}
 		}
@@ -344,7 +408,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	// Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
 
     const Float3 axis = normalize(Float3(1.0f, 0.0f, -0.4f));
-	const float angle = fmodf(clockTime * TWO_PI / 300, TWO_PI);
+	const float angle = fmodf(clockTime * TWO_PI / 100, TWO_PI);
 	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 0.0)).normalized();
 
 	cbo.sunDir        = sunDir;
@@ -352,19 +416,19 @@ void RayTracer::draw(SurfObj* renderTarget)
 
 	// ----- scene -----
 	// sphere
-	Float3 spherePos = Float3(sinf(clockTime * TWO_PI / 30) * 0.01f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
-	cameraFocusPos        = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
-	spheres[0]            = Sphere(spherePos, 0.005f);
-	sphereLights[0]           = spheres[0];
+	// Float3 spherePos = Float3(sinf(clockTime * TWO_PI / 30) * 0.01f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
+	// cameraFocusPos        = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
+	// spheres[0]            = Sphere(spherePos, 0.005f);
+	// sphereLights[0]           = spheres[0];
 
-	GpuErrorCheck(cudaMemcpyAsync(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
-	GpuErrorCheck(cudaMemcpyAsync(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
+	// GpuErrorCheck(cudaMemcpyAsync(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
+	// GpuErrorCheck(cudaMemcpyAsync(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
 
-	d_sceneGeometry.numSpheres      = numSpheres;
-	d_sceneGeometry.spheres         = d_spheres;
+	// d_sceneGeometry.numSpheres      = numSpheres;
+	// d_sceneGeometry.spheres         = d_spheres;
 
-	d_sceneMaterial.numSphereLights = numSphereLights;
-	d_sceneMaterial.sphereLights    = d_sphereLights;
+	// d_sceneMaterial.numSphereLights = numSphereLights;
+	// d_sceneMaterial.sphereLights    = d_sphereLights;
 
 	// camera
 	Camera& camera = cbo.camera;
@@ -388,7 +452,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	GpuErrorCheck(cudaMemsetAsync(d_histogram, 0, 64 * sizeof(uint), streams[0]));
 
 	// ------------------ Ray Gen -------------------
-	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA);
+	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA, sceneTextures);
 
 	// ---------------- post processing ----------------
 

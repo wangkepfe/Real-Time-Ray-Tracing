@@ -331,7 +331,7 @@ inline __host__ __device__ void   swap(float& v1, float& v2)                    
 inline __host__ __device__ void   swap(Float3 & v1, Float3 & v2)                      { Float3 tmp = v1; v1 = v2; v2 = tmp; }
 inline __host__ __device__ float  clampf(float a, float lo, float hi)                 { return a < lo ? lo : a > hi ? hi : a; }
 inline __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo, Float3 hi)             { return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
-inline __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)       { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
+inline __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)     { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
 inline __host__ __device__ float  dot(const Float2 & v1, const Float2 & v2)           { return v1.x * v2.x + v1.y * v2.y; }
 inline __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z; }
 inline __host__ __device__ float  dot(const Float4 & v1, const Float4 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z + v1.w * v2.w; }

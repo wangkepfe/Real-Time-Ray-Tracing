@@ -37,6 +37,10 @@
 // resolution
 const int WIDTH = 2560;
 const int HEIGHT = 1440;
+//const int RENDER_WIDTH = 1920;
+//const int RENDER_HEIGHT = 1080;
+const int RENDER_WIDTH = 1280;
+const int RENDER_HEIGHT = 720;
 
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
@@ -188,7 +192,7 @@ public:
         initVulkan();
         initCuda();
 
-        m_rayTracer = new RayTracer(WIDTH, HEIGHT, WIDTH * 0.5, HEIGHT * 0.5);
+        m_rayTracer = new RayTracer(WIDTH, HEIGHT, RENDER_WIDTH, RENDER_HEIGHT);
         m_rayTracer->init(m_streams);
 
         mainLoop();
@@ -379,7 +383,7 @@ private:
         int deviceId = setCudaVkDevice();
 
         // Create stream
-        
+
 		// init stream
 		for (uint i = 0; i < 8; i++) {
 			checkCudaErrors(cudaStreamCreate(&m_streams[i]));

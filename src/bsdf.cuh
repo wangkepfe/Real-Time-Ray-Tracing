@@ -15,8 +15,8 @@ __device__  void LocalizeSample(
 	else
 		w = Float3(1, 0, 0);
 
-	u = normalize(cross(n, w));
-	v = normalize(cross(n, u));
+	u = cross(n, w);
+	v = cross(n, u);
 }
 
 __device__  Float2 ConcentricSampleDisk(Float2 u) {
@@ -74,7 +74,7 @@ __device__  void LambertianSample(
 	wo.normalize();
 }
 
-__device__ inline Float3 LambertianBsdf(const Float3& wo, const Float3& n, const Float3& albedo) { return max1f(dot(wo, n), 0) * albedo / PI; }
+__device__ inline Float3 LambertianBsdf(const Float3& albedo) { return albedo / PI; }
 __device__ inline float  LambertianPdf(const Float3& wo, const Float3& n) { return max1f(dot(wo, n), 0) / PI; }
 __device__ inline Float3 LambertianBsdfOverPdf(const Float3& albedo) { return albedo; }
 
@@ -141,7 +141,7 @@ __device__ void PerfectReflectionRefraction(float etaI, float etaT, bool isRayIn
 	nextRayDir.normalize();
 }
 
-__device__ void MacrofacetReflection(
+__device__ void MacrofacetReflectionSample(
 	float r1,
 	float r2,
 
@@ -149,8 +149,12 @@ __device__ void MacrofacetReflection(
 	Float3& nextdir,
 	const Float3& normal,
 
-	Float3& beta,
+	Float3& brdfOverPdf,
+	Float3& brdf,
+	float& pdf,
+
 	const Float3& F0,
+	Float3& albedo,
 
 	float alpha)
 {
@@ -175,18 +179,62 @@ __device__ void MacrofacetReflection(
 	nextdir.normalize();
 
 	// Fresnel
-	float cosThetaWoWh = max(0.01f, abs(dot(sampledNormal, nextdir)));
+	float cosThetaWoWh = max(0.01f, dot(sampledNormal, nextdir));
 	Float3 F = FresnelShlick(F0, cosThetaWoWh);
 
 	// Smith's Mask-shadowing function G
-	float cosThetaWo = abs(dot(nextdir, normal));
-	float cosThetaWi = max(0.01f, abs(dot(raydir, normal)));
+	float cosThetaWo = max(0.01f, dot(nextdir, normal));
+	float cosThetaWi = max(0.01f, dot(raydir, normal));
 	float tanThetaWo = sqrt(1.0f - cosThetaWo * cosThetaWo) / cosThetaWo;
 	float G = 1.0f / (1.0f + (sqrtf(1.0f + alpha2 * tanThetaWo * tanThetaWo) - 1.0f) / 2.0f);
 
-	// color
+	// Trowbridge Reitz Distribution D
 	float cosThetaWh = max(0.01f, dot(sampledNormal, normal));
-	beta = minf3f(1.0f, F * G * cosThetaWoWh / cosThetaWi / cosThetaWh);
+	float cosTheta2Wh = cosThetaWh * cosThetaWh;
+	float tanTheta2Wh = (1.0f - cosTheta2Wh) / cosTheta2Wh;
+	float e = tanTheta2Wh / alpha2 + 1.0f;
+	float D = 1.0f / (PI * (alpha2 * cosTheta2Wh * cosTheta2Wh) * (e * e));
+
+	// brdf
+	brdf = (albedo * F) * (D * G) / (4.0f * cosThetaWo * cosThetaWi);
+
+	// pdf
+	pdf = (D * cosThetaWh) / (4.0f * cosThetaWoWh);
+
+	// beta
+	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(1.0f));
+}
+
+__device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& pdf,const Float3& wn, const Float3& wo, const Float3& wi, const Float3& F0, Float3& albedo, float alpha)
+{
+	float alpha2 = alpha * alpha;
+	Float3 wh    = normalize(wi + wo);
+
+	// Fresnel
+	float cosThetaWoWh = max(0.01f, dot(wh, wo));
+	Float3 F           = FresnelShlick(F0, cosThetaWoWh);
+
+	// Smith's Mask-shadowing function G
+	float cosThetaWo = max(0.01f, dot(wo, wn));
+	float cosThetaWi = max(0.01f, dot(wi, wn));
+	float tanThetaWo = sqrt(1.0f - cosThetaWo * cosThetaWo) / cosThetaWo;
+	float G          = 1.0f / (1.0f + (sqrtf(1.0f + alpha2 * tanThetaWo * tanThetaWo) - 1.0f) / 2.0f);
+
+	// Trowbridge Reitz Distribution D
+	float cosThetaWh  = max(0.01f, dot(wh, wn));
+	float cosTheta2Wh = cosThetaWh * cosThetaWh;
+	float tanTheta2Wh = (1.0f - cosTheta2Wh) / cosTheta2Wh;
+	float e           = tanTheta2Wh / alpha2 + 1.0f;
+	float D           = 1.0f / (PI * (alpha2 * cosTheta2Wh * cosTheta2Wh) * (e * e));
+
+	// brdf
+	brdf = (albedo * F) * (D * G) / (4.0f * cosThetaWo * cosThetaWi);
+
+	// pdf
+	pdf = (D * cosThetaWh) / (4.0f * cosThetaWoWh);
+
+	// beta
+	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(1.0f));
 }
 
 __device__ Float3 UniformSampleCone(const Float2 &u, float cosThetaMax, const Float3 &x, const Float3 &y, const Float3 &z)

@@ -69,8 +69,36 @@ enum SurfaceMaterialType : uint
 
 struct __align__(16) SurfaceMaterial
 {
+	__device__ __host__ SurfaceMaterial() :
+		albedo {Float3(0.8)},
+		type {PERFECT_REFLECTION},
+		useTex0 {false},
+		useTex1 {false},
+		useTex2 {false},
+		useTex3 {false},
+		texId0 {0},
+		texId1 {0},
+		texId2 {0},
+		texId3 {0},
+		F0 {Float3(0.56, 0.57, 0.58)},
+		alpha {0.05}
+	{}
+
 	Float3 albedo;
 	uint  type;
+
+	bool useTex0;
+	bool useTex1;
+	bool useTex2;
+	bool useTex3;
+
+	uint texId0;
+	uint texId1;
+	uint texId2;
+	uint texId3;
+
+	Float3 F0;
+	float alpha;
 };
 
 struct __align__(16) SceneMaterial
@@ -144,8 +172,10 @@ struct __align__(16) RayState
 
 	float      surfaceBetaWeight;
 	float      normalDotRayDir;
+	Float2     uv;
+
 	bool       isDiffuseRay;
-	float u2;
+	Float3     tangent;
 
 	RandState  rdState[3];
 };
@@ -197,6 +227,17 @@ struct IndexBuffers
 			cudaFree(bufferTops[i]);
 		}
 	}
+};
+
+union SceneTextures
+{
+	struct
+	{
+		cudaTextureObject_t uv;
+		cudaTextureObject_t sandAlbedo;
+		cudaTextureObject_t sandNormal;
+	};
+	cudaTextureObject_t array[3];
 };
 
 class RayTracer
@@ -273,6 +314,9 @@ private:
 	// traversal structure
 	SceneGeometry               d_sceneGeometry;
 
+	//
+	SceneTextures               sceneTextures;
+
 	// buffer
 	cudaArray*                  colorBufferArrayA;
 	cudaArray*                  colorBufferArrayB;
@@ -285,8 +329,9 @@ private:
 	cudaArray*                  bloomBufferArray4;
 	cudaArray*                  bloomBufferArray16;
 
-	cudaArray*                  normalBufferArray;
-	cudaArray*                  positionBufferArray;
+	cudaArray*                  texArraySandAlbedo;
+	cudaArray*                  texArrayUv;
+	cudaArray*                  texArraySandNormal;
 
 	SurfObj         colorBufferA;
 	SurfObj         colorBufferB;
@@ -298,9 +343,6 @@ private:
 
 	SurfObj         bloomBuffer4;
 	SurfObj         bloomBuffer16;
-
-	SurfObj         normalBuffer;
-	SurfObj         positionBuffer;
 
 	IndexBuffers indexBuffers;
 	ullint* gHitMask;

@@ -13,7 +13,7 @@ public:
     Terrain() :
         mapSize        { 32 },
         heightBase     { 8 },
-        noiseAmpLimit  { 8 },
+        noiseAmpLimit  { 4 },
         baseFrequency  { 4 },
         aabbEdgeLength { 0.01f },
 		heightMap(mapSize, 0)
@@ -64,12 +64,24 @@ public:
 
         for (unsigned int i = 0; i < mapSize; ++i)
         {
-            for (int j = 0; j <= heightMap[i]; ++j)
+            // for (int j = 0; j <= heightMap[i]; ++j)
+            // {
+			// 	float posX = i * aabbEdgeLength + offsetX;
+			// 	float posY = j * aabbEdgeLength + offsetY;
+
+			// 	Float3 pos(posX, posY, 0);
+
+			// 	AABB aabbTemp(pos, aabbEdgeLength);
+
+            //     aabbs.push_back(aabbTemp);
+            // }
+            for (int j = heightMap[i]; j >= 0; --j)
             {
 				float posX = i * aabbEdgeLength + offsetX;
 				float posY = j * aabbEdgeLength + offsetY;
+                float posZ = (j - heightMap[i]) * aabbEdgeLength;
 
-				Float3 pos(posX, posY, 0);
+				Float3 pos(posX, posY, posZ);
 
 				AABB aabbTemp(pos, aabbEdgeLength);
 

@@ -13,7 +13,8 @@ __device__ bool RaySceneIntersect(
 	float&               rayOffset,          // [out]
 	float&               rayDist,
 	bool&                isRayIntoSurface,
-	float&               normalDotRayDir)
+	float&               normalDotRayDir,
+	Float2&              uv)
 {
 	// init t with max distance
 	float t = RayMax;
@@ -21,6 +22,7 @@ __device__ bool RaySceneIntersect(
 	objectIdx = 0;
 	intersectNormal = Float3(0, 0, 0);
 	intersectPoint = Float3(RayMax);
+	uv = Float2(0);
 
 	// get spheres
 	int numSpheres  = sceneGeometry.numSpheres;
@@ -61,7 +63,8 @@ __device__ bool RaySceneIntersect(
 			t               = t_temp;
 			objectIdx       = numSpheres + i;
 
-			GetAabbRayIntersectPointNormal(aabb, ray, t, intersectPoint, intersectNormal, errorP);
+			//GetAabbRayIntersectPointNormal(aabb, ray, t, intersectPoint, intersectNormal, errorP);
+			GetAabbRayIntersectPointNormalUv(aabb, ray, t, intersectPoint, intersectNormal, uv, errorP);
 
 			rayOffset       = errorT + errorP;
 		}
