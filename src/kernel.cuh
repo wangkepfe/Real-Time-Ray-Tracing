@@ -161,13 +161,13 @@ struct __align__(16) RayState
 	int        bounce;
 
 	bool       terminated;
-	bool       hasProbeRay;
+	bool       unused;
 	bool       isSunVisible;
 	bool       isDiffuse;
 
 	bool       isRayIntoSurface;
 	bool       hit;
-	bool       isDeltaLight;
+	bool       unused2;
 	bool       isMoonVisible;
 
 	float      surfaceBetaWeight;

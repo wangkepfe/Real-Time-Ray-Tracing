@@ -9,139 +9,66 @@
 #include "traverse.cuh"
 #include "hash.cuh"
 
-__device__ inline void SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, Float3& lightSampleDir, float& lightSamplePdf, bool& isDeltaLight)
+#define TOTAL_LIGHT_MAX_COUNT 3
+
+__device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, Float3& lightSampleDir, float& lightSamplePdf, float& isDeltaLight)
 {
 	const int numSphereLight = sceneMaterial.numSphereLights;
 	Sphere* sphereLights = sceneMaterial.sphereLights;
 
-	isDeltaLight = false;
-
 	float lightChoosePdf;
 	int sampledIdx;
 
-#if 1
-
-	const int numLight = numSphereLight + 2;
-
-	const int sunLightIdx = numSphereLight;
-	const int envLightIdx = numSphereLight + 1;
-
-	float lightInfluenceHeuristic[5];
-	float lightInfluenceHeuristicTemp;
-	float lightInfluenceHeuristicSum[5];
-	float lightInfluenceHeuristicSumTemp = 0;
-
-	float cosTheta = abs(dot(rayState.normal, cbo.sunDir));
-
-	int i = 0;
-
-	// light
-	for (;i < numSphereLight; ++i)
-	{
-		Float3 vec = sphereLights[i].center - rayState.pos;
-		lightInfluenceHeuristicTemp = (dot(rayState.normal, vec) > 0) ? (1.0 / vec.length2()) : 0;
-		lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
-		lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
-		lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
-	}
-
-	// sun
-	lightInfluenceHeuristicTemp = rayState.isSunVisible ? 4000.0 : (rayState.isMoonVisible ? 40.0 : 0);
-	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
-	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
-	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
-	++i;
-
-	// env
-	lightInfluenceHeuristicTemp = (cbo.sunDir.y > -0.05) ? 400.0 : 4.0;
-	lightInfluenceHeuristic[i] = lightInfluenceHeuristicTemp;
-	lightInfluenceHeuristicSumTemp += lightInfluenceHeuristicTemp;
-	lightInfluenceHeuristicSum[i] = lightInfluenceHeuristicSumTemp;
-
-	// choose a light
-	float sampledValue = rd(&rayState.rdState[2]) * lightInfluenceHeuristicSumTemp;
-	sampledIdx = 0;
-
-	for (int j = 0; j < numLight; ++j)
-	{
-		if (sampledValue < lightInfluenceHeuristicSum[j])
-		{
-			sampledIdx = j;
-			break;
-		}
-	}
-
-	lightChoosePdf = lightInfluenceHeuristic[sampledIdx] / lightInfluenceHeuristicSumTemp;
-
-#else
-
-	int indexRemap[8] = {};
+	int indexRemap[TOTAL_LIGHT_MAX_COUNT] = {};
 	int i = 0;
 	int idx = 0;
 
 	const int sunLightIdx = numSphereLight;
-	const int envLightIdx = numSphereLight + 1;
 
-	// sphere light
 	for (; i < numSphereLight; ++i)
 	{
 		Float3 vec = sphereLights[i].center - rayState.pos;
-
 		if (dot(rayState.normal, vec) > 0 && vec.length2() < 1.0)
-		{
-			indexRemap[idx++] = i;
-		}
+			indexRemap[idx++] = i; // sphere light
 	}
 
-	// sun light
-	if (cbo.sunDir.y > -0.05 && rayState.isSunVisible)
-		indexRemap[idx++] = i++;
+	if (rayState.isSunVisible)
+		indexRemap[idx++] = i++; // sun/moon light
 
-	// env light
-	if (cbo.sunDir.y > -0.05)
-		indexRemap[idx++] = i;
+	if (idx == 0)
+		return false;
 
 	// choose light
 	int sampledValue = rd(&rayState.rdState[2]) * idx;
 	sampledIdx = indexRemap[sampledValue];
 	lightChoosePdf = 1.0 / idx;
 
-#endif
-
-	// sample a direction
+	// sample
 	if (sampledIdx == sunLightIdx)
 	{
 		Float3 moonDir = cbo.sunDir;
-		moonDir = -moonDir;
+		moonDir        = -moonDir;
 		lightSampleDir = cbo.sunDir.y > -0.05 ? cbo.sunDir : moonDir;
-		lightSamplePdf = 1.0;
-		isDeltaLight = true;
-	}
-	else if (sampledIdx == envLightIdx)
-	{
-		lightSamplePdf = 0; // no light sample
+		lightSamplePdf = 1.0f;
+		isDeltaLight   = true;
 	}
 	else
 	{
 		Sphere sphereLight = sphereLights[sampledIdx];
 
-		// calculate cos theta max
-		Float3 lightDir = sphereLight.center - rayState.pos;
-
-		float dist2 = lightDir.length2();
-		float radius2 = sphereLight.radius * sphereLight.radius;
-
+		Float3 lightDir   = sphereLight.center - rayState.pos;
+		float dist2       = lightDir.length2();
+		float radius2     = sphereLight.radius * sphereLight.radius;
 		float cosThetaMax = sqrtf(max1f(dist2 - radius2, 0)) / sqrtf(dist2);
 
-		// sample dir
 		Float3 u, v;
 		LocalizeSample(lightDir, u, v);
 		lightSampleDir = UniformSampleCone(rd2(&rayState.rdState[0], &rayState.rdState[1]), cosThetaMax, u, v, lightDir);
-		lightSampleDir = normalize(lightDir);
-
-		// pdf
+		lightSampleDir = normalize(lightSampleDir);
 		lightSamplePdf = UniformConePdf(cosThetaMax) * lightChoosePdf;
 	}
+
+	return true;
 }
 
 __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial)
@@ -153,13 +80,7 @@ __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMa
 	Float3 lightDir = rayState.dir;
 
 	// ray is terminated
-	if (rayState.hasProbeRay == false) { rayState.terminated = true; }
-	else
-	{
-		beta = rayState.lightBeta * (1.0 - rayState.surfaceBetaWeight);
-		lightDir = rayState.probeDir;
-		rayState.beta *= rayState.surfaceBetaWeight;
-	}
+	rayState.terminated = true;
 
 	// Different light source type
 	if (rayState.matType == MAT_SKY)
@@ -175,8 +96,6 @@ __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMa
 		Float3 L0 = mat.albedo;
 		rayState.L += L0 * beta;
 	}
-
-	rayState.hasProbeRay = false;
 }
 
 __device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial)
@@ -185,7 +104,6 @@ __device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneM
 	if (rayState.terminated == true || rayState.hitLight == true || rayState.isDiffuse == true) { return; }
 
 	rayState.hasBsdfRay = true;
-	rayState.hasProbeRay = false;
 
 	if (rayState.matType == PERFECT_REFLECTION)
 	{
@@ -204,15 +122,12 @@ __device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneM
 	}
 }
 
-#define ENABLE_MIS 0
-
 __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SceneTextures textures)
 {
 	// check for termination and hit light
 	if (rayState.terminated == true || rayState.hitLight == true || rayState.isDiffuse == false) { return; }
 
 	rayState.hasBsdfRay = true;
-	rayState.hasProbeRay = false;
 	rayState.isDiffuseRay = true;
 
 	// get mat
@@ -251,69 +166,88 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 		//normal = mixf(normal, texNormal, 0.0f);
 	}
 
-#if ENABLE_MIS
+	Float3 rayDir = rayState.dir;
+
 	// light sample
+	float isDeltaLight = false;
 	Float3 lightSampleDir;
 	float lightSamplePdf;
-	SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, rayState.isDeltaLight);
-#endif
+	bool isLightSampled = SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight);
+
+	// surface sample
+	Float3 surfSampleDir;
+
+	Float3 surfaceBsdfOverPdf;
+	Float3 surfaceSampleBsdf;
+	float surfaceSamplePdf = 0;
+
+	Float3 lightSampleSurfaceBsdfOverPdf;
+	Float3 lightSampleSurfaceBsdf;
+	float lightSampleSurfacePdf = 0;
 
 	if (rayState.matType == LAMBERTIAN_DIFFUSE)
 	{
-		// surface sample
-		Float3 surfSampleDir;
 		LambertianSample(rd2(&rayState.rdState[0], &rayState.rdState[1]), surfSampleDir, normal);
 
-#if ENABLE_MIS
-		Float3 surfaceBsdfOverPdf = LambertianBsdfOverPdf(albedo);
-		float surfaceSamplePdf = LambertianPdf(surfSampleDir, normal);
+		if (isDeltaLight == false)
+		{
+			surfaceBsdfOverPdf = LambertianBsdfOverPdf(albedo);
+			surfaceSampleBsdf = LambertianBsdf(albedo);
+			surfaceSamplePdf = LambertianPdf(surfSampleDir, normal);
+		}
 
-		// MIS weight
-		float surfaceWeight = (surfaceSamplePdf * surfaceSamplePdf) / (surfaceSamplePdf * surfaceSamplePdf + lightSamplePdf * lightSamplePdf);
-		surfaceWeight = (rayState.isDeltaLight) ? (0.0) : (surfaceWeight);
-
-		// multiple importance sampling
-		rayState.surfaceBetaWeight = surfaceWeight;
-		rayState.probeDir          = lightSampleDir;
-		rayState.lightBeta         = rayState.beta * LambertianBsdf(albedo) * max1f(dot(lightSampleDir, normal), 0) / lightSamplePdf;
-		rayState.beta             *= surfaceBsdfOverPdf;
-		rayState.hasProbeRay       = surfaceWeight < 0.9;
-#endif
-
-		rayState.dir               = surfSampleDir;
-		rayState.orig              = rayState.pos + rayState.offset * normal;
+		if (isLightSampled == true)
+		{
+			lightSampleSurfaceBsdfOverPdf = LambertianBsdfOverPdf(albedo);
+			lightSampleSurfaceBsdf = LambertianBsdf(albedo);
+			lightSampleSurfacePdf = LambertianPdf(lightSampleDir, normal);
+		}
 	}
 	else if (rayState.matType == MICROFACET_REFLECTION)
 	{
 		Float3 F0 = mat.F0;
 		float alpha = mat.alpha;
 
-		Float3 surfSampleDir;
-		Float3 surfaceBrdf;
-		Float3 surfaceBrdfOverPdf;
-		float  surfacePdf;
-		MacrofacetReflectionSample(rd(&rayState.rdState[0]), rd(&rayState.rdState[1]), rayState.dir, surfSampleDir, normal, surfaceBrdfOverPdf, surfaceBrdf, surfacePdf, F0, albedo, alpha);
+		if (isDeltaLight == false)
+			MacrofacetReflectionSample(rd(&rayState.rdState[0]), rd(&rayState.rdState[1]), rayDir, surfSampleDir, normal, surfaceBsdfOverPdf, surfaceSampleBsdf, surfaceSamplePdf, F0, albedo, alpha);
 
-#if ENABLE_MIS
-		// MIS weight
-		float surfaceWeight = (surfacePdf * surfacePdf) / (surfacePdf * surfacePdf + lightSamplePdf * lightSamplePdf);
-		surfaceWeight = (rayState.isDeltaLight) ? (0.0) : (surfaceWeight);
-
-		Float3 lightBrdf;
-		Float3 lightBrdfOverPdf;
-		float  lightPdf;
-		MacrofacetReflection(lightBrdfOverPdf, lightBrdf, lightPdf, normal, lightSampleDir, rayState.dir, F0, albedo, alpha);
-
-		rayState.surfaceBetaWeight = surfaceWeight;
-		rayState.probeDir          = lightSampleDir;
-		rayState.lightBeta         = rayState.beta * lightBrdf * max1f(dot(lightSampleDir, normal), 0) / lightSamplePdf;
-		rayState.beta             *= surfaceBrdfOverPdf;
-		rayState.hasProbeRay       = surfaceWeight < 0.9;
-#endif
-
-		rayState.orig              = rayState.pos + rayState.offset * normal;
-		rayState.dir               = surfSampleDir;
+		if (isLightSampled == true)
+			MacrofacetReflection(lightSampleSurfaceBsdfOverPdf, lightSampleSurfaceBsdf, lightSampleSurfacePdf, normal, lightSampleDir, rayDir, F0, albedo, alpha);
 	}
+
+	// MIS power/balance heuristic
+	//Float3 lightSampleWeight = lightSampleSurfaceBsdf / lightSamplePdf * PowerHeuristic(lightSamplePdf, lightSampleSurfacePdf);
+	//Float3 surfaceSampleWeight = surfaceBsdfOverPdf * PowerHeuristic(surfaceSamplePdf, lightSamplePdf);
+	//Float3 lightSampleWeight = lightSampleSurfaceBsdf / (lightSamplePdf + lightSampleSurfacePdf);
+	//Float3 surfaceSampleWeight = surfaceSampleBsdf / (surfaceSamplePdf + lightSamplePdf);
+	Float3 betaWeight;
+
+	if (isLightSampled)
+	{
+		if (isDeltaLight)
+		{
+			rayState.beta *= lightSampleSurfaceBsdf;
+			rayState.dir = lightSampleDir;
+		}
+		else
+		{
+			float lightSampleWeight =  1.0f / (lightSamplePdf + lightSampleSurfacePdf);
+			float surfaceSampleWeight = 1.0f / (surfaceSamplePdf + lightSamplePdf);
+
+			bool chooseSurfaceSample = rd(&rayState.rdState[2]) < 0.5;
+			/// @todo: surfaceSampleWeight / (lightSampleWeight + surfaceSampleWeight);
+
+			rayState.beta *= chooseSurfaceSample ? (surfaceSampleBsdf * surfaceSampleWeight) : (lightSampleSurfaceBsdf * lightSampleWeight);
+			rayState.dir = chooseSurfaceSample ? surfSampleDir : lightSampleDir;
+		}
+	}
+	else
+	{
+		rayState.beta *= surfaceBsdfOverPdf;
+		rayState.dir = surfSampleDir;
+	}
+
+	rayState.orig              = rayState.pos + rayState.offset * normal;
 }
 
 __device__ inline void UpdateMaterial(ConstBuffer cbo, RayState& rayState, SceneMaterial sceneMaterial)
@@ -342,7 +276,6 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	rayState.bounce     = 0;
 	rayState.terminated = false;
 	rayState.distance   = 0;
-	rayState.hasProbeRay = false;
 	rayState.isDiffuseRay = false;
 
 	// init rand state
@@ -367,16 +300,6 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 		LightShader(cbo, rayState, sceneMaterial);
 		GlossyShader(cbo, rayState, sceneMaterial);
 		DiffuseShader(cbo, rayState, sceneMaterial, textures);
-
-		if (rayState.terminated == false)
-		{
-			if (rayState.hasProbeRay)
-			{
-				rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.probeDir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir, rayState.uv);
-				UpdateMaterial(cbo, rayState, sceneMaterial);
-				LightShader(cbo, rayState, sceneMaterial);
-			}
-		}
 
 		if (bounce != 7)
 		{
@@ -461,25 +384,25 @@ void RayTracer::draw(SurfObj* renderTarget)
 
 	DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim);
 
-	DownScale4<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBuffer4, bufferDim);
-	DownScale4<<<gridDim4, blockDim, 0, streams[0]>>>(colorBuffer4, colorBuffer16, bufferSize4);
-	DownScale4<<<gridDim16, blockDim, 0, streams[0]>>>(colorBuffer16, colorBuffer64, bufferSize16);
+	// DownScale4<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBuffer4, bufferDim);
+	// DownScale4<<<gridDim4, blockDim, 0, streams[0]>>>(colorBuffer4, colorBuffer16, bufferSize4);
+	// DownScale4<<<gridDim16, blockDim, 0, streams[0]>>>(colorBuffer16, colorBuffer64, bufferSize16);
 
-	Histogram2<<<1, dim3(bufferSize64.x, bufferSize64.y, 1), 0, streams[0]>>>(/*out*/d_histogram, /*in*/colorBuffer64 , bufferSize64);
+	// Histogram2<<<1, dim3(bufferSize64.x, bufferSize64.y, 1), 0, streams[0]>>>(/*out*/d_histogram, /*in*/colorBuffer64 , bufferSize64);
 
-	AutoExposure<<<1, 1, 0, streams[0]>>>(/*out*/d_exposure, /*in*/d_histogram, (float)(bufferSize64.x * bufferSize64.y), deltaTime);
+	// AutoExposure<<<1, 1, 0, streams[0]>>>(/*out*/d_exposure, /*in*/d_histogram, (float)(bufferSize64.x * bufferSize64.y), deltaTime);
 
-	BloomGuassian<<<dim3(divRoundUp(bufferSize4.x, 12), divRoundUp(bufferSize4.y, 12), 1), dim3(16, 16, 1), 0, streams[0]>>>(bloomBuffer4, colorBuffer4, bufferSize4, d_exposure);
-	BloomGuassian<<<dim3(divRoundUp(bufferSize16.x, 12), divRoundUp(bufferSize16.y, 12), 1), dim3(16, 16, 1), 0, streams[0]>>>(bloomBuffer16, colorBuffer16, bufferSize16, d_exposure);
+	// BloomGuassian<<<dim3(divRoundUp(bufferSize4.x, 12), divRoundUp(bufferSize4.y, 12), 1), dim3(16, 16, 1), 0, streams[0]>>>(bloomBuffer4, colorBuffer4, bufferSize4, d_exposure);
+	// BloomGuassian<<<dim3(divRoundUp(bufferSize16.x, 12), divRoundUp(bufferSize16.y, 12), 1), dim3(16, 16, 1), 0, streams[0]>>>(bloomBuffer16, colorBuffer16, bufferSize16, d_exposure);
 
-	Bloom<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
+	// Bloom<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
 
-	if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.02 && dot(sunDir, camera.dir.xyz) > 0)
-	{
-		sunPos -= Float2(0.5);
-		sunPos.x *= (float)renderWidth / (float)renderHeight;
-		LensFlare<<<gridDim, blockDim, 0, streams[0]>>>(sunPos, colorBufferA, bufferDim);
-	}
+	// if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.02 && dot(sunDir, camera.dir.xyz) > 0)
+	// {
+	// 	sunPos -= Float2(0.5);
+	// 	sunPos.x *= (float)renderWidth / (float)renderHeight;
+	// 	LensFlare<<<gridDim, blockDim, 0, streams[0]>>>(sunPos, colorBufferA, bufferDim);
+	// }
 
 	ToneMapping<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA , bufferDim , d_exposure);
 

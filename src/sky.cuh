@@ -387,38 +387,24 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 	if ((sunOrMoonDir.y > -0.05 && sunOrMoonDir.z >= 0) || (sunOrMoonDir.y > 0.05 && sunOrMoonDir.z < 0))
 	{
 		Float3 sunColor = GetEnvIncidentLight(rayDirOrRefl, sunOrMoonDir, numSkySample, numSkyLightSample);
-
-		// sunColor *= 3;
-		// if (dot(rayDirOrRefl, sunOrMoonDir) > 0.99999)
-		// {
-		// 	sunColor *= 3.3;
-		// }
-
-		sunColor = sunColor * (powf(max1f(dot(rayDirOrRefl, sunOrMoonDir), 0), 500.0) * 6.0 + 2.0);
-
+		sunColor = sunColor * (powf(max1f(dot(rayDirOrRefl, sunOrMoonDir), 0), 500.0) * 1.0 + 1.0);
 		return sunColor * beta;
 	}
 	else
 	{
 		sunOrMoonDir = -sunOrMoonDir;
-		Float3 moonColor = GetEnvIncidentLight(rayDirOrRefl, sunOrMoonDir, numSkySample, numSkyLightSample);
 
+		Float3 moonColor = GetEnvIncidentLight(rayDirOrRefl, sunOrMoonDir, numSkySample, numSkyLightSample);
 		moonColor *= 0.01;
 		moonColor += moonColor * powf(max1f(dot(rayDirOrRefl, sunOrMoonDir), 0), 55);
-
-		if (dot(rayDirOrRefl, sunOrMoonDir) > 0.999)
-		{
-			moonColor = Float3(0.9608, 0.9529, 0.8078) * 0.1;
-		}
+		moonColor += Float3(0.9608, 0.9529, 0.8078) * powf(max1f(dot(rayDirOrRefl, sunOrMoonDir), 0), 500.0) * 0.1;
 
 		float starColor = 0;
-
 		if (isDiffuseRay == false)
 		{
 			Float2 uv = Float2((atan2f(rayDirOrRefl.x, rayDirOrRefl.z) + clockTime / 300) / TWO_PI, acosf(rayDirOrRefl.y) / PI) * 6000.0;
 			starColor = StableStarField(uv, 0.995f) * 0.1;
 		}
-
 		return (moonColor + starColor) * beta;
 	}
 }

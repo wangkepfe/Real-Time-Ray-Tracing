@@ -269,3 +269,5 @@ __device__ Float3 UniformSampleHemisphere(const Float2 &u)
 }
 
 __device__ constexpr float UniformHemispherePdf() { return 1.0f / (2.0f * PI); }
+
+__device__ __forceinline__ constexpr float PowerHeuristic(float f, float g) { return (f * f) / (f * f + g * g); }

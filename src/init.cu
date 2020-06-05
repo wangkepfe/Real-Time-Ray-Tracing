@@ -37,16 +37,16 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	const int numMaterials     = 6;
 	SurfaceMaterial* materials = new SurfaceMaterial[numMaterials];
 
-	//materials[0].type          = LAMBERTIAN_DIFFUSE;
-	//materials[0].albedo        = Float3(0.9f);
+	materials[0].type          = LAMBERTIAN_DIFFUSE;
+	materials[0].albedo        = Float3(0.5f);
 
 	materials[0].type          = MICROFACET_REFLECTION;
-	materials[0].albedo        = Float3(0.9f);
+	materials[0].albedo        = Float3(0.5f);
 	materials[0].alpha         = TrowbridgeReitzRoughnessToAlpha(0.9f);
 	materials[0].F0            = Float3(0.05f);
 
 	materials[1].type          = MICROFACET_REFLECTION;
-	materials[1].albedo        = Float3(0.9f);
+	materials[1].albedo        = Float3(0.5f);
 	materials[1].alpha         = TrowbridgeReitzRoughnessToAlpha(0.01f);
 
 	materials[2].type          = EMISSIVE;
@@ -56,7 +56,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	materials[3].albedo        = Float3(0.1f, 0.2f, 0.9f);
 
 	materials[4].type          = MICROFACET_REFLECTION;
-	materials[4].albedo        = Float3(0.9f, 0.9f, 0.1f);
+	materials[4].albedo        = Float3(0.5f, 0.5f, 0.1f);
 	materials[4].alpha         = TrowbridgeReitzRoughnessToAlpha(0.5f);
 	materials[4].F0            = Float3(0.05f);
 
@@ -156,7 +156,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)& d_exposure, 4 * sizeof(float)));
 	GpuErrorCheck(cudaMalloc((void**)& d_histogram, 64 * sizeof(uint)));
 
-	float initExposureLum[4] = { 0.0f, 1.0f, 1.0f, 0.0f };
+	float initExposureLum[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	GpuErrorCheck(cudaMemcpy(d_exposure, initExposureLum, 4 * sizeof(float), cudaMemcpyHostToDevice));
 
 	// memory alloc
