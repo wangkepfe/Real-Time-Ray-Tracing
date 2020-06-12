@@ -148,7 +148,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer16, &resDesc));
 
 	// uint buffer
-	//indexBuffers.init(renderBufferSize);
+	indexBuffers.init(renderBufferSize);
 
 	GpuErrorCheck(cudaMalloc((void**)& gHitMask    , cbo.gridSize *      sizeof(ullint)));
 	GpuErrorCheck(cudaMemset(gHitMask              , 0  , cbo.gridSize * sizeof(ullint)));
@@ -165,7 +165,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)& d_materialsIdx     , numObjects *       sizeof(int)));
 	GpuErrorCheck(cudaMalloc((void**)& d_surfaceMaterials , numMaterials *     sizeof(SurfaceMaterial)));
 	GpuErrorCheck(cudaMalloc((void**)& d_sphereLights     , numSphereLights *  sizeof(Float4)));
-	//GpuErrorCheck(cudaMalloc((void**)& rayState           , renderBufferSize * sizeof(RayState)));
+
+	GpuErrorCheck(cudaMalloc((void**)& rayStates          , renderBufferSize * sizeof(RayState)));
 
 	// memory copy
 	GpuErrorCheck(cudaMemcpy(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice));
@@ -432,7 +433,7 @@ void RayTracer::cleanup()
 	cudaFreeArray(colorBufferArray4);
 	cudaFreeArray(colorBufferArray16);
 	cudaFreeArray(colorBufferArray64);
-	//indexBuffers.cleanUp();
+	indexBuffers.cleanUp();
 
 	cudaDestroyTextureObject(sceneTextures.sandAlbedo);
 	cudaFreeArray(texArraySandAlbedo);
@@ -456,5 +457,5 @@ void RayTracer::cleanup()
 
 	cudaFree(d_randInitVec);
 
-	//cudaFree(rayState);
+	cudaFree(rayStates);
 }

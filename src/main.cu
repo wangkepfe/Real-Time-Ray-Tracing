@@ -386,7 +386,7 @@ private:
 
 		// init stream
 		for (uint i = 0; i < 8; i++) {
-			checkCudaErrors(cudaStreamCreate(&m_streams[i]));
+			checkCudaErrors(cudaStreamCreateWithFlags(&m_streams[i], cudaStreamNonBlocking));
 		}
 
         // Create Cuda memory objects, imported from VK

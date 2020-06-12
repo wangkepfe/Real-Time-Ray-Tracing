@@ -1,5 +1,7 @@
 #pragma once
 
+#define CUDA_API_PER_THREAD_DEFAULT_STREAM
+
 #include <device_launch_parameters.h>
 #include <cuda.h>
 //#include <curand.h>
@@ -142,10 +144,10 @@ struct __align__(16) RayState
 	int        objectIdx;
 
 	Float3     L;
-	float      offset;
+	float      encodedNormal;
 
 	Float3     beta;
-	float      distance;
+	float      unused;
 
 	Float3     pos;
 	int        matType;
@@ -160,15 +162,15 @@ struct __align__(16) RayState
 	int        i;
 	int        bounce;
 
+	float      offset;
 	bool       terminated;
-	bool       unused;
-	bool       isSunVisible;
+	bool       unused3;
 	bool       isDiffuse;
 
 	bool       isRayIntoSurface;
 	bool       hit;
 	bool       unused2;
-	bool       isMoonVisible;
+	bool       unused4;
 
 	float      surfaceBetaWeight;
 	float      normalDotRayDir;
@@ -217,7 +219,7 @@ struct IndexBuffers
 	void memsetZero(uint renderBufferSize, cudaStream_t stream) {
 		for (uint i = 0; i < IndexBufferCount; ++i) {
 			GpuErrorCheck(cudaMemsetAsync(buffers[i], 0u, renderBufferSize * sizeof(uint), stream));
-			//GpuErrorCheck(cudaMemsetAsync(bufferTops[i], 0u, sizeof(uint), stream));
+			GpuErrorCheck(cudaMemsetAsync(bufferTops[i], 0u, sizeof(uint), stream));
 		}
 	}
 
@@ -299,7 +301,7 @@ private:
 	ConstBuffer                 cbo;
 
 	// ray state, intersection
-	RayState*                   rayState;
+	RayState*                   rayStates;
 
 	// primitives
 	Sphere*                     d_spheres;

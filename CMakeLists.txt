@@ -22,6 +22,7 @@ target_include_directories(myproject PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/cud
 target_link_libraries(myproject cudadevrt.lib)
 set_target_properties(myproject PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_compile_options(myproject PRIVATE "--keep")
+#target_compile_options(myproject PRIVATE "--default-stream per-thread")
 
 # vulkan
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

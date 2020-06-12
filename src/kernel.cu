@@ -8,6 +8,7 @@
 #include "raygen.cuh"
 #include "traverse.cuh"
 #include "hash.cuh"
+#include <thread>
 
 #define TOTAL_LIGHT_MAX_COUNT 3
 
@@ -32,7 +33,7 @@ __device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 			indexRemap[idx++] = i; // sphere light
 	}
 
-	if (rayState.isSunVisible)
+	if (dot(rayState.normal, cbo.sunDir) > 0.0)
 		indexRemap[idx++] = i++; // sun/moon light
 
 	if (idx == 0)
@@ -216,10 +217,6 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	}
 
 	// MIS power/balance heuristic
-	//Float3 lightSampleWeight = lightSampleSurfaceBsdf / lightSamplePdf * PowerHeuristic(lightSamplePdf, lightSampleSurfacePdf);
-	//Float3 surfaceSampleWeight = surfaceBsdfOverPdf * PowerHeuristic(surfaceSamplePdf, lightSamplePdf);
-	//Float3 lightSampleWeight = lightSampleSurfaceBsdf / (lightSamplePdf + lightSampleSurfacePdf);
-	//Float3 surfaceSampleWeight = surfaceSampleBsdf / (surfaceSamplePdf + lightSamplePdf);
 	Float3 betaWeight;
 
 	if (isLightSampled)
@@ -250,17 +247,7 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	rayState.orig              = rayState.pos + rayState.offset * normal;
 }
 
-__device__ inline void UpdateMaterial(ConstBuffer cbo, RayState& rayState, SceneMaterial sceneMaterial)
-{
-	rayState.matId = sceneMaterial.materialsIdx[rayState.objectIdx];
-	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
-	rayState.matType = (rayState.hit == false) ? MAT_SKY : mat.type;
-	rayState.isSunVisible = (cbo.sunDir.y > 0.0) && (dot(rayState.normal, cbo.sunDir) > 0.0);
-	rayState.isMoonVisible = (cbo.sunDir.y < 0.0) && (dot(rayState.normal, -cbo.sunDir) > 0.0);
-	rayState.hitLight = (rayState.matType == MAT_SKY) || (rayState.matType == EMISSIVE);
-	rayState.isDiffuse = (rayState.matType == LAMBERTIAN_DIFFUSE) || (rayState.matType == MICROFACET_REFLECTION);
-}
-
+#if 0
 __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer, SceneTextures textures)
 {
 	// index
@@ -275,7 +262,6 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	rayState.idx        = idx;
 	rayState.bounce     = 0;
 	rayState.terminated = false;
-	rayState.distance   = 0;
 	rayState.isDiffuseRay = false;
 
 	// init rand state
@@ -284,16 +270,12 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 
 	// generate ray
 	GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, rd2(&rayState.rdState[0], &rayState.rdState[1]));
-	//GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, Float2(0.4f) + 0.2f * rd2(&rayState.rdState[0], &rayState.rdState[1]));
 
 	// scene traverse
-	rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir, rayState.uv);
-
-	// store normal, pos
-	Float3 screenNormal = rayState.normal;
-
-	// update mat id
+	RaySceneIntersect(sceneGeometry, rayState);
 	UpdateMaterial(cbo, rayState, sceneMaterial);
+
+	rayState.encodedNormal = EncodeNormal_R11_G10_B11(rayState.normal);
 
 	for (int bounce = 0; bounce < 8; ++bounce)
 	{
@@ -305,14 +287,222 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 		{
 			if (rayState.terminated == false)
 			{
-				rayState.hit = RaySceneIntersect(Ray(rayState.orig, rayState.dir), sceneGeometry, rayState.pos, rayState.normal, rayState.objectIdx, rayState.offset, rayState.distance, rayState.isRayIntoSurface, rayState.normalDotRayDir, rayState.uv);
+				RaySceneIntersect(sceneGeometry, rayState);
 				UpdateMaterial(cbo, rayState, sceneMaterial);
 			}
 		}
 	}
 
 	// write to buffer
-	Store2D(Float4(rayState.L, EncodeNormal_R11_G10_B11(screenNormal)), colorBuffer, idx);
+	Store2D(Float4(rayState.L, rayState.encodedNormal), colorBuffer, idx);
+}
+
+__global__ void SurfaceShaderTraverse(RayState* rayStates, ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, SurfObj colorBuffer, SceneTextures textures)
+{
+	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	int i = gridDim.x * blockDim.x * idx.y + idx.x;
+	RayState& rayState = rayStates[i];
+
+	for (int bounce = 0; bounce < 8; ++bounce)
+	{
+		LightShader(cbo, rayState, sceneMaterial);
+		GlossyShader(cbo, rayState, sceneMaterial);
+		DiffuseShader(cbo, rayState, sceneMaterial, textures);
+
+		if (bounce != 7)
+		{
+			if (rayState.terminated == false)
+			{
+				RaySceneIntersect(sceneGeometry, rayState);
+				UpdateMaterial(cbo, rayState, sceneMaterial);
+			}
+		}
+	}
+
+	Store2D(Float4(rayState.L, rayState.encodedNormal), colorBuffer, idx);
+}
+
+__global__ void RayTraverse(RayState* rayStates, ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial)
+{
+	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	int i = gridDim.x * blockDim.x * idx.y + idx.x;
+	RayState& rayState = rayStates[i];
+
+	if (rayState.terminated == false)
+	{
+		RaySceneIntersect(sceneGeometry, rayState);
+		UpdateMaterial(cbo, rayState, sceneMaterial);
+	}
+}
+
+__global__ void SurfaceShader(RayState* rayStates, ConstBuffer cbo, SceneMaterial sceneMaterial, SurfObj colorBuffer, SceneTextures textures, bool storeColor = false)
+{
+	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	int i = gridDim.x * blockDim.x * idx.y + idx.x;
+	RayState& rayState = rayStates[i];
+
+	GlossyShader(cbo, rayState, sceneMaterial);
+	DiffuseShader(cbo, rayState, sceneMaterial, textures);
+
+	if (storeColor)
+		Store2D(Float4(rayState.L, rayState.encodedNormal), colorBuffer, idx);
+}
+
+__global__ void LightShader1(RayState* rayStates, ConstBuffer cbo, SceneMaterial sceneMaterial, SurfObj colorBuffer, bool storeColor = false)
+{
+	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	int i = gridDim.x * blockDim.x * idx.y + idx.x;
+	RayState& rayState = rayStates[i];
+
+	LightShader(cbo, rayState, sceneMaterial);
+
+	if (storeColor)
+		Store2D(Float4(rayState.L, rayState.encodedNormal), colorBuffer, idx);
+}
+#endif
+
+__global__ void RayGenTraverse(RayState* rayStates, ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, IndexBuffers indexBuffers)
+{
+	// index
+	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	int i = gridDim.x * blockDim.x * idx.y + idx.x;
+
+	// init ray state
+	RayState& rayState    = rayStates[i];
+	rayState.i            = i;
+	rayState.L            = 0.0;
+	rayState.beta         = 1.0;
+	rayState.idx          = idx;
+	rayState.bounce       = 0;
+	rayState.terminated   = false;
+	rayState.isDiffuseRay = false;
+
+	// init rand state
+	const uint seed = (idx.x << 16) ^ (idx.y);
+	for (int k = 0; k < 3; ++k) { curand_init(randInitVec[k], CURAND_2POW32 * 0.5f, WangHash(seed) + cbo.frameNum, &rayState.rdState[k]); }
+
+	// generate ray
+	GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, rd2(&rayState.rdState[0], &rayState.rdState[1]));
+
+	// scene traverse
+	RaySceneIntersect(sceneGeometry, rayState);
+	UpdateMaterial(cbo, rayState, sceneMaterial);
+
+	rayState.encodedNormal = EncodeNormal_R11_G10_B11(rayState.normal);
+
+	// regroup
+	uint* hitBuffer = indexBuffers.hitBufferA;
+	uint* missBuffer = indexBuffers.missBufferA;
+	uint* hitBufferTop = indexBuffers.hitBufferTopA;
+	uint* missBufferTop = indexBuffers.missBufferTopA;
+	uint oldVal;
+
+	if (rayState.hitLight == false)
+	{
+		oldVal = atomicInc(hitBufferTop, cbo.bufferSize);
+		hitBuffer[oldVal] = i;
+	}
+	else
+	{
+		oldVal = atomicInc(missBufferTop, cbo.bufferSize);
+		missBuffer[oldVal] = i;
+	}
+
+	//printf("i = %d, hitLight = %d, oldVal = %d\n", i, rayState.hitLight, oldVal);
+}
+
+
+__global__ void RayTraverse2(uint* idxBuffer, RayState* rayStates, ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, uint* hitBuffer, uint* missBuffer, uint* hitBufferTop, uint* missBufferTop)
+{
+	uint i = idxBuffer[blockIdx.x * 64 + threadIdx.y * 8 + threadIdx.x];
+	RayState& rayState = rayStates[i];
+
+	if (rayState.terminated == false)
+	{
+		RaySceneIntersect(sceneGeometry, rayState);
+		UpdateMaterial(cbo, rayState, sceneMaterial);
+	}
+
+	if ((rayState.hitLight == false) && (rayState.terminated == false))
+	{
+		uint oldVal = atomicInc(hitBufferTop, cbo.bufferSize);
+		hitBuffer[oldVal] = i;
+	}
+	else
+	{
+		uint oldVal = atomicInc(missBufferTop, cbo.bufferSize);
+		missBuffer[oldVal] = i;
+	}
+}
+
+__global__ void SurfaceShader2(uint* idxBuffer, RayState* rayStates, ConstBuffer cbo, SceneMaterial sceneMaterial, SceneTextures textures)
+{
+	uint i = idxBuffer[blockIdx.x * 64 + threadIdx.y * 8 + threadIdx.x];
+	RayState& rayState = rayStates[i];
+	if (rayState.terminated == true) return;
+
+	GlossyShader(cbo, rayState, sceneMaterial);
+	DiffuseShader(cbo, rayState, sceneMaterial, textures);
+}
+
+__global__ void LightShader2(uint* idxBuffer, RayState* rayStates, ConstBuffer cbo, SceneMaterial sceneMaterial, SurfObj colorBuffer)
+{
+	uint i = idxBuffer[blockIdx.x * 64 + threadIdx.y * 8 + threadIdx.x];
+	RayState& rayState = rayStates[i];
+	if (rayState.terminated == true) return;
+
+	LightShader(cbo, rayState, sceneMaterial);
+
+	Int2 idx(i % cbo.bufferDim.x, i / cbo.bufferDim.x);
+	Store2D(Float4(rayState.L, rayState.encodedNormal), colorBuffer, idx);
+}
+
+__global__ void LightShaderLaunch(
+	uint*         bufferTop,
+	uint*         idxBuffer,
+
+	RayState*     rayStates,
+	ConstBuffer   cbo,
+	SceneMaterial sceneMaterial,
+	SurfObj       colorBuffer)
+{
+	LightShader2<<<dim3(divRoundUp(*bufferTop, 64u), 1, 1), dim3(8, 8, 1), 0>>> (
+		idxBuffer,
+		rayStates, cbo, sceneMaterial, colorBuffer);
+}
+
+__global__ void SurfaceShaderLaunch(
+	uint*         bufferTop,
+	uint*         idxBuffer,
+
+	RayState*     rayStates,
+	ConstBuffer   cbo,
+	SceneMaterial sceneMaterial,
+	SceneTextures textures)
+{
+	SurfaceShader2<<<dim3(divRoundUp(*bufferTop, 64u), 1, 1), dim3(8, 8, 1), 0>>> (
+		idxBuffer,
+		rayStates, cbo, sceneMaterial, textures);
+}
+
+__global__ void RayTraverseLaunch(
+	uint*         bufferTop,
+	uint*         idxBuffer,
+
+	RayState*     rayStates,
+	ConstBuffer   cbo,
+	SceneGeometry sceneGeometry,
+	SceneMaterial sceneMaterial,
+
+	uint*         hitBuffer,
+	uint*         missBuffer,
+	uint*         hitBufferTop,
+	uint*         missBufferTop)
+{
+	RayTraverse2<<<dim3(divRoundUp(*bufferTop, 64u), 1, 1), dim3(8, 8, 1), 0>>> (
+		idxBuffer,
+		rayStates, cbo, sceneGeometry, sceneMaterial,
+		hitBuffer, missBuffer, hitBufferTop, missBufferTop);
 }
 
 void RayTracer::draw(SurfObj* renderTarget)
@@ -322,13 +512,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	float deltaTime = timer.getDeltaTime();
 	float clockTime = timer.getTime();
 
-	//clockTime = 6;
-
 	cbo.clockTime     = clockTime;
-
-	// const Float3 axis = normalize(Float3(0.0, 0.0, 1.0));
-	// const float angle = fmodf(clockTime * TWO_PI / 30, TWO_PI);
-	// Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 2.5)).normalized();
 
     const Float3 axis = normalize(Float3(1.0f, 0.0f, -0.4f));
 	const float angle = fmodf(clockTime * TWO_PI / 100, TWO_PI);
@@ -337,28 +521,8 @@ void RayTracer::draw(SurfObj* renderTarget)
 	cbo.sunDir        = sunDir;
 	cbo.frameNum      = cbo.frameNum + 1;
 
-	// ----- scene -----
-	// sphere
-	// Float3 spherePos = Float3(sinf(clockTime * TWO_PI / 30) * 0.01f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
-	// cameraFocusPos        = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
-	// spheres[0]            = Sphere(spherePos, 0.005f);
-	// sphereLights[0]           = spheres[0];
-
-	// GpuErrorCheck(cudaMemcpyAsync(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
-	// GpuErrorCheck(cudaMemcpyAsync(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice, streams[0]));
-
-	// d_sceneGeometry.numSpheres      = numSpheres;
-	// d_sceneGeometry.spheres         = d_spheres;
-
-	// d_sceneMaterial.numSphereLights = numSphereLights;
-	// d_sceneMaterial.sphereLights    = d_sphereLights;
-
 	// camera
 	Camera& camera = cbo.camera;
-	// Float3 cameraLookAtPoint = cameraFocusPos + Float3(0.0f, 0.01f, 0.0f);
-	// camera.pos               = cameraFocusPos + rotate3f(Float3(0, 1, 0), fmodf(clockTime * TWO_PI / 300, TWO_PI), Float3(0.0f, 0.0f, -0.1f)) + Float3(0, abs(sinf(clockTime * TWO_PI / 300)) * 0.05f, 0);
-	// camera.dir               = normalize(cameraLookAtPoint - camera.pos.xyz);
-	// camera.left              = cross(Float3(0, 1, 0), camera.dir.xyz);
 
 	Float3 camUp = normalize(cross(camera.dir.xyz, camera.left.xyz)); // up
 	Mat3 invCamMat(camera.left.xyz, camUp, camera.dir.xyz); // build view matrix
@@ -375,14 +539,146 @@ void RayTracer::draw(SurfObj* renderTarget)
 	GpuErrorCheck(cudaMemsetAsync(d_histogram, 0, 64 * sizeof(uint), streams[0]));
 
 	// ------------------ Ray Gen -------------------
+#if 0 // 41 FPS
 	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA, sceneTextures);
+#elif 0 // 21 FPS
+	RayGenTraverse<<<gridDim, blockDim, 0, streams[0]>>>(rayStates, cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec);
+	SurfaceShaderTraverse<<<gridDim, blockDim, 0, streams[0]>>>(rayStates, cbo, d_sceneGeometry, d_sceneMaterial, colorBufferA, sceneTextures);
+#elif 0 // 19 FPS
+	RayGenTraverse<<<gridDim, blockDim, 0, streams[0]>>>(rayStates, cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec);
+	for (int bounce = 0; bounce < 8; ++bounce)
+	{
+		if (bounce != 7)
+		{
+			SurfaceShader<<<gridDim, blockDim, 0, streams[0]>>>(rayStates, cbo, d_sceneGeometry, d_sceneMaterial, colorBufferA, sceneTextures);
+			RayTraverse<<<gridDim, blockDim, 0, streams[0]>>>(rayStates, cbo, d_sceneGeometry, d_sceneMaterial);
+		}
+		else
+		{
+			SurfaceShader<<<gridDim, blockDim, 0, streams[0]>>>(rayStates, cbo, d_sceneGeometry, d_sceneMaterial, colorBufferA, sceneTextures, true);
+		}
+	}
+#elif 1
+	indexBuffers.memsetZero(renderBufferSize, streams[0]);
+
+	RayGenTraverse<<<gridDim, blockDim, 0, streams[0]>>>(rayStates, cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, indexBuffers);
+
+	cudaStreamSynchronize(streams[0]);
+
+	SurfaceShaderLaunch<<<dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[1]>>>(
+	/*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA,
+	rayStates, cbo, d_sceneMaterial, sceneTextures);
+
+	LightShaderLaunch<<<dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[0]>>>(
+	/*in*/indexBuffers.missBufferTopA, /*in*/indexBuffers.missBufferA,
+	rayStates, cbo, d_sceneMaterial, colorBufferA);
+
+	cudaStreamSynchronize(streams[0]);
+	cudaStreamSynchronize(streams[1]);
+
+	RayTraverseLaunch<<<dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[0]>>>(
+		/*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA,
+		rayStates, cbo, d_sceneGeometry, d_sceneMaterial,
+		/*out*/indexBuffers.hitBufferB, /*out*/indexBuffers.missBufferB,
+		/*out*/indexBuffers.hitBufferTopB, /*out*/indexBuffers.missBufferTopB);
+
+	LightShaderLaunch<<<dim3(1, 1, 1), dim3(1, 1, 1), 0, streams[0]>>>(
+		/*in*/indexBuffers.missBufferTopB, /*in*/indexBuffers.missBufferB,
+		rayStates, cbo, d_sceneMaterial, colorBufferA);
+
+	//SurfaceShaderLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//		/*in*/indexBuffers.hitBufferTopB, /*in*/indexBuffers.hitBufferB,
+	//		rayStates, cbo, d_sceneMaterial, colorBufferA, sceneTextures, true);
+
+	//GpuErrorCheck(cudaDeviceSynchronize());
+	//GpuErrorCheck(cudaPeekAtLastError());
+
+	//for (int bounce = 0; bounce < 2; ++bounce)
+	//{
+	//	if (bounce != 1)
+	//	{
+	//		if (bounce % 2 == 0)
+	//		{
+	//			cudaMemsetAsync(indexBuffers.hitBufferTopB, 0u, sizeof(uint), streams[0]);
+	//			cudaMemsetAsync(indexBuffers.missBufferTopB, 0u, sizeof(uint), streams[0]);
+
+	//			LightShaderLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.missBufferTopA, /*in*/indexBuffers.missBufferA,
+	//				rayStates, cbo, d_sceneMaterial, colorBufferA);
+
+	//			GpuErrorCheck(cudaDeviceSynchronize());
+	//			GpuErrorCheck(cudaPeekAtLastError());
+
+	//			SurfaceShaderLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA,
+	//				rayStates, cbo, d_sceneMaterial, colorBufferA, sceneTextures);
+
+	//			GpuErrorCheck(cudaDeviceSynchronize());
+	//			GpuErrorCheck(cudaPeekAtLastError());
+
+	//			RayTraverseLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.hitBufferTopA, /*in*/indexBuffers.hitBufferA,
+	//				rayStates, cbo, d_sceneGeometry, d_sceneMaterial,
+	//				/*out*/indexBuffers.hitBufferB, /*out*/indexBuffers.missBufferB,
+	//				/*out*/indexBuffers.hitBufferTopB, /*out*/indexBuffers.missBufferTopB);
+
+	//			GpuErrorCheck(cudaDeviceSynchronize());
+	//			GpuErrorCheck(cudaPeekAtLastError());
+	//		}
+	//		else
+	//		{
+	//			cudaMemsetAsync(indexBuffers.hitBufferTopA, 0u, sizeof(uint), streams[0]);
+	//			cudaMemsetAsync(indexBuffers.missBufferTopA, 0u, sizeof(uint), streams[0]);
+
+	//			LightShaderLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.missBufferTopB, /*in*/indexBuffers.missBufferB,
+	//				rayStates, cbo, d_sceneMaterial, colorBufferA);
+
+	//			GpuErrorCheck(cudaDeviceSynchronize());
+	//			GpuErrorCheck(cudaPeekAtLastError());
+
+	//			SurfaceShaderLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.hitBufferTopB, /*in*/indexBuffers.hitBufferB,
+	//				rayStates, cbo, d_sceneMaterial, colorBufferA, sceneTextures);
+
+	//			GpuErrorCheck(cudaDeviceSynchronize());
+	//			GpuErrorCheck(cudaPeekAtLastError());
+
+	//			RayTraverseLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.hitBufferTopB, /*in*/indexBuffers.hitBufferB,
+	//				rayStates, cbo, d_sceneGeometry, d_sceneMaterial,
+	//				/*out*/indexBuffers.hitBufferA, /*out*/indexBuffers.missBufferA,
+	//				/*out*/indexBuffers.hitBufferTopA, /*out*/indexBuffers.missBufferTopA);
+
+	//			GpuErrorCheck(cudaDeviceSynchronize());
+	//			GpuErrorCheck(cudaPeekAtLastError());
+	//		}
+	//	}
+	//	else
+	//	{
+	//		LightShaderLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.missBufferTopB, /*in*/indexBuffers.missBufferB,
+	//				rayStates, cbo, d_sceneMaterial, colorBufferA, true);
+
+	//		GpuErrorCheck(cudaDeviceSynchronize());
+	//		GpuErrorCheck(cudaPeekAtLastError());
+
+	//		SurfaceShaderLaunch<<<gridDim, blockDim, 0, streams[0]>>>(
+	//				/*in*/indexBuffers.hitBufferTopB, /*in*/indexBuffers.hitBufferB,
+	//				rayStates, cbo, d_sceneMaterial, colorBufferA, sceneTextures, true);
+
+	//		GpuErrorCheck(cudaDeviceSynchronize());
+	//		GpuErrorCheck(cudaPeekAtLastError());
+	//	}
+	//}
+#endif
 
 	// ---------------- post processing ----------------
 
-	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
-	else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
+	//if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
+	//else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
 
-	DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim);
+	// DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim);
 
 	// DownScale4<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBuffer4, bufferDim);
 	// DownScale4<<<gridDim4, blockDim, 0, streams[0]>>>(colorBuffer4, colorBuffer16, bufferSize4);
