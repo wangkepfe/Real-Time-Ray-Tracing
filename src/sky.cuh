@@ -214,9 +214,12 @@ inline __device__ float GetWaves(Float2 pos, int iterations, float clockTime)
     return w / ws;
 }
 
+#define WATER_GEOMETRY_QUALITY 8
+#define WATER_GEOMETRY_TRAVERSE_STEP 3
+
 inline __device__ void RayMarchWater(float& dist, Float3& hitpos, Float3 camera, Float3 start, Float3 end, float clockTime)
 {
-	int iter = 8;
+	int iter = WATER_GEOMETRY_QUALITY;
 
 #if 1
 	Float3 pos = start;
@@ -229,7 +232,7 @@ inline __device__ void RayMarchWater(float& dist, Float3& hitpos, Float3 camera,
 	float h_low = end.y - (1.0 - GetWaves(end.xz(), iter, clockTime)) * vec.y;
 	float h_mid = 0.0;
 
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < WATER_GEOMETRY_TRAVERSE_STEP; i++)
 	{
 		t_mid = mix1f(t_high, t_low, h_high / (h_high - h_low));
 		pos = start + vec * t_mid;
@@ -272,10 +275,12 @@ inline __device__ void RayMarchWater(float& dist, Float3& hitpos, Float3 camera,
 #endif
 }
 
+#define WATER_NORMAL_QUALITY 20
+
 inline __device__ Float3 GetWaterNormal(Float2 pos, float depth, float clockTime, float distFallOff)
 {
 	const float eps = 1e-3;
-	int iter = mix1f(4, 30, distFallOff);
+	int iter = WATER_NORMAL_QUALITY;
 	Float3 normal;
 #if 0
 	Float3 n;
@@ -296,6 +301,8 @@ inline __device__ Float3 GetWaterNormal(Float2 pos, float depth, float clockTime
 	return normal;
 }
 
+#define GEOMETRY_WATER 0
+
 inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime)
 {
 	const float waterDepth = 1;
@@ -315,6 +322,8 @@ inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime
 	if (waterCeilingT > 1e4f) { return; }
 	Float3 waterCeilingHitPos = GetRayPlaneIntersectPoint(waterCeiling, ray, waterCeilingT, tError);
 
+#if GEOMETRY_WATER
+
 	float waterFloorT = RayPlaneIntersect(waterFloor, ray, tError);
 	if (waterFloorT > 1e4f) { return; }
 	Float3 waterFloorHitPos = GetRayPlaneIntersectPoint(waterFloor, ray, waterFloorT, tError);
@@ -323,6 +332,13 @@ inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime
 	float dist;
 	Float3 pos;
 	RayMarchWater(dist, pos, orig, waterCeilingHitPos, waterFloorHitPos, clockTime);
+
+#else
+
+	Float3 pos = waterCeilingHitPos;
+	float dist = distance(pos, orig);
+
+#endif
 
 	// normal blending
 	float distFallOff = 1.0 / (dist * dist * 1e-4 + 1.0);
@@ -339,9 +355,15 @@ inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime
 
 	// beta
 	beta = fresnel;
+
+#if GEOMETRY_WATER
+
+	// add light wave color
 	float height = min1f(powf(cosf((pos.y / waterDepth) * PI / 2), 16) * 10, 1.0);
 	beta += height * (Float3(1.0) - fresnel) * Float3(0.8, 0.9, 0.6);
 	beta = min3f(beta, Float3(1.0));
+
+#endif
 }
 
 inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, float clockTime, bool isDiffuseRay)
@@ -351,8 +373,8 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 	Float3 rayDirOrRefl = raydir;
 	Float3 beta = Float3(1.0);
 
-	int numSkySample = 12;
-	int numSkyLightSample = 6;
+	int numSkySample = 16;
+	int numSkyLightSample = 8;
 
 	if (rayDirOrRefl.y < 0.01 && isDiffuseRay == false) { OceanShader(rayDirOrRefl, beta, clockTime * 0.7); }
 
@@ -371,14 +393,17 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 		Float3 moonColor = GetEnvIncidentLight(rayDirOrRefl, sunOrMoonDir, numSkySample, numSkyLightSample);
 		moonColor *= 0.01;
 		moonColor += moonColor * powf(max1f(dot(rayDirOrRefl, sunOrMoonDir), 0), 55);
-		moonColor += Float3(0.9608, 0.9529, 0.8078) * powf(max1f(dot(rayDirOrRefl, sunOrMoonDir), 0), 500.0) * 0.1;
+		if (dot(rayDirOrRefl, sunOrMoonDir) > 0.999)
+			moonColor += Float3(0.9608, 0.9529, 0.8078) * 0.1;
 
 		float starColor = 0;
+#if 0
 		if (isDiffuseRay == false)
 		{
 			Float2 uv = Float2((atan2f(rayDirOrRefl.x, rayDirOrRefl.z) + clockTime / 300) / TWO_PI, acosf(rayDirOrRefl.y) / PI) * 6000.0;
 			starColor = StableStarField(uv, 0.995f) * 0.1;
 		}
+#endif
 		return (moonColor + starColor) * beta;
 	}
 }

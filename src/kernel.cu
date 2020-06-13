@@ -210,31 +210,54 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 			MacrofacetReflection(lightSampleSurfaceBsdfOverPdf, lightSampleSurfaceBsdf, lightSampleSurfacePdf, normal, lightSampleDir, rayDir, F0, albedo, alpha);
 	}
 
-	// MIS power/balance heuristic
-	Float3 betaWeight;
-
+	// -------------------------------------- MIS balance heuristic ------------------------------------------
 	if (isLightSampled)
 	{
 		if (isDeltaLight)
 		{
+			// if a delta light (or say distant/directional light, typically sun light) is sampled,
+			// no surface sample is needed since the weight for surface is zero
 			rayState.beta *= lightSampleSurfaceBsdf;
 			rayState.dir = lightSampleDir;
 		}
 		else
 		{
+			// The full equation for MIS is L = sum w_i * f_i / pdf_i
+			// which in this case, two samples, one from surface bsdf distribution, one from light distribution
+			//
+			// L = w_surf * bsdf(dir_surf) / surfaceSamplePdf(dir_surf) + w_light * bsdf(dir_light) / surfaceSamplePdf(dir_light)
+			// where w_surf = surfaceSamplePdf(dir_surf) / (surfaceSamplePdf(dir_surf) + lightSamplePdf)
+			//       w_light = surfaceSamplePdf(dir_light) / (surfaceSamplePdf(dir_light) + lightSamplePdf)
+			//
+			// Then it'll become
+			// L = bsdf(dir_surf) / (surfaceSamplePdf(dir_surf) + lightSamplePdf) +
+			//     bsdf(dir_light) / (surfaceSamplePdf(dir_light) + lightSamplePdf)
+			//
+			// My algorithm takes bsdf as value and misWeight*pdf as weight,
+			// using the weights to choose either sample light or surface.
+			// It achieves single ray sample per surface shader with no bias to MIS balance heuristic algorithm
 			float lightSampleWeight =  1.0f / (lightSamplePdf + lightSampleSurfacePdf);
 			float surfaceSampleWeight = 1.0f / (surfaceSamplePdf + lightSamplePdf);
 
-			//bool chooseSurfaceSample = rd(&rayState.rdState[2]) < 0.5;
-			bool chooseSurfaceSample = rd(&rayState.rdState[2]) < surfaceSampleWeight / (lightSampleWeight + surfaceSampleWeight);
-			/// @todo: surfaceSampleWeight / (lightSampleWeight + surfaceSampleWeight);
+			float chooseSurfaceFactor = surfaceSampleWeight / (lightSampleWeight + surfaceSampleWeight);
 
-			rayState.beta *= chooseSurfaceSample ? (surfaceSampleBsdf * surfaceSampleWeight) : (lightSampleSurfaceBsdf * lightSampleWeight);
-			rayState.dir = chooseSurfaceSample ? surfSampleDir : lightSampleDir;
+			if (rd(&rayState.rdState[2]) < chooseSurfaceFactor)
+			{
+				// choose surface scatter sample
+				rayState.beta *= min3f(surfaceSampleBsdf * surfaceSampleWeight / chooseSurfaceFactor, Float3(1.0f));
+				rayState.dir = surfSampleDir;
+			}
+			else
+			{
+				// choose light sample
+				rayState.beta *= min3f(lightSampleSurfaceBsdf * lightSampleWeight / (1.0f - chooseSurfaceFactor), Float3(1.0f));
+				rayState.dir = lightSampleDir;
+			}
 		}
 	}
 	else
 	{
+		// if no light sample condition is met, sample surface only, which is the vanila case
 		rayState.beta *= surfaceBsdfOverPdf;
 		rayState.dir = surfSampleDir;
 	}
@@ -332,9 +355,9 @@ void RayTracer::draw(SurfObj* renderTarget)
 	DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim);
 
 	// Histogram
-	DownScale4<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBuffer4, bufferDim);
-	DownScale4<<<gridDim4, blockDim, 0, streams[0]>>>(colorBuffer4, colorBuffer16, bufferSize4);
-	DownScale4<<<gridDim16, blockDim, 0, streams[0]>>>(colorBuffer16, colorBuffer64, bufferSize16);
+	DownScale4_fp32_fp16<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBuffer4, bufferDim);
+	DownScale4_fp16_fp16<<<gridDim4, blockDim, 0, streams[0]>>>(colorBuffer4, colorBuffer16, bufferSize4);
+	DownScale4_fp16_fp16<<<gridDim16, blockDim, 0, streams[0]>>>(colorBuffer16, colorBuffer64, bufferSize16);
 
 	Histogram2<<<1, dim3(bufferSize64.x, bufferSize64.y, 1), 0, streams[0]>>>(/*out*/d_histogram, /*in*/colorBuffer64 , bufferSize64);
 

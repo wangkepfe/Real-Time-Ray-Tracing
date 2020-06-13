@@ -7,7 +7,7 @@
 #define USE_CATMULL_ROM_SAMPLER 1
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 0
 
-__device__ Float3 Uncharted2Tonemap(Float3 x)
+__device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x)
 {
 	const float A = 0.15;
 	const float B = 0.50;
@@ -67,6 +67,21 @@ __global__ void TAA(
 	Store2D(Float4(outColor, currentColor.w), accumulateBuffer, idx);
 }
 
+__global__ void BufferCopy(
+	SurfObj   inBuffer,
+	SurfObj   OutBuffer,
+	Int2                  size)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= size.x || idx.y >= size.y) return;
+
+    Store2D(Load2D(inBuffer, idx), OutBuffer, idx);
+}
+
+#if 0
 __global__ void BufferAdd(
 	SurfObj   OutBuffer,
 	SurfObj   inBuffer,
@@ -98,34 +113,6 @@ __global__ void BufferDivide(
     Store2D(Float4(Load2D(OutBuffer, idx).xyz / a, 1.0), OutBuffer, idx);
 }
 
-__global__ void BufferCopy(
-	SurfObj   inBuffer,
-	SurfObj   OutBuffer,
-	Int2                  size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-    Store2D(Load2D(inBuffer, idx), OutBuffer, idx);
-}
-
-//__global__ void BufferCopyFp16(
-//	SurfObj   OutBuffer,
-//	SurfObj   inBuffer,
-//	Int2                  size)
-//{
-//	Int2 idx;
-//	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-//	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-//
-//	if (idx.x >= size.x || idx.y >= size.y) return;
-//
-//    Store2D(Load2Dfp16(inBuffer, idx), OutBuffer, idx);
-//}
-
 __global__ void BufferInit(
 	SurfObj   OutBuffer,
 	Int2      size)
@@ -138,6 +125,8 @@ __global__ void BufferInit(
 
     Store2D(Float4(0), OutBuffer, idx);
 }
+
+#endif
 
 __global__ void FilterScale(
 	SurfObj* renderTarget,
@@ -269,7 +258,7 @@ __global__ void Histogram2(
 	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (idx.x >= size.x || idx.y >= size.y) return;
 
-	Float3 color = Load2D(InBuffer, idx).xyz;
+	Float3 color = Load2Dfp16(InBuffer, idx).xyz;
 	float luminance = color.max();//dot(color, Float3(0.3, 0.6, 0.1));
 	float logLuminance = log2f(luminance) * 0.1 + 0.75;
 	uint fBucket = (uint)rintf(clampf(logLuminance, 0.0, 1.0) * 63 * 0.99999);
@@ -372,7 +361,7 @@ __global__ void AutoExposure(float* exposure, uint* histogram, float area, float
 	exposure[2] = lumBrightTemp;
 }
 
-__global__ void DownScale4(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
+__global__ void DownScale4_fp32_fp16(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
 {
 	Int2 idx;
 	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -397,7 +386,38 @@ __global__ void DownScale4(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
 			sharedBuffer[threadIdx.x + 2][threadIdx.y] +
 			sharedBuffer[threadIdx.x][threadIdx.y + 2] +
 			sharedBuffer[threadIdx.x + 2][threadIdx.y + 2];
-		Store2D(result, OutBuffer, Int2(idx.x / 4, idx.y / 4));
+
+		Store2Dfp16(result, OutBuffer, Int2(idx.x / 4, idx.y / 4));
+	}
+}
+
+__global__ void DownScale4_fp16_fp16(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	__shared__ Float4 sharedBuffer[8][8];
+	sharedBuffer[threadIdx.x][threadIdx.y] = Load2Dfp16(InBuffer, idx) / 16;
+
+	if (threadIdx.x % 2 == 0 && threadIdx.y % 2 == 0)
+	{
+		sharedBuffer[threadIdx.x][threadIdx.y] =
+			sharedBuffer[threadIdx.x][threadIdx.y] +
+			sharedBuffer[threadIdx.x + 1][threadIdx.y] +
+			sharedBuffer[threadIdx.x][threadIdx.y + 1] +
+			sharedBuffer[threadIdx.x + 1][threadIdx.y + 1];
+	}
+
+	if (threadIdx.x % 4 == 0 && threadIdx.y % 4 == 0)
+	{
+		Float4 result =
+			sharedBuffer[threadIdx.x][threadIdx.y] +
+			sharedBuffer[threadIdx.x + 2][threadIdx.y] +
+			sharedBuffer[threadIdx.x][threadIdx.y + 2] +
+			sharedBuffer[threadIdx.x + 2][threadIdx.y + 2];
+
+		Store2Dfp16(result, OutBuffer, Int2(idx.x / 4, idx.y / 4));
 	}
 }
 
@@ -528,7 +548,7 @@ __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, fl
 	idx2.y = blockIdx.y * 12 + threadIdx.y - 2;
 
 	// read global memory buffer. One-to-one mapping
-	Float3 inColor = Load2D(inBuffer, idx2).xyz;
+	Float3 inColor = Load2Dfp16(inBuffer, idx2).xyz;
 
 	// discard dark pixels
 	float lum = inColor.max();
@@ -552,7 +572,7 @@ __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, fl
 		outColor += filterKernel[i] * sharedBuffer[x][y];
 	}
 
-	Store2D(Float4(outColor, 1.0), outBuffer, idx2);
+	Store2Dfp16(Float4(outColor, 1.0), outBuffer, idx2);
 }
 
 __global__ void Bloom(SurfObj colorBuffer, SurfObj buffer4, SurfObj buffer16, Int2 size, Int2 size4, Int2 size16)
@@ -563,8 +583,8 @@ __global__ void Bloom(SurfObj colorBuffer, SurfObj buffer4, SurfObj buffer16, In
 	if (idx.x >= size.x || idx.y >= size.y) return;
 	Float2 uv((float)idx.x / size.x, (float)idx.y / size.y);
 
-	Float3 sampledColor4 = SampleBicubicCatmullRom(buffer4, uv, size4).xyz;
-	Float3 sampledColor16 = SampleBicubicCatmullRom(buffer16, uv, size16).xyz;
+	Float3 sampledColor4 = SampleBicubicCatmullRomfp16(buffer4, uv, size4).xyz;
+	Float3 sampledColor16 = SampleBicubicCatmullRomfp16(buffer16, uv, size16).xyz;
 	Float3 color = Load2D(colorBuffer, idx).xyz;
 
 	color = color + (sampledColor4 + sampledColor16) * 0.05;
@@ -632,7 +652,7 @@ __global__ void LensFlare(Float2 sunPos, SurfObj colorBuffer, Int2 size)
     float angle = atan2f(vec.y, vec.x);
 
     // add the sun with the frill things
-    //color += max(0.1 / powf(len * 50. , 5.0)       , 0.0) * abs(sinf(angle * 5.0 + cosf(angle * 9.0))) / 20.0;
+    color += max(0.1 / powf(len * 10. , 5.0)       , 0.0) * abs(sinf(angle * 5.0 + cosf(angle * 9.0))) / 20.0;
     color += max(0.1 / powf(len * 10.0, 1.0 / 20.0), 0.0) + abs(sinf(angle * 3.0 + cosf(angle * 9.0))) / 16.0 * abs(sinf(angle * 9.0));
 
 	Store2D(Float4(color, 1.0), colorBuffer, idx);

@@ -2,13 +2,13 @@
 
 #include <cuda_runtime.h>
 #include <surface_indirect_functions.h>
-//#include "cuda_fp16.h"
+#include "fp16Utils.cuh"
 
 __device__ Float4 Load2D(
 	SurfObj tex,
 	Int2    uv)
 {
-    float4 ret = surf2Dread<float4>(tex, uv.x * 16, uv.y, cudaBoundaryModeClamp);
+    float4 ret = surf2Dread<float4>(tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
 	return Float4(ret.x, ret.y, ret.z, ret.w);
 }
 
@@ -17,40 +17,33 @@ __device__ void Store2D(
 	SurfObj tex,
 	Int2    uv)
 {
-    surf2Dwrite(make_float4(val.x, val.y, val.z, val.w), tex, uv.x * 16, uv.y, cudaBoundaryModeClamp);
+    surf2Dwrite(make_float4(val.x, val.y, val.z, val.w), tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
 }
 
-//union UShortHalf { ushort1 us1; __half h; __device__ UShortHalf() : h(0) {} };
+__device__ Float4 Load2Dfp16(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
 
-//__device__ Float4 Load2Dfp16(
-//	SurfObj tex,
-//	Int2    uv)
-//{
-//	ushort4 us4 = surf2Dread<ushort4>(tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
-//	UShortHalf Cvt[4];
-//	Cvt[0].us1 = make_ushort1(us4.x);
-//	Cvt[1].us1 = make_ushort1(us4.y);
-//	Cvt[2].us1 = make_ushort1(us4.z);
-//	Cvt[3].us1 = make_ushort1(us4.w);
-//	return Float4(
-//		__half2float(Cvt[0].h),
-//		__half2float(Cvt[1].h),
-//		__half2float(Cvt[2].h),
-//		__half2float(Cvt[3].h));
-//}
-//
-//__device__ void Store2Dfp16(
-//    Float4  val,
-//	SurfObj tex,
-//	Int2    uv)
-//{
-//	UShortHalf Cvt[4];
-//	Cvt[0].h = __float2half(val.x);
-//	Cvt[1].h = __float2half(val.y);
-//	Cvt[2].h = __float2half(val.z);
-//	Cvt[3].h = __float2half(val.w);
-//    surf2Dwrite(make_ushort4(Cvt[0].us1.x, Cvt[1].us1.x, Cvt[2].us1.x, Cvt[3].us1.x), tex, uv.x * 8, uv.y, cudaBoundaryModeClamp);
-//}
+	ushort4ToHalf4Converter conv(ret);
+	Half4 hf4 = conv.hf4;
+
+	return half4ToFloat4(hf4);
+}
+
+__device__ void Store2Dfp16(
+    Float4  fl4,
+	SurfObj tex,
+	Int2    uv)
+{
+    Half4 hf4 = float4ToHalf4(fl4);
+
+    ushort4ToHalf4Converter conv(hf4);
+    ushort4 us4 = conv.us4;
+
+    surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+}
 
 __device__ Float4 SampleBicubicSmoothStep(
     SurfObj tex,
@@ -148,12 +141,10 @@ __device__ Float4 SampleBicubicCatmullRom(
     return OutColor;
 }
 
-#if 0
-__device__ Float4 SampleBicubicSmoothStepThreshold(
+__device__ Float4 SampleBicubicCatmullRomfp16(
     SurfObj tex,
     const Float2&       uv,
-    const Int2&         texSize,
-    float threshold)
+    const Int2&         texSize)
 {
     Float2 UV         = uv * texSize;
     Float2 invTexSize = 1.0f / texSize;
@@ -163,40 +154,45 @@ __device__ Float4 SampleBicubicSmoothStepThreshold(
 	Float2 f2 = f * f;
 	Float2 f3 = f2 * f;
 
-    Float2 w1 = -2.0f * f3 + 3.0f * f2;
-    Float2 w0 = 1.0f - w1;
+    Float2 w0 = f2 - 0.5f * (f3 + f);
+	Float2 w1 = 1.5f * f3 - 2.5f * f2 + 1.0f;
+	Float2 w3 = 0.5f * (f3 - f2);
+	Float2 w2 = 1.0f - w0 - w1 - w3;
 
-    Int2 tc0 = floori(UV - 0.5f);
-    Int2 tc1 = tc0 + 1;
+    Int2 tc1 = floori(UV - 0.5f);
+    Int2 tc0 = tc1 - 1;
+    Int2 tc2 = tc1 + 1;
+    Int2 tc3 = tc1 + 2;
 
-    Int2 sampleUV[4] = {
-        { tc0.x, tc0.y }, { tc1.x, tc0.y },
-        { tc0.x, tc1.y }, { tc1.x, tc1.y },
+    Int2 sampleUV[16] = {
+        { tc0.x, tc0.y }, { tc1.x, tc0.y }, { tc2.x, tc0.y }, { tc3.x, tc0.y },
+        { tc0.x, tc1.y }, { tc1.x, tc1.y }, { tc2.x, tc1.y }, { tc3.x, tc1.y },
+        { tc0.x, tc2.y }, { tc1.x, tc2.y }, { tc2.x, tc2.y }, { tc3.x, tc2.y },
+        { tc0.x, tc3.y }, { tc1.x, tc3.y }, { tc2.x, tc3.y }, { tc3.x, tc3.y },
     };
 
-    float weights[4] = {
-        w0.x * w0.y,  w1.x * w0.y,
-        w0.x * w1.y,  w1.x * w1.y,
+    float weights[16] = {
+        w0.x * w0.y,  w1.x * w0.y,  w2.x * w0.y,  w3.x * w0.y,
+        w0.x * w1.y,  w1.x * w1.y,  w2.x * w1.y,  w3.x * w1.y,
+        w0.x * w2.y,  w1.x * w2.y,  w2.x * w2.y,  w3.x * w2.y,
+        w0.x * w3.y,  w1.x * w3.y,  w2.x * w3.y,  w3.x * w3.y,
     };
 
 	Float4 OutColor;
     float sumWeight = 0;
 
 	#pragma unroll
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < 16; i++)
 	{
         sumWeight += weights[i];
-        Float4 color = Load2D(tex, sampleUV[i]);
-        //color = (dot(color.xyz, Float3(0.3, 0.6, 0.1)) > threshold) ? color : 0;
-        color = (color.xyz.max() > threshold) ? color : 0;
-		OutColor += color * weights[i];
+		OutColor += Load2Dfp16(tex, sampleUV[i]) * weights[i];
 	}
 
 	OutColor /= sumWeight;
 
     return OutColor;
 }
-#endif
+
 
 union UintFloatConverter { uint ui; float f; __device__ UintFloatConverter() : ui(0) {} };
 
