@@ -45,7 +45,7 @@ const int RENDER_HEIGHT = 720;
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
 // number too high - commands are queuing up - consume too much cpu side memory
-const int MAX_FRAMES_IN_FLIGHT = 2;
+const int MAX_FRAMES_IN_FLIGHT = 1;
 
 // validation layer
 const std::vector<const char*> validationLayers = {

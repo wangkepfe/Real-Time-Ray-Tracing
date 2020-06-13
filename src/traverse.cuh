@@ -27,9 +27,13 @@ __device__ inline void UpdateMaterial(
 
 // ray traverse, return true if hit
 __device__ inline void RaySceneIntersect(
+	const ConstBuffer&   cbo,
+	const SceneMaterial& sceneMaterial,
 	const SceneGeometry& sceneGeometry,
 	RayState&            rayState)
 {
+	if (rayState.hitLight == true) { return; }
+
 	Ray ray(rayState.orig, rayState.dir);
 
 	Float3& intersectPoint   = rayState.pos;
@@ -108,6 +112,7 @@ __device__ inline void RaySceneIntersect(
 		normalDotRayDir = -normalDotRayDir;
 	}
 
-	// return true if hit
 	rayState.hit = (t < RayMax);
+
+	UpdateMaterial(cbo, rayState, sceneMaterial);
 }

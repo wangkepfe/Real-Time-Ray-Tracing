@@ -319,53 +319,29 @@ inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime
 	if (waterFloorT > 1e4f) { return; }
 	Float3 waterFloorHitPos = GetRayPlaneIntersectPoint(waterFloor, ray, waterFloorT, tError);
 
-	//printf("%s = (%f, %f, %f), (%f, %f, %f)\n", "hit pos", waterCeilingHitPos[0], waterCeilingHitPos[1], waterCeilingHitPos[2], waterFloorHitPos[0], waterFloorHitPos[1], waterFloorHitPos[2]);
-
 	// ray march from ceiling to floor
 	float dist;
 	Float3 pos;
 	RayMarchWater(dist, pos, orig, waterCeilingHitPos, waterFloorHitPos, clockTime);
-	//Print("pos", pos);
-
-	// water transmission (Beer's Law)
-	//float depth = pos.y + waterDepth / 2;
-	//float waterDist = tanf(depth * PI / 2);
-    //Float3 Tr = exp3f(Float3(1.0, 0.1, 0.01) * (-waterDist));
-
-	//printf("%s = (%f, %f, %f), %f, %f\n", "Tr depth waterDist", Tr[0], Tr[1], Tr[2], depth, waterDist);
 
 	// normal blending
 	float distFallOff = 1.0 / (dist * dist * 1e-4 + 1.0);
 	Float3 normal = GetWaterNormal(pos.xz(), waterDepth, clockTime, distFallOff);
 	normal = mixf(Float3(0.0, 1.0, 0.0), normal, distFallOff);
 
-	//Print("normal", normal);
-
 	// fresnel
 	normal = dot(normal, rayDir) > 0 ? Float3(0.0, 1.0, 0.0) : normal;
 	float cosTheta = -dot(normal, rayDir);
 	Float3 fresnel = Float3(0.04 + 0.96 * powf(1.0 - cosTheta, 5.0));
 
-	//printf("%s = (%f, %f, %f), (%f, %f, %f)\n", "normal rayDir", normal[0], normal[1], normal[2], rayDir[0], rayDir[1], rayDir[2]);
-
-	//printf("%s = (%f, %f, %f), %f, %f\n", "fresnel cosTheta cosTheta", fresnel[0], fresnel[1], fresnel[2], cosTheta, cosTheta);
-
 	// ray dir
 	rayDir = normalize(reflect3f(rayDir, normal));
 
 	// beta
-	//beta = fresnel + (1 - fresnel) * Tr;
 	beta = fresnel;
-
-	//Print("pos, depth", Float4(pos, depth));
-
-	//beta += max1f(depth * 100.0 - 99.0, 0.0) * Float3(0.8, 0.9, 0.6) * 100;
-	//* (Float3(1.0) - fresnel)
 	float height = min1f(powf(cosf((pos.y / waterDepth) * PI / 2), 16) * 10, 1.0);
 	beta += height * (Float3(1.0) - fresnel) * Float3(0.8, 0.9, 0.6);
-	//beta += height * (Float3(1.0) - fresnel) * 1000 * Float3(0.8, 0.9, 0.6);
 	beta = min3f(beta, Float3(1.0));
-	//fresnel += powf(1.0 - depth, 8) * Float3(0.8, 0.9, 0.6) * 10;
 }
 
 inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, float clockTime, bool isDiffuseRay)
@@ -377,8 +353,6 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 
 	int numSkySample = 12;
 	int numSkyLightSample = 6;
-
-	if (isDiffuseRay == true) { numSkySample = 6; numSkyLightSample = 3; }
 
 	if (rayDirOrRefl.y < 0.01 && isDiffuseRay == false) { OceanShader(rayDirOrRefl, beta, clockTime * 0.7); }
 

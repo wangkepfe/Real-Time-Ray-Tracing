@@ -4,8 +4,6 @@
 
 #include <device_launch_parameters.h>
 #include <cuda.h>
-//#include <curand.h>
-//#include <curand_kernel.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 
@@ -44,11 +42,12 @@ inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort =
 // ---------------------- struct ----------------------
 struct __align__(16) Camera
 {
-	Float4 pos;        // .w unused
-	Float4 dir;        // .w unused
-	Float4 left;       // left = up x dir, .w unused
-	Float4 resolution; // (width, height, 1/width, 1/height)
-	Float4 fov;        // (radius_x, radius_y, tan(radius_x / 2), tan(radius_y / 2))
+	Float4 pos;          // .w unused
+	Float4 dirFocal;     // .xyz: dir, .w: focal length
+	Float4 leftAperture; // .xyz: left = <0,1,0> x dir, .w: aperture
+	Float4 up;           // .xyz: up = dir x left, .w: unused
+	Float4 resolution;   // (width, height, 1/width, 1/height)
+	Float4 fov;          // (radius_x, radius_y, tan(radius_x / 2), tan(radius_y / 2))
 };
 
 struct __align__(16) SceneGeometry
@@ -144,10 +143,10 @@ struct __align__(16) RayState
 	int        objectIdx;
 
 	Float3     L;
-	float      encodedNormal;
+	bool       isRayIntoSurface;
 
 	Float3     beta;
-	float      unused;
+	float      offset;
 
 	Float3     pos;
 	int        matType;
@@ -156,21 +155,11 @@ struct __align__(16) RayState
 	bool       hitLight;
 
 	Float3     lightBeta;
-	bool       hasBsdfRay;
+	bool       isDiffuse;
 
 	Int2       idx;
 	int        i;
-	int        bounce;
-
-	float      offset;
-	bool       terminated;
-	bool       unused3;
-	bool       isDiffuse;
-
-	bool       isRayIntoSurface;
 	bool       hit;
-	bool       unused2;
-	bool       unused4;
 
 	float      surfaceBetaWeight;
 	float      normalDotRayDir;
@@ -182,54 +171,8 @@ struct __align__(16) RayState
 	RandState  rdState[3];
 };
 
-
 __device__ __inline__ float rd(RandState* rdState) { return curand_uniform(rdState); }
 __device__ __inline__ Float2 rd2(RandState* rdState1, RandState* rdState2) { return Float2(curand_uniform(rdState1), curand_uniform(rdState2)); }
-
-struct IndexBuffers
-{
-	static const uint IndexBufferCount = 4;
-	union {
-		struct {
-			uint* hitBufferA;
-			uint* missBufferA;
-			uint* hitBufferB;
-			uint* missBufferB;
-		};
-		uint* buffers[IndexBufferCount];
-	};
-
-	union {
-		struct {
-			uint* hitBufferTopA;
-			uint* missBufferTopA;
-			uint* hitBufferTopB;
-			uint* missBufferTopB;
-		};
-		uint* bufferTops[IndexBufferCount];
-	};
-
-	void init(uint renderBufferSize) {
-		for (uint i = 0; i < IndexBufferCount; ++i) {
-			GpuErrorCheck(cudaMalloc((void**)& buffers[i] , renderBufferSize *  sizeof(uint)));
-			GpuErrorCheck(cudaMalloc((void**)& bufferTops[i] , sizeof(uint)));
-		}
-	}
-
-	void memsetZero(uint renderBufferSize, cudaStream_t stream) {
-		for (uint i = 0; i < IndexBufferCount; ++i) {
-			GpuErrorCheck(cudaMemsetAsync(buffers[i], 0u, renderBufferSize * sizeof(uint), stream));
-			GpuErrorCheck(cudaMemsetAsync(bufferTops[i], 0u, sizeof(uint), stream));
-		}
-	}
-
-	void cleanUp() {
-		for (uint i = 0; i < IndexBufferCount; ++i) {
-			cudaFree(buffers[i]);
-			cudaFree(bufferTops[i]);
-		}
-	}
-};
 
 union SceneTextures
 {
@@ -270,8 +213,6 @@ public:
 
 private:
 
-	void LoadTextures();
-
 	// resolution
 	const int                   screenWidth;
 	const int                   screenHeight;
@@ -300,9 +241,6 @@ private:
 	// constant buffer
 	ConstBuffer                 cbo;
 
-	// ray state, intersection
-	RayState*                   rayStates;
-
 	// primitives
 	Sphere*                     d_spheres;
 	AABB*                       d_aabbs;
@@ -316,42 +254,33 @@ private:
 	// traversal structure
 	SceneGeometry               d_sceneGeometry;
 
-	//
+	// texture
 	SceneTextures               sceneTextures;
-
-	// buffer
-	cudaArray*                  colorBufferArrayA;
-	cudaArray*                  colorBufferArrayB;
-	cudaArray*                  colorBufferArrayC;
-
-	cudaArray*                  colorBufferArray4;
-	cudaArray*                  colorBufferArray16;
-	cudaArray*                  colorBufferArray64;
-
-	cudaArray*                  bloomBufferArray4;
-	cudaArray*                  bloomBufferArray16;
-
 	cudaArray*                  texArraySandAlbedo;
 	cudaArray*                  texArrayUv;
 	cudaArray*                  texArraySandNormal;
 
-	SurfObj         colorBufferA;
-	SurfObj         colorBufferB;
-	SurfObj         colorBufferC;
+	// surface
+	SurfObj                     colorBufferA;
+	SurfObj                     colorBufferB;
+	cudaArray*                  colorBufferArrayA;
+	cudaArray*                  colorBufferArrayB;
 
-	SurfObj         colorBuffer4;
-	SurfObj         colorBuffer16;
-	SurfObj         colorBuffer64;
+	SurfObj                     colorBuffer4;
+	SurfObj                     colorBuffer16;
+	SurfObj                     colorBuffer64;
+	cudaArray*                  colorBufferArray4;
+	cudaArray*                  colorBufferArray16;
+	cudaArray*                  colorBufferArray64;
 
-	SurfObj         bloomBuffer4;
-	SurfObj         bloomBuffer16;
+	SurfObj                     bloomBuffer4;
+	SurfObj                     bloomBuffer16;
+	cudaArray*                  bloomBufferArray4;
+	cudaArray*                  bloomBufferArray16;
 
-	IndexBuffers indexBuffers;
-	ullint* gHitMask;
-
-	//
-	float* d_exposure;
-	uint* d_histogram;
+	// buffer
+	float*                      d_exposure;
+	uint*                       d_histogram;
 
 	// rand init
 	RandInitVec*                d_randInitVec;
@@ -362,12 +291,14 @@ private:
 	// terrain
 	Terrain                     terrain;
 
-	static const uint NumStreams = 4;
-	cudaStream_t* streams;
-	Float3  cameraFocusPos;
-	Sphere* spheres;
-	Sphere* sphereLights;
-	int numSpheres;
-	int numSphereLights;
+	// streams
+	cudaStream_t*               streams;
+
+	// cpu buffers
+	Float3                      cameraFocusPos;
+	Sphere*                     spheres;
+	Sphere*                     sphereLights;
+	int                         numSpheres;
+	int                         numSphereLights;
 };
 

@@ -1,8 +1,6 @@
 
 #include "kernel.cuh"
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#include <iostream>
+#include "textureUtils.cuh"
 
 inline float TrowbridgeReitzRoughnessToAlpha(float roughness)
 {
@@ -13,6 +11,7 @@ inline float TrowbridgeReitzRoughnessToAlpha(float roughness)
 
 void RayTracer::init(cudaStream_t* cudaStreams)
 {
+	// set streams
 	streams = cudaStreams;
 
 	// init terrain
@@ -23,22 +22,19 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	AABB* aabbs = terrain.generateAabbs(numAabbs);
 
 	// sphere
-	numSpheres  = 6;
-	spheres       = new Sphere[numSpheres];
+	numSpheres     = 6;
+	spheres        = new Sphere[numSpheres];
 	cameraFocusPos = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
-	spheres[0] = Sphere(cameraFocusPos, 0.005f);
-	spheres[1] = Sphere(Float3(0.07f, terrain.getHeightAt(0.07f) + 0.005f, 0.0f) , 0.005f);
-	spheres[2] = Sphere(Float3(-0.07f, terrain.getHeightAt(-0.07f) + 0.005f, 0.0f) , 0.005f);
-	spheres[3] = Sphere(Float3(0.03f, terrain.getHeightAt(0.03f) - 0.005f, -0.01f) , 0.005f);
-	spheres[4] = Sphere(Float3(-0.03f, terrain.getHeightAt(-0.03f) - 0.005f, -0.01f) , 0.005f);
-	spheres[5] = Sphere(Float3(0.02f, terrain.getHeightAt(0.02f) + 0.005f, 0.0f) , 0.005f);
+	spheres[0]     = Sphere(cameraFocusPos, 0.005f);
+	spheres[1]     = Sphere(Float3(0.07f, terrain.getHeightAt(0.07f) + 0.005f, 0.0f) , 0.005f);
+	spheres[2]     = Sphere(Float3(-0.07f, terrain.getHeightAt(-0.07f) + 0.005f, 0.0f) , 0.005f);
+	spheres[3]     = Sphere(Float3(0.03f, terrain.getHeightAt(0.03f) - 0.005f, -0.01f) , 0.005f);
+	spheres[4]     = Sphere(Float3(-0.03f, terrain.getHeightAt(-0.03f) - 0.005f, -0.01f) , 0.005f);
+	spheres[5]     = Sphere(Float3(0.02f, terrain.getHeightAt(0.02f) + 0.005f, 0.0f) , 0.005f);
 
 	// surface materials
 	const int numMaterials     = 6;
 	SurfaceMaterial* materials = new SurfaceMaterial[numMaterials];
-
-	materials[0].type          = LAMBERTIAN_DIFFUSE;
-	materials[0].albedo        = Float3(0.5f);
 
 	materials[0].type          = MICROFACET_REFLECTION;
 	materials[0].albedo        = Float3(0.5f);
@@ -73,8 +69,6 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	materialsIdx[5] = 5;
 	for (int i = numSpheres; i < numObjects; ++i)
 	{
-		//if (i < numSpheres + numAabbs / 2 + 10) materialsIdx[i] = 0;
-		//else materialsIdx[i] = 4;
 		materialsIdx[i] = 0;
 	}
 
@@ -104,71 +98,61 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	scaleBlockDim = dim3(8, 8, 1);
 	scaleGridDim = dim3(divRoundUp(screenWidth, scaleBlockDim.x), divRoundUp(screenHeight, scaleBlockDim.y), 1);
 
-	// surface object
+	// ------------------------ surface object ---------------------------
 	cudaChannelFormatDesc surfaceChannelFormatDesc = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
-
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayA, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayB, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayC, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-
-	bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
-	gridDim4 = dim3(divRoundUp(bufferSize4.x, blockDim.x), divRoundUp(bufferSize4.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray4, &surfaceChannelFormatDesc, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
-	GpuErrorCheck(cudaMallocArray(&bloomBufferArray4, &surfaceChannelFormatDesc, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
-
-	bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
-	gridDim16 = dim3(divRoundUp(bufferSize16.x, blockDim.x), divRoundUp(bufferSize16.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray16, &surfaceChannelFormatDesc, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
-	GpuErrorCheck(cudaMallocArray(&bloomBufferArray16, &surfaceChannelFormatDesc, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
-
-	bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
-	gridDim64 = dim3(divRoundUp(bufferSize64.x, blockDim.x), divRoundUp(bufferSize64.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray64, &surfaceChannelFormatDesc, bufferSize64.x, bufferSize64.y, cudaArraySurfaceLoadStore));
-
 	cudaResourceDesc resDesc = {};
 	resDesc.resType = cudaResourceTypeArray;
 
-	resDesc.res.array.array = colorBufferArrayA;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferA, &resDesc));
-	resDesc.res.array.array = colorBufferArrayB;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferB, &resDesc));
-	resDesc.res.array.array = colorBufferArrayC;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferC, &resDesc));
+	// array A: main render buffer
+	GpuErrorCheck(cudaMallocArray(&colorBufferArrayA, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = colorBufferArrayA; GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferA, &resDesc));
 
-	resDesc.res.array.array = colorBufferArray4;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer4, &resDesc));
-	resDesc.res.array.array = colorBufferArray16;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer16, &resDesc));
-	resDesc.res.array.array = colorBufferArray64;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer64, &resDesc));
+	// array B: TAA buffer
+	GpuErrorCheck(cudaMallocArray(&colorBufferArrayB, &surfaceChannelFormatDesc, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = colorBufferArrayB; GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferB, &resDesc));
 
-	resDesc.res.array.array = bloomBufferArray4;
-	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer4, &resDesc));
-	resDesc.res.array.array = bloomBufferArray16;
-	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer16, &resDesc));
+	// color buffer 1/4 size
+	bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
+	gridDim4 = dim3(divRoundUp(bufferSize4.x, blockDim.x), divRoundUp(bufferSize4.y, blockDim.y), 1);
+	GpuErrorCheck(cudaMallocArray(&colorBufferArray4, &surfaceChannelFormatDesc, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = colorBufferArray4; GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer4, &resDesc));
 
-	// uint buffer
-	indexBuffers.init(renderBufferSize);
+	// bloom buffer 1/4 size
+	GpuErrorCheck(cudaMallocArray(&bloomBufferArray4, &surfaceChannelFormatDesc, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = bloomBufferArray4; GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer4, &resDesc));
 
-	GpuErrorCheck(cudaMalloc((void**)& gHitMask    , cbo.gridSize *      sizeof(ullint)));
-	GpuErrorCheck(cudaMemset(gHitMask              , 0  , cbo.gridSize * sizeof(ullint)));
+	// color buffer 1/16 size
+	bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
+	gridDim16 = dim3(divRoundUp(bufferSize16.x, blockDim.x), divRoundUp(bufferSize16.y, blockDim.y), 1);
+	GpuErrorCheck(cudaMallocArray(&colorBufferArray16, &surfaceChannelFormatDesc, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = colorBufferArray16; GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer16, &resDesc));
 
+	// bloom buffer 1/16 size
+	GpuErrorCheck(cudaMallocArray(&bloomBufferArray16, &surfaceChannelFormatDesc, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = bloomBufferArray16; GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer16, &resDesc));
+
+	// color buffer 1/64 size
+	bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
+	gridDim64 = dim3(divRoundUp(bufferSize64.x, blockDim.x), divRoundUp(bufferSize64.y, blockDim.y), 1);
+	GpuErrorCheck(cudaMallocArray(&colorBufferArray64, &surfaceChannelFormatDesc, bufferSize64.x, bufferSize64.y, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = colorBufferArray64; GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer64, &resDesc));
+
+	// ----------------------- GPU buffers -----------------------
+	// exposure
 	GpuErrorCheck(cudaMalloc((void**)& d_exposure, 4 * sizeof(float)));
-	GpuErrorCheck(cudaMalloc((void**)& d_histogram, 64 * sizeof(uint)));
-
-	float initExposureLum[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	float initExposureLum[4] = { 1.0f, 1.0f, 1.0f, 1.0f }; // (exposureValue, historyAverageLuminance, historyBrightThresholdLuminance, unused)
 	GpuErrorCheck(cudaMemcpy(d_exposure, initExposureLum, 4 * sizeof(float), cudaMemcpyHostToDevice));
 
-	// memory alloc
+	// histogram
+	GpuErrorCheck(cudaMalloc((void**)& d_histogram, 64 * sizeof(uint)));
+
+	// scene
 	GpuErrorCheck(cudaMalloc((void**)& d_spheres          , numSpheres *       sizeof(Sphere)));
 	GpuErrorCheck(cudaMalloc((void**)& d_aabbs            , numAabbs *         sizeof(AABB)));
 	GpuErrorCheck(cudaMalloc((void**)& d_materialsIdx     , numObjects *       sizeof(int)));
 	GpuErrorCheck(cudaMalloc((void**)& d_surfaceMaterials , numMaterials *     sizeof(SurfaceMaterial)));
 	GpuErrorCheck(cudaMalloc((void**)& d_sphereLights     , numSphereLights *  sizeof(Float4)));
 
-	GpuErrorCheck(cudaMalloc((void**)& rayStates          , renderBufferSize * sizeof(RayState)));
-
-	// memory copy
 	GpuErrorCheck(cudaMemcpy(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_surfaceMaterials , materials    , numMaterials *    sizeof(SurfaceMaterial), cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_aabbs            , aabbs        , numAabbs *        sizeof(AABB)           , cudaMemcpyHostToDevice));
@@ -197,7 +181,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	RandInitVec* randDirvectors = g_curandDirectionVectors32;
 	GpuErrorCheck(cudaMemcpy(d_randInitVec, randDirvectors, 3 * sizeof(RandInitVec), cudaMemcpyHostToDevice));
 
-	// camera
+	// --------------------------------- camera ------------------------------------
 	Camera& camera = cbo.camera;
 
 	camera.resolution = Float4((float)renderWidth, (float)renderHeight, 1.0f / renderWidth, 1.0f / renderHeight);
@@ -209,253 +193,69 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	Float3 cameraLookAtPoint = cameraFocusPos + Float3(0.0f, 0.01f, 0.0f);
 	camera.pos               = cameraFocusPos + Float3(0.0f, 0.0f, -0.1f);
-	camera.dir               = normalize(cameraLookAtPoint - camera.pos.xyz);
-	camera.left              = cross(Float3(0, 1, 0), camera.dir.xyz);
+	Float3 CamToObj          = cameraLookAtPoint - camera.pos.xyz;
+	camera.dirFocal.xyz      = normalize(CamToObj);
+	camera.dirFocal.w        = CamToObj.length();
+	camera.leftAperture.xyz  = normalize(cross(Float3(0, 1, 0), camera.dirFocal.xyz));
+	camera.leftAperture.w    = 0.001f;
+	camera.up.xyz            = normalize(cross(camera.dirFocal.xyz, camera.leftAperture.xyz));
 
+	// textures
+	LoadTextureRgba8("resources/textures/uv.png", texArrayUv, sceneTextures.uv);
+	LoadTextureRgb8("resources/textures/sand.png", texArraySandAlbedo, sceneTextures.sandAlbedo);
+	LoadTextureRgb8("resources/textures/sand_n.png", texArraySandNormal, sceneTextures.sandNormal);
+
+	// timer init
 	timer.init();
-
-	LoadTextures();
-}
-
-void RayTracer::LoadTextures()
-{
-	{
-		int texWidth, texHeight, texChannel;
-		const char* texPath = "resources/textures/uv.png";
-		unsigned char* buffer = stbi_load(texPath, &texWidth, &texHeight, &texChannel, STBI_rgb_alpha);
-		std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
-		assert(buffer != NULL);
-
-		uchar4* cpuTextureBuffer = new uchar4[texWidth * texHeight];
-		for (int i = 0; i < texWidth * texHeight; ++i)
-		{
-			cpuTextureBuffer[i] = make_uchar4(buffer[i * 4], buffer[i * 4 + 1], buffer[i * 4 + 2], buffer[i * 4 + 3]);
-		}
-
-		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
-		cudaMallocArray(&texArrayUv, &channelDesc, texWidth, texHeight);
-		cudaMemcpyToArray(texArrayUv, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(uchar4), cudaMemcpyHostToDevice);
-
-		cudaResourceDesc resDesc;
-		memset(&resDesc, 0, sizeof(resDesc));
-		resDesc.resType = cudaResourceTypeArray;
-		resDesc.res.array.array = texArrayUv;
-
-		cudaTextureDesc texDesc;
-		memset(&texDesc, 0, sizeof(texDesc));
-		texDesc.addressMode[0]   = cudaAddressModeWrap;
-		texDesc.addressMode[1]   = cudaAddressModeWrap;
-		texDesc.filterMode       = cudaFilterModeLinear;
-		texDesc.readMode         = cudaReadModeNormalizedFloat;
-		texDesc.normalizedCoords = 1;
-
-		cudaCreateTextureObject(&sceneTextures.uv, &resDesc, &texDesc, NULL);
-		assert(sceneTextures.uv != NULL);
-
-		delete cpuTextureBuffer;
-		stbi_image_free(buffer);
-	}
-
-#if 0
-	{
-		int texWidth, texHeight, texChannel;
-		const char* texPath = "resources/textures/TexturesCom_DesertSand2_3x3_1K_albedo.png";
-		unsigned char* buffer = stbi_load(texPath, &texWidth, &texHeight, &texChannel, STBI_rgb);
-		std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
-		assert(buffer != NULL);
-
-		uchar4* cpuTextureBuffer = new uchar4[texWidth * texHeight];
-		for (int i = 0; i < texWidth * texHeight; ++i)
-		{
-			cpuTextureBuffer[i] = make_uchar4(buffer[i * 3], buffer[i * 3 + 1], buffer[i * 3 + 2], 0);
-		}
-
-		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
-		cudaMallocArray(&texArraySandAlbedo, &channelDesc, texWidth, texHeight);
-		cudaMemcpyToArray(texArraySandAlbedo, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(uchar4), cudaMemcpyHostToDevice);
-
-		cudaResourceDesc resDesc;
-		memset(&resDesc, 0, sizeof(resDesc));
-		resDesc.resType = cudaResourceTypeArray;
-		resDesc.res.array.array = texArraySandAlbedo;
-
-		cudaTextureDesc texDesc;
-		memset(&texDesc, 0, sizeof(texDesc));
-		texDesc.addressMode[0]   = cudaAddressModeWrap;
-		texDesc.addressMode[1]   = cudaAddressModeWrap;
-		texDesc.filterMode       = cudaFilterModeLinear;
-		texDesc.readMode         = cudaReadModeNormalizedFloat;
-		texDesc.normalizedCoords = 1;
-
-		cudaCreateTextureObject(&sceneTextures.sandAlbedo, &resDesc, &texDesc, NULL);
-		assert(sceneTextures.sandAlbedo != NULL);
-
-		delete cpuTextureBuffer;
-		stbi_image_free(buffer);
-	}
-
-	{
-		int texWidth, texHeight, texChannel;
-		const char* texPath = "resources/textures/TexturesCom_DesertSand2_3x3_1K_normal.png";
-		unsigned short* buffer = stbi_load_16(texPath, &texWidth, &texHeight, &texChannel, STBI_rgb);
-		std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
-		assert(buffer != NULL);
-
-		ushort4* cpuTextureBuffer = new ushort4[texWidth * texHeight];
-		for (int i = 0; i < texWidth * texHeight; ++i)
-		{
-			cpuTextureBuffer[i] = make_ushort4(buffer[i * 3], buffer[i * 3 + 1], buffer[i * 3 + 2], 0);
-		}
-
-		cudaArray* &texArray = texArraySandNormal;
-
-		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<ushort4>();
-		cudaMallocArray(&texArray, &channelDesc, texWidth, texHeight);
-		cudaMemcpyToArray(texArray, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(ushort4), cudaMemcpyHostToDevice);
-
-		cudaResourceDesc resDesc;
-		memset(&resDesc, 0, sizeof(resDesc));
-		resDesc.resType = cudaResourceTypeArray;
-		resDesc.res.array.array = texArray;
-
-		cudaTextureDesc texDesc;
-		memset(&texDesc, 0, sizeof(texDesc));
-		texDesc.addressMode[0]   = cudaAddressModeWrap;
-		texDesc.addressMode[1]   = cudaAddressModeWrap;
-		texDesc.filterMode       = cudaFilterModeLinear;
-		texDesc.readMode         = cudaReadModeNormalizedFloat;
-		texDesc.normalizedCoords = 1;
-
-		cudaCreateTextureObject(&sceneTextures.sandNormal, &resDesc, &texDesc, NULL);
-		assert(sceneTextures.sandNormal != NULL);
-
-		delete cpuTextureBuffer;
-		stbi_image_free(buffer);
-	}
-#endif
-
-	{
-		int texWidth, texHeight, texChannel;
-		const char* texPath = "resources/textures/sand.png";
-		unsigned char* buffer = stbi_load(texPath, &texWidth, &texHeight, &texChannel, STBI_rgb);
-		std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
-		assert(buffer != NULL);
-
-		uchar4* cpuTextureBuffer = new uchar4[texWidth * texHeight];
-		for (int i = 0; i < texWidth * texHeight; ++i)
-		{
-			cpuTextureBuffer[i] = make_uchar4(buffer[i * 3], buffer[i * 3 + 1], buffer[i * 3 + 2], 0);
-		}
-
-		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
-		cudaMallocArray(&texArraySandAlbedo, &channelDesc, texWidth, texHeight);
-		cudaMemcpyToArray(texArraySandAlbedo, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(uchar4), cudaMemcpyHostToDevice);
-
-		cudaResourceDesc resDesc;
-		memset(&resDesc, 0, sizeof(resDesc));
-		resDesc.resType = cudaResourceTypeArray;
-		resDesc.res.array.array = texArraySandAlbedo;
-
-		cudaTextureDesc texDesc;
-		memset(&texDesc, 0, sizeof(texDesc));
-		texDesc.addressMode[0]   = cudaAddressModeWrap;
-		texDesc.addressMode[1]   = cudaAddressModeWrap;
-		texDesc.filterMode       = cudaFilterModeLinear;
-		texDesc.readMode         = cudaReadModeNormalizedFloat;
-		texDesc.normalizedCoords = 1;
-
-		cudaCreateTextureObject(&sceneTextures.sandAlbedo, &resDesc, &texDesc, NULL);
-		assert(sceneTextures.sandAlbedo != NULL);
-
-		delete cpuTextureBuffer;
-		stbi_image_free(buffer);
-	}
-
-	{
-		int texWidth, texHeight, texChannel;
-		const char* texPath = "resources/textures/sand_n.png";
-		unsigned char* buffer = stbi_load(texPath, &texWidth, &texHeight, &texChannel, STBI_rgb);
-		std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
-		assert(buffer != NULL);
-
-		uchar4* cpuTextureBuffer = new uchar4[texWidth * texHeight];
-		for (int i = 0; i < texWidth * texHeight; ++i)
-		{
-			cpuTextureBuffer[i] = make_uchar4(buffer[i * 3], buffer[i * 3 + 1], buffer[i * 3 + 2], 0);
-		}
-
-		cudaArray* &texArray = texArraySandNormal;
-
-		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
-		cudaMallocArray(&texArray, &channelDesc, texWidth, texHeight);
-		cudaMemcpyToArray(texArray, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(uchar4), cudaMemcpyHostToDevice);
-
-		cudaResourceDesc resDesc;
-		memset(&resDesc, 0, sizeof(resDesc));
-		resDesc.resType = cudaResourceTypeArray;
-		resDesc.res.array.array = texArray;
-
-		cudaTextureDesc texDesc;
-		memset(&texDesc, 0, sizeof(texDesc));
-		texDesc.addressMode[0]   = cudaAddressModeWrap;
-		texDesc.addressMode[1]   = cudaAddressModeWrap;
-		texDesc.filterMode       = cudaFilterModeLinear;
-		texDesc.readMode         = cudaReadModeNormalizedFloat;
-		texDesc.normalizedCoords = 1;
-
-		cudaCreateTextureObject(&sceneTextures.sandNormal, &resDesc, &texDesc, NULL);
-		assert(sceneTextures.sandNormal != NULL);
-
-		delete cpuTextureBuffer;
-		stbi_image_free(buffer);
-	}
 }
 
 void RayTracer::cleanup()
 {
+	// free cpu buffer
 	delete[] spheres;
 	delete[] sphereLights;
 
-	// Destroy surface objects
+	// ---------------- Destroy surface objects ----------------------
+	// color buffer
     cudaDestroySurfaceObject(colorBufferA);
 	cudaDestroySurfaceObject(colorBufferB);
-	cudaDestroySurfaceObject(colorBufferC);
+	cudaFreeArray(colorBufferArrayA);
+	cudaFreeArray(colorBufferArrayB);
 
+	// down sized color buffer
 	cudaDestroySurfaceObject(colorBuffer4);
 	cudaDestroySurfaceObject(colorBuffer16);
 	cudaDestroySurfaceObject(colorBuffer64);
-
-    // Free device memory
-    cudaFreeArray(colorBufferArrayA);
-	cudaFreeArray(colorBufferArrayB);
-	cudaFreeArray(colorBufferArrayC);
-
 	cudaFreeArray(colorBufferArray4);
 	cudaFreeArray(colorBufferArray16);
 	cudaFreeArray(colorBufferArray64);
-	indexBuffers.cleanUp();
 
+	// bloom buffer
+	cudaDestroySurfaceObject(bloomBuffer4);
+	cudaDestroySurfaceObject(bloomBuffer16);
+	cudaFreeArray(bloomBufferArray4);
+	cudaFreeArray(bloomBufferArray16);
+
+	// ---------------------- destroy texture objects --------------------------
 	cudaDestroyTextureObject(sceneTextures.sandAlbedo);
-	cudaFreeArray(texArraySandAlbedo);
-
 	cudaDestroyTextureObject(sceneTextures.uv);
-	cudaFreeArray(texArrayUv);
-
 	cudaDestroyTextureObject(sceneTextures.sandNormal);
+	cudaFreeArray(texArraySandAlbedo);
+	cudaFreeArray(texArrayUv);
 	cudaFreeArray(texArraySandNormal);
 
+	// --------------------- free other gpu buffer ----------------------------
+	// exposure and histogram
 	cudaFree(d_exposure);
 	cudaFree(d_histogram);
 
-	cudaFree(gHitMask);
-
+	// scene
 	cudaFree(d_spheres);
 	cudaFree(d_surfaceMaterials);
 	cudaFree(d_aabbs);
 	cudaFree(d_materialsIdx);
 	cudaFree(d_sphereLights);
 
+	// random
 	cudaFree(d_randInitVec);
-
-	cudaFree(rayStates);
 }
