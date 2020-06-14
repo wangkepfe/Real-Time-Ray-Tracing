@@ -8,70 +8,9 @@
 #include "raygen.cuh"
 #include "traverse.cuh"
 #include "hash.cuh"
+#include "light.cuh"
 
-#define TOTAL_LIGHT_MAX_COUNT 3
-
-__device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, Float3& lightSampleDir, float& lightSamplePdf, float& isDeltaLight)
-{
-	const int numSphereLight = sceneMaterial.numSphereLights;
-	Sphere* sphereLights = sceneMaterial.sphereLights;
-
-	float lightChoosePdf;
-	int sampledIdx;
-
-	int indexRemap[TOTAL_LIGHT_MAX_COUNT] = {};
-	int i = 0;
-	int idx = 0;
-
-	const int sunLightIdx = numSphereLight;
-
-	for (; i < numSphereLight; ++i)
-	{
-		Float3 vec = sphereLights[i].center - rayState.pos;
-		if (dot(rayState.normal, vec) > 0 && vec.length2() < 1.0)
-			indexRemap[idx++] = i; // sphere light
-	}
-
-	if (dot(rayState.normal, cbo.sunDir) > 0.0)
-		indexRemap[idx++] = i++; // sun/moon light
-
-	if (idx == 0)
-		return false;
-
-	// choose light
-	int sampledValue = rd(&rayState.rdState[2]) * idx;
-	sampledIdx = indexRemap[sampledValue];
-	lightChoosePdf = 1.0 / idx;
-
-	// sample
-	if (sampledIdx == sunLightIdx)
-	{
-		Float3 moonDir = cbo.sunDir;
-		moonDir        = -moonDir;
-		lightSampleDir = cbo.sunDir.y > -0.05 ? cbo.sunDir : moonDir;
-		lightSamplePdf = 1.0f;
-		isDeltaLight   = true;
-	}
-	else
-	{
-		Sphere sphereLight = sphereLights[sampledIdx];
-
-		Float3 lightDir   = sphereLight.center - rayState.pos;
-		float dist2       = lightDir.length2();
-		float radius2     = sphereLight.radius * sphereLight.radius;
-		float cosThetaMax = sqrtf(max1f(dist2 - radius2, 0)) / sqrtf(dist2);
-
-		Float3 u, v;
-		LocalizeSample(lightDir, u, v);
-		lightSampleDir = UniformSampleCone(rd2(&rayState.rdState[0], &rayState.rdState[1]), cosThetaMax, u, v, lightDir);
-		lightSampleDir = normalize(lightSampleDir);
-		lightSamplePdf = UniformConePdf(cosThetaMax) * lightChoosePdf;
-	}
-
-	return true;
-}
-
-__device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial)
+__device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, TexObj skyTex)
 {
 	// check for termination and hit light
 	if (rayState.hitLight == false) { return; }
@@ -83,8 +22,9 @@ __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMa
 	if (rayState.matType == MAT_SKY)
 	{
 		// env light
-		Float3 envLightColor = EnvLight(lightDir, cbo.sunDir, cbo.clockTime, rayState.isDiffuseRay);
+		//Float3 envLightColor = EnvLight(lightDir, cbo.sunDir, cbo.clockTime, rayState.isDiffuseRay);
 		//Float3 envLightColor = Float3(0.8f);
+		Float3 envLightColor = EnvLight2(lightDir, cbo.clockTime, rayState.isDiffuseRay, skyTex);
 		rayState.L += envLightColor * beta;
 	}
 	else if (rayState.matType == EMISSIVE)
@@ -118,7 +58,7 @@ __device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneM
 	}
 }
 
-__device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SceneTextures textures)
+__device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SceneTextures textures, float* skyCdf)
 {
 	// check for termination and hit light
 	if (rayState.hitLight == true || rayState.isDiffuse == false) { return; }
@@ -167,7 +107,7 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	float isDeltaLight = false;
 	Float3 lightSampleDir;
 	float lightSamplePdf;
-	bool isLightSampled = SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight);
+	bool isLightSampled = SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf);
 
 	// surface sample
 	Float3 surfSampleDir;
@@ -265,7 +205,7 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	rayState.orig = rayState.pos + rayState.offset * normal;
 }
 
-__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer, SceneTextures textures)
+__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer, SceneTextures textures, TexObj skyTex, float* skyCdf)
 {
 	// index
 	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
@@ -295,12 +235,12 @@ __global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMat
 	for (int k = 0; k < 7; ++k)
 	{
 		GlossyShader(cbo, rayState, sceneMaterial);
-		DiffuseShader(cbo, rayState, sceneMaterial, textures);
+		DiffuseShader(cbo, rayState, sceneMaterial, textures, skyCdf);
 		RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 	}
 
 	GlossyShader(cbo, rayState, sceneMaterial);
-	LightShader(cbo, rayState, sceneMaterial);
+	LightShader(cbo, rayState, sceneMaterial, skyTex);
 
 	// write to buffer
 	Store2D(Float4(rayState.L, encodedNormal), colorBuffer, idx);
@@ -343,8 +283,15 @@ void RayTracer::draw(SurfObj* renderTarget)
 	// init histogram
 	GpuErrorCheck(cudaMemsetAsync(d_histogram, 0, 64 * sizeof(uint), streams[0]));
 
+	// sky
+	Sky<<<dim3(8, 2, 1), dim3(8, 8, 1), 0, streams[0]>>>(skyBuffer, skyCdf, Int2(64, 16), sunDir);
+	Scan<<<1, dim3(512, 1, 1), 1024 * sizeof(float), streams[0]>>>(skyCdf, 1024);
+
+	//GpuErrorCheck(cudaDeviceSynchronize());
+	//GpuErrorCheck(cudaPeekAtLastError());
+
 	// ---------------- launch path tracing kernel ----------------------
-	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA, sceneTextures);
+	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA, sceneTextures, skyTex, skyCdf);
 
 	// ---------------- post processing -------------------
 	// TAA
@@ -371,7 +318,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	Bloom<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
 
 	// Lens flare
-	if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.02 && dot(sunDir, camera.dirFocal.xyz) > 0)
+	if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.0 && dot(sunDir, camera.dirFocal.xyz) > 0)
 	{
 		sunPos -= Float2(0.5);
 		sunPos.x *= (float)renderWidth / (float)renderHeight;

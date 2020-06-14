@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include "geometry.cuh"
 #include "debug_util.cuh"
+#include "sampler.cuh"
 
 //--------------------------------------------------------------------------
 //Starfield
@@ -406,4 +407,123 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 #endif
 		return (moonColor + starColor) * beta;
 	}
+}
+
+inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool isDiffuseRay, TexObj skyTex)
+{
+	Float3 rayDirOrRefl = raydir;
+	Float3 beta = Float3(1.0);
+
+	if (rayDirOrRefl.y < 0.01 && isDiffuseRay == false) { OceanShader(rayDirOrRefl, beta, clockTime * 0.7); }
+
+	float u = atan2f(-rayDirOrRefl.z, -rayDirOrRefl.x) / TWO_PI + 0.5f;
+	float v = abs(rayDirOrRefl.y);
+
+	float4 texRead = tex2D<float4>(skyTex, u, v);
+	Float3 color = Float3(texRead.x , texRead.y, texRead.z);
+
+	return color * beta;
+}
+
+__global__ void Sky(SurfObj skyBuffer, float* skyCdf, Int2 size, Float3 sunDir)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	float u = ((float)x + 0.5f) / size.x;
+	float v = ((float)y + 0.5f) / size.y;
+
+	// hemisphere projection
+	float z = v;
+	float r = sqrtf(1 - v * v);
+	float phi = TWO_PI * u;
+
+	// ray dir
+	Float3 rayDir(r * cosf(phi), z, r * sinf(phi));
+
+	// get sky color
+	const int numSkySample = 16;
+	const int numSkyLightSample = 8;
+	Float3 sunOrMoonDir = sunDir;
+	Float3 color;
+	if ((sunOrMoonDir.y > -0.05 && sunOrMoonDir.z >= 0) || (sunOrMoonDir.y > 0.05 && sunOrMoonDir.z < 0))
+	{
+		Float3 sunColor = GetEnvIncidentLight(rayDir, sunOrMoonDir, numSkySample, numSkyLightSample);
+		sunColor = sunColor * (powf(max1f(dot(rayDir, sunOrMoonDir), 0), 500.0) * 1.0 + 1.0);
+		color = sunColor;
+	}
+	else
+	{
+		sunOrMoonDir = -sunOrMoonDir;
+		Float3 moonColor = GetEnvIncidentLight(rayDir, sunOrMoonDir, numSkySample, numSkyLightSample) * 0.01;
+		moonColor += moonColor * powf(max1f(dot(rayDir, sunOrMoonDir), 0), 55);
+		color = moonColor;
+	}
+
+	// store
+	Store2D(Float4(color, 0), skyBuffer, Int2(x, y));
+
+	// sky cdf
+	int i = size.x * y + x;
+	skyCdf[i] = color.max();
+}
+
+__global__ void Scan(float *data, int n)
+{
+	// allocated on invocation
+	extern __shared__ float temp[];
+
+	int i = threadIdx.x;
+	int offset = 1;
+
+	// load input into shared memory
+	temp[2 * i] = data[2 * i];
+	temp[2 * i + 1] = data[2 * i + 1];
+
+	// save orig value
+	float orig0 = temp[2 * i];
+	float orig1 = temp[2 * i + 1];
+
+	// build sum in place up the tree
+	for (int d = n>>1; d > 0; d >>= 1)
+	{
+		__syncthreads();
+		if (i < d)
+		{
+			int ai = offset * (2 * i + 1) - 1;
+			int bi = offset * (2 * i + 2) - 1;
+			temp[bi] += temp[ai];
+		}
+		offset *= 2;
+	}
+
+	// clear the last element
+	if (i == 0)
+	{
+		temp[n - 1] = 0;
+	}
+
+	// traverse down tree & build scan
+	for (int d = 1; d < n; d *= 2)
+	{
+		offset >>= 1;
+		__syncthreads();
+		if (i < d)
+		{
+			int ai = offset * (2 * i + 1) - 1;
+			int bi = offset * (2 * i + 2) - 1;
+
+			float t = temp[ai];
+			temp[ai] = temp[bi];
+			temp[bi] += t;
+		}
+	}
+	__syncthreads();
+
+	// write results to device memory
+	data[2 * i] = temp[2 * i] + orig0;
+	data[2 * i + 1] = temp[2 * i + 1] + orig1;
+
+	//printf("data[%d] = %f\n", 2 * i, data[2 * i]);
+	//("data[%d] = %f\n", 2 * i + 1, data[2 * i + 1]);
 }

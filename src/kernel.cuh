@@ -20,6 +20,7 @@
 #define RandState curandStateScrambledSobol32_t
 #define RandInitVec curandDirectionVectors32_t
 #define SurfObj cudaSurfaceObject_t
+#define TexObj cudaTextureObject_t
 #define ullint unsigned long long int
 
 // ---------------------- shader setting ----------------------
@@ -178,11 +179,11 @@ union SceneTextures
 {
 	struct
 	{
-		cudaTextureObject_t uv;
-		cudaTextureObject_t sandAlbedo;
-		cudaTextureObject_t sandNormal;
+		TexObj uv;
+		TexObj sandAlbedo;
+		TexObj sandNormal;
 	};
-	cudaTextureObject_t array[3];
+	TexObj array[3];
 };
 
 class RayTracer
@@ -277,6 +278,16 @@ private:
 	SurfObj                     bloomBuffer16;
 	cudaArray*                  bloomBufferArray4;
 	cudaArray*                  bloomBufferArray16;
+
+	// sky
+	const unsigned int          skyWidth = 64;
+	const unsigned int          skyHeight = 16;
+	const unsigned int          skySize = 1024;
+
+	SurfObj                     skyBuffer;
+	TexObj                      skyTex;
+	cudaArray*                  skyArray;
+	float*                      skyCdf;
 
 	// buffer
 	float*                      d_exposure;

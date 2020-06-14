@@ -98,45 +98,71 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	scaleBlockDim = dim3(8, 8, 1);
 	scaleGridDim = dim3(divRoundUp(screenWidth, scaleBlockDim.x), divRoundUp(screenHeight, scaleBlockDim.y), 1);
 
-	// ------------------------ surface object ---------------------------
+	// ------------------------ surface/texture object ---------------------------
 	cudaChannelFormatDesc channelFormatRgba32 = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
 	cudaChannelFormatDesc channelFormatRgba16 = cudaCreateChannelDescHalf4();
+
+	// resource desription
 	cudaResourceDesc resDesc = {};
 	resDesc.resType = cudaResourceTypeArray;
 
+	// texture description
+	cudaTextureDesc texDesc  = {};
+	texDesc.addressMode[0]   = cudaAddressModeClamp;
+	texDesc.addressMode[1]   = cudaAddressModeClamp;
+	texDesc.filterMode       = cudaFilterModeLinear;
+	texDesc.readMode         = cudaReadModeElementType;
+	texDesc.normalizedCoords = 1;
+
 	// array A: main render buffer
 	GpuErrorCheck(cudaMallocArray(&colorBufferArrayA, &channelFormatRgba32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArrayA; GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferA, &resDesc));
+	resDesc.res.array.array = colorBufferArrayA;
+	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferA, &resDesc));
 
 	// array B: TAA buffer
 	GpuErrorCheck(cudaMallocArray(&colorBufferArrayB, &channelFormatRgba32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArrayB; GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferB, &resDesc));
+	resDesc.res.array.array = colorBufferArrayB;
+	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferB, &resDesc));
 
 	// color buffer 1/4 size
 	bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
 	gridDim4 = dim3(divRoundUp(bufferSize4.x, blockDim.x), divRoundUp(bufferSize4.y, blockDim.y), 1);
 	GpuErrorCheck(cudaMallocArray(&colorBufferArray4, &channelFormatRgba16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArray4; GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer4, &resDesc));
+	resDesc.res.array.array = colorBufferArray4;
+	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer4, &resDesc));
 
 	// bloom buffer 1/4 size
 	GpuErrorCheck(cudaMallocArray(&bloomBufferArray4, &channelFormatRgba16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = bloomBufferArray4; GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer4, &resDesc));
+	resDesc.res.array.array = bloomBufferArray4;
+	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer4, &resDesc));
 
 	// color buffer 1/16 size
 	bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
 	gridDim16 = dim3(divRoundUp(bufferSize16.x, blockDim.x), divRoundUp(bufferSize16.y, blockDim.y), 1);
 	GpuErrorCheck(cudaMallocArray(&colorBufferArray16, &channelFormatRgba16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArray16; GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer16, &resDesc));
+	resDesc.res.array.array = colorBufferArray16;
+	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer16, &resDesc));
 
 	// bloom buffer 1/16 size
 	GpuErrorCheck(cudaMallocArray(&bloomBufferArray16, &channelFormatRgba16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = bloomBufferArray16; GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer16, &resDesc));
+	resDesc.res.array.array = bloomBufferArray16;
+	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer16, &resDesc));
 
 	// color buffer 1/64 size
 	bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
 	gridDim64 = dim3(divRoundUp(bufferSize64.x, blockDim.x), divRoundUp(bufferSize64.y, blockDim.y), 1);
 	GpuErrorCheck(cudaMallocArray(&colorBufferArray64, &channelFormatRgba16, bufferSize64.x, bufferSize64.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArray64; GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer64, &resDesc));
+	resDesc.res.array.array = colorBufferArray64;
+	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer64, &resDesc));
+
+	// ----------------------- sky buffer ------------------------
+	GpuErrorCheck(cudaMallocArray(&skyArray, &channelFormatRgba32, skyWidth, skyHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = skyArray;
+	GpuErrorCheck(cudaCreateSurfaceObject(&skyBuffer, &resDesc));
+	GpuErrorCheck(cudaCreateTextureObject(&skyTex, &resDesc, &texDesc, NULL));
+
+	GpuErrorCheck(cudaMalloc((void**)&skyCdf, skySize * sizeof(float)));
+	GpuErrorCheck(cudaMemset(skyCdf, 0, skySize * sizeof(float)));
 
 	// ----------------------- GPU buffers -----------------------
 	// exposure
@@ -198,7 +224,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	camera.dirFocal.xyz      = normalize(CamToObj);
 	camera.dirFocal.w        = CamToObj.length();
 	camera.leftAperture.xyz  = normalize(cross(Float3(0, 1, 0), camera.dirFocal.xyz));
-	camera.leftAperture.w    = 0.001f;
+	camera.leftAperture.w    = 0.002f;
 	camera.up.xyz            = normalize(cross(camera.dirFocal.xyz, camera.leftAperture.xyz));
 
 	// textures
@@ -244,6 +270,12 @@ void RayTracer::cleanup()
 	cudaFreeArray(texArraySandAlbedo);
 	cudaFreeArray(texArrayUv);
 	cudaFreeArray(texArraySandNormal);
+
+	// sky
+	cudaDestroyTextureObject(skyTex);
+	cudaDestroySurfaceObject(skyBuffer);
+	cudaFreeArray(skyArray);
+	cudaFree(skyCdf);
 
 	// --------------------- free other gpu buffer ----------------------------
 	// exposure and histogram
