@@ -10,7 +10,14 @@ __device__ inline void UpdateMaterial(
 	const SceneMaterial& sceneMaterial)
 {
 	// get mat id
-	rayState.matId = sceneMaterial.materialsIdx[rayState.objectIdx];
+	if (rayState.objectIdx == MAGIC_NUMBER_PLANE)
+	{
+		rayState.matId = 3;
+	}
+	else
+	{
+		rayState.matId = sceneMaterial.materialsIdx[rayState.objectIdx];
+	}
 
 	// get mat
 	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
@@ -24,6 +31,10 @@ __device__ inline void UpdateMaterial(
 	// is diffuse
 	rayState.isDiffuse = (rayState.matType == LAMBERTIAN_DIFFUSE) || (rayState.matType == MICROFACET_REFLECTION);
 }
+
+#define RAY_TRAVERSE_SPHERES 1
+#define RAY_TRAVERSE_AABBS 1
+#define RAY_TRAVERSE_PLANE 1
 
 // ray traverse, return true if hit
 __device__ inline void RaySceneIntersect(
@@ -53,6 +64,8 @@ __device__ inline void RaySceneIntersect(
 	intersectPoint  = Float3(RayMax);
 	uv              = Float2(0);
 
+#if RAY_TRAVERSE_SPHERES
+	// ----------------------- spheres ---------------------------
 	// get spheres
 	int numSpheres  = sceneGeometry.numSpheres;
 	Sphere* spheres = sceneGeometry.spheres;
@@ -80,13 +93,16 @@ __device__ inline void RaySceneIntersect(
 			rayOffset       = errorT + errorP;
 		}
 	}
+#endif
 
+#if RAY_TRAVERSE_AABBS
+	// ----------------------- aabbs ---------------------------
 	// traverse aabb
 	int numAabbs = sceneGeometry.numAabbs;
 	AABB* aabbs = sceneGeometry.aabbs;
 
 	// pre-calculation
-	Float3 oneOverRayDir = 1.0 / ray.dir;
+	Float3 oneOverRayDir = SafeDivede3f(Float3(1.0f), ray.dir);
 	Float3 rayOrigOverRayDir = ray.orig * oneOverRayDir;
 
 	for (int i = 0; i < numAabbs; ++i)
@@ -97,11 +113,27 @@ __device__ inline void RaySceneIntersect(
 		{
 			t               = t_temp;
 			objectIdx       = numSpheres + i;
-			//GetAabbRayIntersectPointNormal(aabb, ray, t, intersectPoint, intersectNormal, errorP);
-			GetAabbRayIntersectPointNormalUv(aabb, ray, t, intersectPoint, intersectNormal, uv, errorP);
+			GetAabbRayIntersectPointNormal(aabb, ray, t, intersectPoint, intersectNormal, errorP);
+			//GetAabbRayIntersectPointNormalUv(aabb, ray, t, intersectPoint, intersectNormal, uv, errorP);
 			rayOffset       = errorT + errorP;
 		}
 	}
+#endif
+
+#if RAY_TRAVERSE_PLANE
+	// ----------------------- planes ---------------------------
+	Float4 plane(Float3(0, 1, 0), 0);
+	float t_temp = RayPlaneIntersect(plane, ray, errorT);
+	if (t_temp < t)
+	{
+		t               = t_temp;
+		objectIdx       = MAGIC_NUMBER_PLANE;
+		intersectPoint  = GetRayPlaneIntersectPoint(plane, ray, t, errorP);
+		intersectNormal = plane.xyz;
+		rayOffset       = errorT + errorP;
+	}
+
+#endif
 
 	// Is ray into surface? If no, flip normal
 	normalDotRayDir = dot(intersectNormal, ray.dir);    // ray dot geometry normal

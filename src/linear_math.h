@@ -77,6 +77,7 @@ struct Int2
 	__host__ __device__ Int2()              : x{0}, y{0} {}
 	__host__ __device__ Int2(int a)         : x{a}, y{a} {}
     __host__ __device__ Int2(int x, int y)  : x{x}, y{y} {}
+	__host__ __device__ Int2(const Int2& v) : x{v.x}, y{v.y} {}
 
     inline __host__ __device__ Int2 operator + (int a) const         { return Int2(x + a, y + a); }
     inline __host__ __device__ Int2 operator - (int a) const         { return Int2(x - a, y - a); }
@@ -316,8 +317,8 @@ inline __host__ __device__ Float3 max(const Float3& v1, const Float3& v2)       
 inline __host__ __device__ Float2 normalize(const Float2& v)                          { float norm = sqrtf(v.x * v.x + v.y * v.y); return Float2(v.x / norm, v.y / norm); }
 inline __host__ __device__ Float3 normalize(const Float3& v)                          { float norm = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); return Float3(v.x / norm, v.y / norm, v.z / norm); }
 inline __host__ __device__ Float3 sqrt3f(const Float3& v)                             { return Float3(sqrtf(v.x), sqrtf(v.y), sqrtf(v.z)); }
-inline __host__ __device__ Float3 min3f(const Float3 & v1, const Float3 & v2)         { return Float3(v1.x < v2.x ? v1.x : v2.x, v1.y < v2.y ? v1.y : v2.y, v1.z < v2.z ? v1.z : v2.z); }
-inline __host__ __device__ Float3 max3f(const Float3 & v1, const Float3 & v2)         { return Float3(v1.x > v2.x ? v1.x : v2.x, v1.y > v2.y ? v1.y : v2.y, v1.z > v2.z ? v1.z : v2.z); }
+inline __host__ __device__ Float3 min3f(const Float3 & v1, const Float3 & v2)         { return Float3(min(v1.x, v2.x), min(v1.y, v2.y), min(v1.z, v2.z)); }
+inline __host__ __device__ Float3 max3f(const Float3 & v1, const Float3 & v2)         { return Float3(max(v1.x, v2.x), max(v1.y, v2.y), max(v1.z, v2.z)); }
 inline __host__ __device__ Float3 cross(const Float3 & v1, const Float3 & v2)         { return Float3(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x); }
 inline __host__ __device__ Float3 powf(const Float3 & v1, const Float3 & v2)          { return Float3(powf(v1.x, v2.x), powf(v1.y, v2.y), powf(v1.z, v2.z)); }
 inline __host__ __device__ Float3 exp3f(const Float3 & v)                             { return Float3(expf(v.x), expf(v.y), expf(v.z)); }
@@ -329,7 +330,7 @@ inline __host__ __device__ float  mix1f(float v1, float v2, float a)            
 inline __host__ __device__ Float3 minf3f(const float a, const Float3 & v)             { return Float3(v.x < a ? v.x : a, v.y < a ? v.y : a, v.y < a ? v.y : a); }
 inline __host__ __device__ void   swap(float& v1, float& v2)                          { float tmp = v1; v1 = v2; v2 = tmp; }
 inline __host__ __device__ void   swap(Float3 & v1, Float3 & v2)                      { Float3 tmp = v1; v1 = v2; v2 = tmp; }
-inline __host__ __device__ float  clampf(float a, float lo, float hi)                 { return a < lo ? lo : a > hi ? hi : a; }
+inline __host__ __device__ float  clampf(float a, float lo = 1.0f, float hi = 1.0f)   { return a < lo ? lo : a > hi ? hi : a; }
 inline __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo, Float3 hi)             { return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
 inline __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)     { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
 inline __host__ __device__ float  dot(const Float2 & v1, const Float2 & v2)           { return v1.x * v2.x + v1.y * v2.y; }
@@ -338,7 +339,10 @@ inline __host__ __device__ float  dot(const Float4 & v1, const Float4 & v2)     
 inline __host__ __device__ float  distancesq(const Float3 & v1, const Float3 & v2)    { return (v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y) + (v1.z - v2.z) * (v1.z - v2.z); }
 inline __host__ __device__ float  distance(const Float3 & v1, const Float3 & v2)      { return sqrtf((v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y) + (v1.z - v2.z) * (v1.z - v2.z)); }
 inline __host__ __device__ Float3 lerp3f(Float3 a, Float3 b, float w)                 { return a + w * (b - a); }
-inline __host__ __device__ Float3 reflect3f(Float3 i, Float3 n)                         { return i - 2.0f * n * dot(n,i); }
+inline __host__ __device__ float  lerpf(float a, float b, float w)                    { return a + w * (b - a); }
+inline __host__ __device__ Float3 reflect3f(Float3 i, Float3 n)                       { return i - 2.0f * n * dot(n,i); }
+inline __host__ __device__ float  pow2(float a)                                       { return a * a; }
+inline __host__ __device__ float  pow3(float a)                                       { return a * a * a; }
 
 inline __host__ __device__ unsigned int divRoundUp(unsigned int dividend, unsigned int divisor) { return (dividend + divisor - 1) / divisor; }
 
@@ -382,11 +386,62 @@ struct Mat4
 		Float4 _v4[4];
 		float _v[16];
 	};
-	Mat4() { for (int i = 0; i < 16; ++i) _v[i] = 0; }
-	Mat4(const Float4& v0, const Float4& v1, const Float4& v2, const Float4& v3) : v0{v0}, v1{v1}, v2{v2}, v3{v3} {}
 
-	inline __host__ __device__ Float4&       operator[](int i)       { return _v4[i]; }
-	inline __host__ __device__ const Float4& operator[](int i) const { return _v4[i]; }
+	__host__ __device__ Mat4() { for (int i = 0; i < 16; ++i) { _v[i] = 0; } m00 = m11 = m22 = m33 = 1; }
+	__host__ __device__ Mat4(const Float4& v0, const Float4& v1, const Float4& v2, const Float4& v3) : v0{v0}, v1{v1}, v2{v2}, v3{v3} {}
+
+	inline __host__ __device__ void          setCol(uint i, const Float4& v)       { _v4[i] = v; }
+	inline __host__ __device__ Float4        getCol(uint i) const                  { return _v4[i]; }
+
+	inline __host__ __device__ void          setRow(uint i, const Float4& v)       { _v[i] = v[0]; _v[i+4] = v[1]; _v[i+8] = v[2]; _v[i+12] = v[3]; }
+	inline __host__ __device__ Float4        getRow(uint i) const                  { return Float4(_v[i], _v[i+4], _v[i+8], _v[i+12]); }
+
+	inline __host__ __device__ float&        get(uint r, uint c)                   { return _v[r + c * 4]; }
+	inline __host__ __device__ float         get(uint r, uint c) const             { return _v[r + c * 4]; }
+
+	inline __host__ __device__ float&        operator()(int r, int c)              { return get(r, c); }
+	inline __host__ __device__ float         operator()(int r, int c) const        { return get(r, c); }
+
+	inline __host__ __device__ Float4&       operator[](int i)                     { return _v4[i]; }
+	inline __host__ __device__ const Float4& operator[](int i) const               { return _v4[i]; }
+
+	inline __host__ __device__ Mat4 invert()
+	{
+		float inv[16];
+		float m[16] = {	m00, m10, m20, m30,
+						m01, m11, m21, m31,
+						m02, m12, m22, m32,
+						m03, m13, m23, m33 };
+
+		inv[0]  =  m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+		inv[4]  = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+		inv[8]  =  m[4] * m[9] *  m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+		inv[12] = -m[4] * m[9] *  m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+		inv[1]  = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+		inv[5]  =  m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+		inv[9]  = -m[0] * m[9] *  m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+		inv[13] =  m[0] * m[9] *  m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+		inv[2]  =  m[1] * m[6] *  m[15] - m[1] * m[7] *  m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] -  m[13] * m[3] * m[6];
+		inv[6]  = -m[0] * m[6] *  m[15] + m[0] * m[7] *  m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] +  m[12] * m[3] * m[6];
+		inv[10] =  m[0] * m[5] *  m[15] - m[0] * m[7] *  m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] -  m[12] * m[3] * m[5];
+		inv[14] = -m[0] * m[5] *  m[14] + m[0] * m[6] *  m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] +  m[12] * m[2] * m[5];
+		inv[3]  = -m[1] * m[6] *  m[11] + m[1] * m[7] *  m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] *  m[2] * m[7] +  m[9] *  m[3] * m[6];
+		inv[7]  =  m[0] * m[6] *  m[11] - m[0] * m[7] *  m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] *  m[2] * m[7] -  m[8] *  m[3] * m[6];
+		inv[11] = -m[0] * m[5] *  m[11] + m[0] * m[7] *  m[9] +  m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -  m[8] *  m[1] * m[7] +  m[8] *  m[3] * m[5];
+		inv[15] =  m[0] * m[5] *  m[10] - m[0] * m[6] *  m[9] -  m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +  m[8] *  m[1] * m[6] -  m[8] *  m[2] * m[5];
+
+		float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+
+		if (det == 0)
+			return Mat4();
+
+		det = 1.f / det;
+		Mat4 inverse;
+		for (int i = 0; i < 16; i++)
+			inverse[i] = inv[i] * det;
+
+		return inverse;
+	}
 };
 
 struct Quat
@@ -427,3 +482,6 @@ inline __host__ __device__ Quat rotationBetween(const Quat& p, const Quat& q)   
 inline __host__ __device__ Float3 rotate3f         (const Float3& axis, float angle, const Float3& v) { return rotate(Quat::axisAngle(axis, angle), v).v; }
 inline __host__ __device__ Float3 slerp3f          (const Float3& q, const Float3& r, float t)        { return slerp(Quat(q), Quat(r), t).v; }
 inline __host__ __device__ Float3 rotationBetween3f(const Float3& p, const Float3& q)                 { return rotationBetween(Quat(p), Quat(q)).v; }
+
+__host__ __device__ __inline__ float SafeDivede(float a, float b) { float eps = exp2f(-80.0f); return a / ((fabsf(b) > eps) ? b : copysignf(eps, b)); };
+__host__ __device__ __inline__ Float3 SafeDivede3f(const Float3& a, const Float3& b) { return Float3(SafeDivede(a.x, b.x), SafeDivede(a.y, b.y), SafeDivede(a.z, b.z)); };

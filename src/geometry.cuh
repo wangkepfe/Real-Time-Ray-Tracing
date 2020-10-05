@@ -9,7 +9,7 @@
 // ------------------------------ Machine Epsilon -----------------------------------------------
 // The smallest number that is larger than one minus one. ULP (unit in the last place) of 1
 // ----------------------------------------------------------------------------------------------
-__device__ constexpr float MachineEpsilon()
+__device__ __inline__ constexpr float MachineEpsilon()
 {
 	typedef union {
 		float f32;
@@ -25,7 +25,7 @@ __device__ constexpr float MachineEpsilon()
 // ------------------------------ Error Gamma -------------------------------------------------------
 // return 32bit floating point arithmatic calculation error upper bound, n is number of calculation
 // --------------------------------------------------------------------------------------------------
-__device__ constexpr float ErrGamma(int n)
+__device__ __inline__ constexpr float ErrGamma(int n)
 {
 	return (n * MachineEpsilon()) / (1.0f - n * MachineEpsilon());
 }
@@ -33,7 +33,7 @@ __device__ constexpr float ErrGamma(int n)
 // ------------------------------ Sphere Ray Intersect ------------------------------------
 // ray/sphere intersection. returns distance, RayMax if no intersection.
 // ----------------------------------------------------------------------------------------
-__device__ float SphereRayIntersect(
+__device__ __inline__ float SphereRayIntersect(
 	const Sphere& sphere,
 	const Ray&    ray,
 	float&        tError)
@@ -69,7 +69,7 @@ __device__ float SphereRayIntersect(
 // ------------------------------ Get Sphere Ray Intersect Point --------------------------
 // reproject intersection point to increase accuracy
 // ----------------------------------------------------------------------------------------
-__device__ Float3 GetSphereRayIntersectPoint(
+__device__ __inline__ Float3 GetSphereRayIntersectPoint(
 	const Sphere& sphere,
 	const Ray&    ray,
 	float         t,
@@ -86,7 +86,7 @@ __device__ Float3 GetSphereRayIntersectPoint(
 // ------------------------------ Aabb Ray Intersect ------------------------------
 //	ray AABB intersect, return distance, RayMax if no hit
 // --------------------------------------------------------------------------------
-__device__ float AabbRayIntersect(
+__device__ __inline__ float AabbRayIntersect(
 	const Float3& aabbMin,
 	const Float3& aabbMax,
 	const Float3& rayOrig,
@@ -131,7 +131,7 @@ __device__ float AabbRayIntersect(
 // --------------------------- Get Aabb Ray Intersect Point Normal -------------------------
 //	Get Aabb Ray Intersect reprojected Point and Normal
 // -----------------------------------------------------------------------------------------
-__device__ void GetAabbRayIntersectPointNormal(
+__device__ __inline__ void GetAabbRayIntersectPointNormal(
 	const AABB& aabb,
 	const Ray&  ray,
 	float       t,
@@ -181,7 +181,7 @@ __device__ void GetAabbRayIntersectPointNormal(
 // --------------------------- Get Aabb Ray Intersect Point Normal UV -------------------------
 //	Get Aabb Ray Intersect reprojected Point and Normal and uv
 // -----------------------------------------------------------------------------------------
-__device__ void GetAabbRayIntersectPointNormalUv(
+__device__ __inline__ void GetAabbRayIntersectPointNormalUv(
 	const AABB& aabb,
 	const Ray&  ray,
 	float       t,
@@ -239,7 +239,7 @@ __device__ void GetAabbRayIntersectPointNormalUv(
 // --------------------------- Ray Plane Intersect -------------------------
 // ray plane intersect, return distance, RayMax if no hit
 // -------------------------------------------------------------------------
-__device__ float RayPlaneIntersect( // N dot P = w
+__device__ __inline__ float RayPlaneIntersect( // N dot P = w
 	const Float4& plane,
 	const Ray&    ray,
 	float&        tError)
@@ -266,7 +266,7 @@ __device__ float RayPlaneIntersect( // N dot P = w
 // --------------------------- Get Ray Plane Intersect Point -------------------------
 //	Get plane, Ray Intersect reprojected Point
 // -----------------------------------------------------------------------------------
-__device__ Float3 GetRayPlaneIntersectPoint(
+__device__ __inline__ Float3 GetRayPlaneIntersectPoint(
 	const Float4& plane,
 	const Ray&    ray,
 	float         t,

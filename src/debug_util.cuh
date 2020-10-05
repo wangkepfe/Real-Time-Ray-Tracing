@@ -3,6 +3,8 @@
 #include <device_launch_parameters.h>
 #include <cuda_runtime.h>
 
+#define DEBUG_CUDA() GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
+
 __device__ bool IsPixelAt(float u, float v)
 {
 	int centerx = gridDim.x * blockDim.x * u;

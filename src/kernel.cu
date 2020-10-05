@@ -7,7 +7,6 @@
 #include "postprocessing.cuh"
 #include "raygen.cuh"
 #include "traverse.cuh"
-#include "hash.cuh"
 #include "light.cuh"
 
 __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, TexObj skyTex)
@@ -36,10 +35,12 @@ __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMa
 	}
 }
 
-__device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial)
+__device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, BlueNoiseRandGenerator& randGen, int loopIdx)
 {
 	// check for termination and hit light
 	if (rayState.hitLight == true || rayState.isDiffuse == true) { return; }
+
+	if (loopIdx == 0) { rayState.bounceLimit = 4; }
 
 	if (rayState.matType == PERFECT_REFLECTION)
 	{
@@ -52,13 +53,14 @@ __device__ inline void GlossyShader(ConstBuffer& cbo, RayState& rayState, SceneM
 		// glass
 		Float3 nextRayDir;
 		float rayOffset = rayState.offset;
-		PerfectReflectionRefraction(1.0, 1.33, rayState.isRayIntoSurface, rayState.normal, rayState.normalDotRayDir, rd(&rayState.rdState[2]), rayState.dir, nextRayDir, rayOffset);
+		float surfaceRand = randGen.Rand(4 + loopIdx * 6 + 0);
+		PerfectReflectionRefraction(1.0, 1.33, rayState.isRayIntoSurface, rayState.normal, rayState.normalDotRayDir, surfaceRand, rayState.dir, nextRayDir, rayOffset);
 		rayState.dir = nextRayDir;
 		rayState.orig = rayState.pos + rayOffset * rayState.normal;
 	}
 }
 
-__device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SceneTextures textures, float* skyCdf)
+__device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SceneTextures textures, float* skyCdf, BlueNoiseRandGenerator& randGen, int loopIdx)
 {
 	// check for termination and hit light
 	if (rayState.hitLight == true || rayState.isDiffuse == false) { return; }
@@ -68,9 +70,9 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	// get mat
 	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
 
-	float uvScale = 60.0f;
-
 	Float3 albedo;
+#if 0
+	float uvScale = 60.0f;
 	if (mat.useTex0)
 	{
 		float4 texColor = tex2D<float4>(textures.array[mat.texId0], rayState.uv.x * uvScale, rayState.uv.y * uvScale);
@@ -80,8 +82,12 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	{
 		albedo = mat.albedo;
 	}
+#else
+	albedo = mat.albedo;
+#endif
 
 	Float3 normal = rayState.normal;
+#if 0
 	if (mat.useTex1)
 	{
 		float4 texColor = tex2D<float4>(textures.array[mat.texId1], rayState.uv.x * uvScale, rayState.uv.y * uvScale);
@@ -100,6 +106,7 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 		normal = texNormal;
 		//normal = mixf(normal, texNormal, 0.0f);
 	}
+#endif
 
 	Float3 rayDir = rayState.dir;
 
@@ -107,7 +114,7 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	float isDeltaLight = false;
 	Float3 lightSampleDir;
 	float lightSamplePdf;
-	bool isLightSampled = SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf);
+	bool isLightSampled = SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf, randGen, loopIdx);
 
 	// surface sample
 	Float3 surfSampleDir;
@@ -120,9 +127,10 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	Float3 lightSampleSurfaceBsdf;
 	float lightSampleSurfacePdf = 0;
 
+	Float2 surfaceDiffuseRand2 = randGen.Rand2(4 + loopIdx * 6 + 0);
 	if (rayState.matType == LAMBERTIAN_DIFFUSE)
 	{
-		LambertianSample(rd2(&rayState.rdState[0], &rayState.rdState[1]), surfSampleDir, normal);
+		LambertianSample(surfaceDiffuseRand2, surfSampleDir, normal);
 
 		if (isDeltaLight == false)
 		{
@@ -144,13 +152,14 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 		float alpha = mat.alpha;
 
 		if (isDeltaLight == false)
-			MacrofacetReflectionSample(rd(&rayState.rdState[0]), rd(&rayState.rdState[1]), rayDir, surfSampleDir, normal, surfaceBsdfOverPdf, surfaceSampleBsdf, surfaceSamplePdf, F0, albedo, alpha);
+			MacrofacetReflectionSample(surfaceDiffuseRand2, rayDir, surfSampleDir, normal, surfaceBsdfOverPdf, surfaceSampleBsdf, surfaceSamplePdf, F0, albedo, alpha);
 
 		if (isLightSampled == true)
 			MacrofacetReflection(lightSampleSurfaceBsdfOverPdf, lightSampleSurfaceBsdf, lightSampleSurfacePdf, normal, lightSampleDir, rayDir, F0, albedo, alpha);
 	}
 
 	// -------------------------------------- MIS balance heuristic ------------------------------------------
+	float misRand = randGen.Rand(4 + loopIdx * 6 + 4);
 	if (isLightSampled)
 	{
 		if (isDeltaLight)
@@ -181,7 +190,7 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 
 			float chooseSurfaceFactor = surfaceSampleWeight / (lightSampleWeight + surfaceSampleWeight);
 
-			if (rd(&rayState.rdState[2]) < chooseSurfaceFactor)
+			if (misRand < chooseSurfaceFactor)
 			{
 				// choose surface scatter sample
 				rayState.beta *= min3f(surfaceSampleBsdf * surfaceSampleWeight / chooseSurfaceFactor, Float3(1.0f));
@@ -205,101 +214,117 @@ __device__ inline void DiffuseShader(ConstBuffer& cbo, RayState& rayState, Scene
 	rayState.orig = rayState.pos + rayState.offset * normal;
 }
 
-__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, RandInitVec* randInitVec, SurfObj colorBuffer, SceneTextures textures, TexObj skyTex, float* skyCdf)
+__global__ void PathTrace(ConstBuffer cbo, SceneGeometry sceneGeometry, SceneMaterial sceneMaterial, BlueNoiseRandGenerator randGen, SurfObj colorBuffer, SceneTextures textures, TexObj skyTex, float* skyCdf)
 {
 	// index
 	Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
 	int i = gridDim.x * blockDim.x * idx.y + idx.x;
 
-	// init ray state
-	RayState rayState;
-	rayState.i            = i;
-	rayState.L            = 0.0;
-	rayState.beta         = 1.0;
-	rayState.idx          = idx;
-	rayState.isDiffuseRay = false;
-	rayState.hitLight     = false;
+	int sampleNum = 1;
+	float encodedNormal;
+	Float3 outColor = 0;
 
-	// init rand state
-	const uint seed = WangHash((idx.x << 16) ^ (idx.y));
-	for (int k = 0; k < 3; ++k) { curand_init(randInitVec[k], CURAND_2POW32 * 0.5f, seed + cbo.frameNum, &rayState.rdState[k]); }
-
-	// generate ray
-	GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, rd2(&rayState.rdState[0], &rayState.rdState[1]), rd2(&rayState.rdState[0], &rayState.rdState[1]));
-	RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
-
-	// encode normal
-	float encodedNormal = EncodeNormal_R11_G10_B11(rayState.normal);
-
-	// main loop
-	for (int k = 0; k < 7; ++k)
+	#pragma unroll
+	for (int sampleIdx = 0; sampleIdx < sampleNum; ++sampleIdx)
 	{
-		GlossyShader(cbo, rayState, sceneMaterial);
-		DiffuseShader(cbo, rayState, sceneMaterial, textures, skyCdf);
+		// init ray state
+		RayState rayState;
+		rayState.i            = i;
+		rayState.L            = 0.0;
+		rayState.beta         = 1.0;
+		rayState.idx          = idx;
+		rayState.isDiffuseRay = false;
+		rayState.hitLight     = false;
+		rayState.bounceLimit  = 2;
+
+		// setup rand gen
+		randGen.idx = idx;
+		randGen.sampleIdx = cbo.frameNum * sampleNum + sampleIdx;
+
+		// generate ray
+		GenerateRay(rayState.orig, rayState.dir, cbo.camera, idx, randGen.Rand2(0), randGen.Rand2(2));
 		RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+
+		// encode normal
+		if (sampleIdx == 0) { encodedNormal = EncodeNormal_R11_G10_B11(rayState.normal); }
+
+		// main loop
+		int loopIdx = 0;
+		for (; loopIdx < rayState.bounceLimit; ++loopIdx)
+		{
+			GlossyShader(cbo, rayState, sceneMaterial, randGen, loopIdx);
+			DiffuseShader(cbo, rayState, sceneMaterial, textures, skyCdf, randGen, loopIdx);
+			RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+		}
+
+		GlossyShader(cbo, rayState, sceneMaterial, randGen, loopIdx);
+		LightShader(cbo, rayState, sceneMaterial, skyTex);
+
+		outColor += rayState.L;
 	}
 
-	GlossyShader(cbo, rayState, sceneMaterial);
-	LightShader(cbo, rayState, sceneMaterial, skyTex);
-
 	// write to buffer
-	Store2D(Float4(rayState.L, encodedNormal), colorBuffer, idx);
+	Store2D(Float4(outColor / (float)sampleNum, encodedNormal), colorBuffer, idx);
 }
 
-void RayTracer::draw(SurfObj* renderTarget)
+void RayTracer::UpdateFrame()
 {
-	// ---------------- frame update ------------------
 	// timer
 	timer.update();
-	float deltaTime = timer.getDeltaTime();
-	float clockTime = timer.getTime();
+	deltaTime = timer.getDeltaTime();
+	clockTime = timer.getTime();
 	cbo.clockTime     = clockTime;
 
 	// sun dir
     const Float3 axis = normalize(Float3(1.0f, 0.0f, -0.4f));
 	const float angle = fmodf(clockTime * TWO_PI / 100, TWO_PI);
-	Float3 sunDir     = rotate3f(axis, angle, Float3(0.0, 1.0, 0.0)).normalized();
+	sunDir     = rotate3f(axis, angle, Float3(0.0, -1.0, 0.0)).normalized();
 	cbo.sunDir        = sunDir;
 
 	// frame number
-	cbo.frameNum      = cbo.frameNum + 1;
+	static int framen = 1;
+	cbo.frameNum      = framen++;
 
-	// get camera
+	// prepare for lens flare
 	Camera& camera = cbo.camera;
-
-	// prepare for len flare
-	Mat3 invCamMat(camera.leftAperture.xyz, camera.up.xyz, camera.dirFocal.xyz); // build view matrix
+	Mat3 invCamMat(camera.left, camera.up, camera.dir); // build view matrix
 	invCamMat.transpose(); // orthogonal matrix, inverse is transpose
 	Float3 sunPosViewSpace = sunDir * invCamMat; // transform sun dir to view space
-	Float2 sunPos = sunPosViewSpace.xy; // get xy
+	sunPos = sunPosViewSpace.xy; // get xy
 	sunPos /= sunPosViewSpace.z; // get the x and y when z is 1
-	sunPos /= camera.fov.zw; // [-1, 1]
+	sunPos /= camera.tanHalfFov; // [-1, 1]
 	sunPos = Float2(0.5) - sunPos * Float2(0.5); // [0, 1]
+}
+
+void RayTracer::draw(SurfObj* renderTarget)
+{
+	// update frame
+	UpdateFrame();
 
 	// dimensions
 	Int2 bufferDim(renderWidth, renderHeight);
 	Int2 outputDim(screenWidth, screenHeight);
 
-	// init histogram
+	// ---------------- init histogram ----------------
 	GpuErrorCheck(cudaMemsetAsync(d_histogram, 0, 64 * sizeof(uint), streams[0]));
 
-	// sky
+	// ---------------- sky ----------------
 	Sky<<<dim3(8, 2, 1), dim3(8, 8, 1), 0, streams[0]>>>(skyBuffer, skyCdf, Int2(64, 16), sunDir);
 	Scan<<<1, dim3(512, 1, 1), 1024 * sizeof(float), streams[0]>>>(skyCdf, 1024);
 
-	//GpuErrorCheck(cudaDeviceSynchronize());
-	//GpuErrorCheck(cudaPeekAtLastError());
+	// ---------------- path tracing ----------------------
+	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randGen, colorBufferA, sceneTextures, skyTex, skyCdf);
 
-	// ---------------- launch path tracing kernel ----------------------
-	PathTrace<<<gridDim, blockDim, 0, streams[0]>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randInitVec, colorBufferA, sceneTextures, skyTex, skyCdf);
+	DEBUG_CUDA();
 
 	// ---------------- post processing -------------------
-	// TAA
-	if (cbo.frameNum == 1) { BufferCopy<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
-	else                   { TAA       <<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim); }
+	if (cbo.frameNum != 1)
+	{
+		TemporalFilter <<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim);
+	}
 
 	// Denoise
-	DenoiseKernel<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, bufferDim);
+	AtousFilter<<<dim3(divRoundUp(renderWidth, 28), divRoundUp(renderHeight, 28), 1), dim3(32, 32, 1), 0, streams[0]>>>(colorBufferA, colorBufferB, bufferDim);
 
 	// Histogram
 	DownScale4_fp32_fp16<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, colorBuffer4, bufferDim);
@@ -318,7 +343,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 	Bloom<<<gridDim, blockDim, 0, streams[0]>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
 
 	// Lens flare
-	if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.0 && dot(sunDir, camera.dirFocal.xyz) > 0)
+	if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.0 && dot(sunDir, cbo.camera.dir) > 0)
 	{
 		sunPos -= Float2(0.5);
 		sunPos.x *= (float)renderWidth / (float)renderHeight;

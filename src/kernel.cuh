@@ -14,7 +14,9 @@
 #include "geometry.h"
 #include "timer.h"
 #include "terrain.hpp"
-#include "hash.cuh"
+#include "blueNoiseRandGen.h"
+
+#define MAGIC_NUMBER_PLANE 666666
 
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
@@ -22,11 +24,6 @@
 #define SurfObj cudaSurfaceObject_t
 #define TexObj cudaTextureObject_t
 #define ullint unsigned long long int
-
-// ---------------------- shader setting ----------------------
-#define USE_PERFECT_FRESNEL_REFLECTION_REFRACTION 0
-#define USE_MICROFACET_REFLECTION 0
-#define RAND_DIM 7 // 7=2+2+1+2; 2 anti-aliasing, 1 fresnel / lights, 2 diffuse, 2 light
 
 // ---------------------- error handling ----------------------
 #define CheckCurandErrors(x) do { if((x)!=CURAND_STATUS_SUCCESS) { printf("Error at %s:%d\n",__FILE__,__LINE__); return EXIT_FAILURE;}} while(0)
@@ -43,20 +40,55 @@ inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort =
 // ---------------------- struct ----------------------
 struct __align__(16) Camera
 {
-	Float4 pos;          // .w unused
-	Float4 dirFocal;     // .xyz: dir, .w: focal length
-	Float4 leftAperture; // .xyz: left = <0,1,0> x dir, .w: aperture
-	Float4 up;           // .xyz: up = dir x left, .w: unused
-	Float4 resolution;   // (width, height, 1/width, 1/height)
-	Float4 fov;          // (radius_x, radius_y, tan(radius_x / 2), tan(radius_y / 2))
+	Float3 pos;
+	float  unused1;
+	Float3 dir;
+	float  focal;
+	Float3 left;
+	float  aperture;
+	Float3 up;
+	float  unused2;
+	Float2 resolution;
+	Float2 inversedResolution;
+	Float2 fov;
+	Float2 tanHalfFov;
+	Float3 adjustedLeft;
+	float  unused3;
+	Float3 adjustedUp;
+	float  unused4;
+	Float3 adjustedFront;
+	float  unused5;
+	Float3 apertureLeft;
+	float  unused6;
+	Float3 apertureUp;
+	float  unused7;
+
+	void update()
+	{
+		inversedResolution = 1.0f / resolution;
+		fov.y = fov.x / resolution.x * resolution.y;
+		tanHalfFov = Float2(tanf(fov.x / 2), tanf(fov.y / 2));
+
+		left = normalize(cross(up, dir));
+		up = normalize(cross(dir, left));
+
+		adjustedFront = dir * focal;
+		adjustedLeft = left * tanHalfFov.x * focal;
+		adjustedUp = up * tanHalfFov.y * focal;
+
+		apertureLeft = left * aperture;
+		apertureUp = up * aperture;
+	}
 };
 
 struct __align__(16) SceneGeometry
 {
 	Sphere* spheres;
 	AABB*   aabbs;
+	Triangle* triangles;
 	int numAabbs;
 	int numSpheres;
+	int numTriangles;
 };
 
 enum SurfaceMaterialType : uint
@@ -169,11 +201,11 @@ struct __align__(16) RayState
 	bool       isDiffuseRay;
 	Float3     tangent;
 
-	RandState  rdState[3];
+	int        bounceLimit;
 };
 
-__device__ __inline__ float rd(RandState* rdState) { return curand_uniform(rdState); }
-__device__ __inline__ Float2 rd2(RandState* rdState1, RandState* rdState2) { return Float2(curand_uniform(rdState1), curand_uniform(rdState2)); }
+//__device__ __inline__ float rd(RandState* rdState) { return curand_uniform(rdState); }
+//__device__ __inline__ Float2 rd2(RandState* rdState1, RandState* rdState2) { return Float2(curand_uniform(rdState1), curand_uniform(rdState2)); }
 
 union SceneTextures
 {
@@ -214,6 +246,9 @@ public:
 
 private:
 
+	void CameraSetup(Camera& camera);
+	void UpdateFrame();
+
 	// resolution
 	const int                   screenWidth;
 	const int                   screenHeight;
@@ -245,6 +280,7 @@ private:
 	// primitives
 	Sphere*                     d_spheres;
 	AABB*                       d_aabbs;
+	Triangle*                   d_triangles;
 	Sphere*                     d_sphereLights;
 
 	// materials
@@ -293,8 +329,9 @@ private:
 	float*                      d_exposure;
 	uint*                       d_histogram;
 
-	// rand init
-	RandInitVec*                d_randInitVec;
+	// rand gen
+	BlueNoiseRandGeneratorHost  h_randGen;
+	BlueNoiseRandGenerator      d_randGen;
 
 	// timer
 	Timer                       timer;
@@ -309,7 +346,19 @@ private:
 	Float3                      cameraFocusPos;
 	Sphere*                     spheres;
 	Sphere*                     sphereLights;
+	AABB*                       aabbs;
+	Triangle*                   triangles;
 	int                         numSpheres;
 	int                         numSphereLights;
+	int                         numTriangles;
+
+	// cpu update
+	Float2                      sunPos;
+	Float3                      sunDir;
+	float                       deltaTime;
+	float                       clockTime;
+
+	// save to file
+	Float4*                     saveToFileBuffer;
 };
 

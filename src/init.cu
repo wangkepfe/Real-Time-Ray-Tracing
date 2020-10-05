@@ -1,6 +1,7 @@
 
 #include "kernel.cuh"
 #include "textureUtils.cuh"
+#include "blueNoiseRandGenData.h"
 
 inline float TrowbridgeReitzRoughnessToAlpha(float roughness)
 {
@@ -15,67 +16,74 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	streams = cudaStreams;
 
 	// init terrain
-	terrain.generateHeightMap();
+	//terrain.generateHeightMap();
 
 	// AABB
-	int numAabbs;
-	AABB* aabbs = terrain.generateAabbs(numAabbs);
+	//int numAabbs;
+	//AABB* aabbs = terrain.generateAabbs(numAabbs);
+	int numAabbs = 3;
+	AABB* aabbs = new AABB[numAabbs];
+	aabbs[0] = AABB({-0.05f, 0.005f, 0.0f}, 0.01f);
+	aabbs[1] = AABB({-0.03f, 0.005f, 0.0f}, 0.01f);
+	aabbs[2] = AABB({0.05f, 0.005f, 0.0f}, 0.01f);
 
 	// sphere
-	numSpheres     = 6;
-	spheres        = new Sphere[numSpheres];
-	cameraFocusPos = Float3(0.0f, terrain.getHeightAt(0.0f) + 0.005f, 0.0f);
-	spheres[0]     = Sphere(cameraFocusPos, 0.005f);
-	spheres[1]     = Sphere(Float3(0.07f, terrain.getHeightAt(0.07f) + 0.005f, 0.0f) , 0.005f);
-	spheres[2]     = Sphere(Float3(-0.07f, terrain.getHeightAt(-0.07f) + 0.005f, 0.0f) , 0.005f);
-	spheres[3]     = Sphere(Float3(0.03f, terrain.getHeightAt(0.03f) - 0.005f, -0.01f) , 0.005f);
-	spheres[4]     = Sphere(Float3(-0.03f, terrain.getHeightAt(-0.03f) - 0.005f, -0.01f) , 0.005f);
-	spheres[5]     = Sphere(Float3(0.02f, terrain.getHeightAt(0.02f) + 0.005f, 0.0f) , 0.005f);
+	numSpheres = 3;
+	spheres    = new Sphere[numSpheres];
+	spheres[0] = Sphere({-0.05f, 0.015f, 0.0f}, 0.005f);
+	spheres[1] = Sphere({-0.03f, 0.015f, 0.0f}, 0.005f);
+	spheres[2] = Sphere({0.05f, 0.015f, 0.0f}, 0.005f);
+
+	// triangles
+	numTriangles   = 2;
+	triangles = new Triangle[numTriangles];
+	triangles[0] = Triangle({0.0f, 0.0f, 0.0f}, {0.02f, 0.0f, 0.0f}, {0.02f, 0.02f, 0.0f});
+	triangles[1] = Triangle({0.0f, 0.0f, 0.0f}, {0.02f, 0.02f, 0.0f}, {0.0f, 0.02f, 0.0f});
+	//for (int i = 0 ; i < numTriangles; ++i) { triangles[i].WatertightTransform(); }
 
 	// surface materials
 	const int numMaterials     = 6;
 	SurfaceMaterial* materials = new SurfaceMaterial[numMaterials];
 
-	materials[0].type          = MICROFACET_REFLECTION;
-	materials[0].albedo        = Float3(0.5f);
-	materials[0].alpha         = TrowbridgeReitzRoughnessToAlpha(0.9f);
-	materials[0].F0            = Float3(0.05f);
+	materials[0].type          = EMISSIVE;
+	materials[0].albedo        = Float3(0.1f, 0.2f, 0.9f);
 
-	materials[1].type          = MICROFACET_REFLECTION;
-	materials[1].albedo        = Float3(0.5f);
-	materials[1].alpha         = TrowbridgeReitzRoughnessToAlpha(0.01f);
+	materials[1].type          = PERFECT_FRESNEL_REFLECTION_REFRACTION;
 
 	materials[2].type          = EMISSIVE;
 	materials[2].albedo        = Float3(0.9f, 0.2f, 0.1f);
 
-	materials[3].type          = EMISSIVE;
-	materials[3].albedo        = Float3(0.1f, 0.2f, 0.9f);
+	materials[3].type          = LAMBERTIAN_DIFFUSE;
+	materials[3].albedo        = Float3(0.5f);
 
-	materials[4].type          = MICROFACET_REFLECTION;
-	materials[4].albedo        = Float3(0.5f, 0.5f, 0.1f);
-	materials[4].alpha         = TrowbridgeReitzRoughnessToAlpha(0.5f);
-	materials[4].F0            = Float3(0.05f);
+	materials[4].type          = PERFECT_REFLECTION;
 
-	materials[5].type          = PERFECT_FRESNEL_REFLECTION_REFRACTION;
+	materials[5].type          = MICROFACET_REFLECTION;
+	materials[5].albedo        = Float3(0.5f);
+	materials[5].alpha         = TrowbridgeReitzRoughnessToAlpha(0.01f);
 
 	// material index for each object
 	const int numObjects = numAabbs + numSpheres;
-	int* materialsIdx    = new int[numObjects];
-	materialsIdx[0] = 1;
-	materialsIdx[1] = 2;
-	materialsIdx[2] = 3;
-	materialsIdx[3] = 4;
-	materialsIdx[4] = 5;
+	int* materialsIdx = new int[numObjects];
+
+	// sphere
+	materialsIdx[0] = 0;
+	materialsIdx[1] = 1;
+	materialsIdx[2] = 2;
+
+	// aabb
+	materialsIdx[3] = 3;
+	materialsIdx[4] = 4;
 	materialsIdx[5] = 5;
-	for (int i = numSpheres; i < numObjects; ++i)
-	{
-		materialsIdx[i] = 0;
-	}
+
+	// triangle
+	materialsIdx[6] = 5;
+	materialsIdx[7] = 5;
 
 	// light source
 	numSphereLights = 2;
 	sphereLights = new Sphere[numSphereLights];
-	sphereLights[0] = spheres[1];
+	sphereLights[0] = spheres[0];
 	sphereLights[1] = spheres[2];
 
 	// init cuda
@@ -179,12 +187,14 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)& d_materialsIdx     , numObjects *       sizeof(int)));
 	GpuErrorCheck(cudaMalloc((void**)& d_surfaceMaterials , numMaterials *     sizeof(SurfaceMaterial)));
 	GpuErrorCheck(cudaMalloc((void**)& d_sphereLights     , numSphereLights *  sizeof(Float4)));
+	GpuErrorCheck(cudaMalloc((void**)& d_triangles        , numTriangles *     sizeof(Triangle)));
 
 	GpuErrorCheck(cudaMemcpy(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_surfaceMaterials , materials    , numMaterials *    sizeof(SurfaceMaterial), cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_aabbs            , aabbs        , numAabbs *        sizeof(AABB)           , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_materialsIdx     , materialsIdx , numObjects *      sizeof(int)            , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice));
+	GpuErrorCheck(cudaMemcpy(d_triangles        , triangles    , numTriangles *    sizeof(Triangle)       , cudaMemcpyHostToDevice));
 
 	// setup scene
 	d_sceneGeometry.numSpheres      = numSpheres;
@@ -192,6 +202,9 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	d_sceneGeometry.numAabbs        = numAabbs;
 	d_sceneGeometry.aabbs           = d_aabbs;
+
+	d_sceneGeometry.numTriangles    = numTriangles;
+	d_sceneGeometry.triangles       = d_triangles;
 
 	d_sceneMaterial.numSphereLights = numSphereLights;
 	d_sceneMaterial.sphereLights    = d_sphereLights;
@@ -204,28 +217,13 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	delete[] materialsIdx;
 
 	// cuda random
-	GpuErrorCheck(cudaMalloc((void**)& d_randInitVec, 3 * sizeof(RandInitVec)));
-	RandInitVec* randDirvectors = g_curandDirectionVectors32;
-	GpuErrorCheck(cudaMemcpy(d_randInitVec, randDirvectors, 3 * sizeof(RandInitVec), cudaMemcpyHostToDevice));
+	h_randGen.init();
+	d_randGen = h_randGen;
 
-	// --------------------------------- camera ------------------------------------
+	// camera
+	cameraFocusPos = {0, 0, 0};
 	Camera& camera = cbo.camera;
-
-	camera.resolution = Float4((float)renderWidth, (float)renderHeight, 1.0f / renderWidth, 1.0f / renderHeight);
-
-	camera.fov.x = 90.0f * Pi_over_180;
-	camera.fov.y = camera.fov.x * (float)renderHeight / (float)renderWidth;
-	camera.fov.z = tan(camera.fov.x / 2.0f);
-	camera.fov.w = tan(camera.fov.y / 2.0f);
-
-	Float3 cameraLookAtPoint = cameraFocusPos + Float3(0.0f, 0.01f, 0.0f);
-	camera.pos               = cameraFocusPos + Float3(0.0f, 0.0f, -0.1f);
-	Float3 CamToObj          = cameraLookAtPoint - camera.pos.xyz;
-	camera.dirFocal.xyz      = normalize(CamToObj);
-	camera.dirFocal.w        = CamToObj.length();
-	camera.leftAperture.xyz  = normalize(cross(Float3(0, 1, 0), camera.dirFocal.xyz));
-	camera.leftAperture.w    = 0.002f;
-	camera.up.xyz            = normalize(cross(camera.dirFocal.xyz, camera.leftAperture.xyz));
+	CameraSetup(camera);
 
 	// textures
 	LoadTextureRgba8("resources/textures/uv.png", texArrayUv, sceneTextures.uv);
@@ -236,11 +234,32 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	timer.init();
 }
 
+void RayTracer::CameraSetup(Camera& camera)
+{
+	camera.pos = cameraFocusPos + Float3(0.0f, 0.01f, -0.1f);
+
+	Float3 cameraLookAtPoint = cameraFocusPos;
+	Float3 camToObj = cameraLookAtPoint - camera.pos;
+
+	camera.dir = normalize(camToObj);
+	camera.up  = { 0.0f, 1.0f, 0.0f };
+
+	camera.focal = camToObj.length();
+	camera.aperture = 0.0001f;
+
+	camera.resolution = { (float)renderWidth, (float)renderHeight };
+	camera.fov.x = 90.0f * Pi_over_180;
+
+	camera.update();
+}
+
 void RayTracer::cleanup()
 {
 	// free cpu buffer
+	delete[] aabbs;
 	delete[] spheres;
 	delete[] sphereLights;
+	delete[] triangles;
 
 	// ---------------- Destroy surface objects ----------------------
 	// color buffer
@@ -290,5 +309,5 @@ void RayTracer::cleanup()
 	cudaFree(d_sphereLights);
 
 	// random
-	cudaFree(d_randInitVec);
+	h_randGen.clear();
 }

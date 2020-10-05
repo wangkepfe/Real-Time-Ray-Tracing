@@ -6,7 +6,7 @@
 
 #define TOTAL_LIGHT_MAX_COUNT 8
 
-__device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, Float3& lightSampleDir, float& lightSamplePdf, float& isDeltaLight, float* skyCdf)
+__device__ __inline__ bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, Float3& lightSampleDir, float& lightSamplePdf, float& isDeltaLight, float* skyCdf, BlueNoiseRandGenerator& randGen, int loopIdx)
 {
 	const int numSphereLight = sceneMaterial.numSphereLights;
 	Sphere* sphereLights = sceneMaterial.sphereLights;
@@ -32,11 +32,14 @@ __device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
     indexRemap[idx++] = i++; // env light
 
 	// choose light
-	int sampledValue = rd(&rayState.rdState[2]) * idx;
+    float chooseLightRand = randGen.Rand(4 + loopIdx * 6 + 5);
+	int sampledValue = chooseLightRand * idx;
 	sampledIdx = indexRemap[sampledValue];
 	lightChoosePdf = 1.0 / idx;
 
 	// sample
+	Float2 lightSampleRand2 = randGen.Rand2(4 + loopIdx * 6 + 2);
+
 	if (sampledIdx == sunLightIdx)
 	{
         if (dot(rayState.normal, cbo.sunDir) > 0)
@@ -55,7 +58,7 @@ __device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
     else if (sampledIdx == envLightIdx)
 	{
         float maxSkyCdf = skyCdf[1023];
-        float sampledSkyValue = rd(&rayState.rdState[2]) * maxSkyCdf;
+        float sampledSkyValue = lightSampleRand2[0] * maxSkyCdf;
 
         int left = 0;
         int right = 1022;
@@ -112,7 +115,7 @@ __device__ inline bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMa
 
 		Float3 u, v;
 		LocalizeSample(lightDir, u, v);
-		lightSampleDir = UniformSampleCone(rd2(&rayState.rdState[0], &rayState.rdState[1]), cosThetaMax, u, v, lightDir);
+		lightSampleDir = UniformSampleCone(lightSampleRand2, cosThetaMax, u, v, lightDir);
 		lightSampleDir = normalize(lightSampleDir);
 		lightSamplePdf = UniformConePdf(cosThetaMax) * lightChoosePdf;
 	}

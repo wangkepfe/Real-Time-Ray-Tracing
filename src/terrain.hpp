@@ -6,9 +6,43 @@
 #include <vector>
 
 #include "geometry.h"
+#include "kernel.cuh"
 
 class Terrain
 {
+private:
+
+    //static const char layer0[8 * 16] =
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### aaaa #### #### aaaa #### ####"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa";
+
+    //static const char layer1[8 * 16] =
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### aaaa #### #### aaaa #### ####"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa";
+
+    //static const char layer2[8 * 16] =
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### #### #### #### #### #### ####"
+    //"#### #### aaaa #### #### aaaa #### ####"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa"
+    //"aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa";
+
+
 public:
     Terrain() :
         mapSize        { 32 },
@@ -23,6 +57,12 @@ public:
 
     ~Terrain() {}
 
+    //void GetScene(Triangle* triangles, SceneMaterial* sceneMat)
+    //{
+
+    //}
+
+#if 1
     void generateHeightMap()
     {
         std::vector<float> noise(mapSize, 0);
@@ -100,6 +140,7 @@ public:
         const float offsetY = 0.5f * aabbEdgeLength;
 		return heightMap[(unsigned int)((pos + offsetX) / aabbEdgeLength)] * aabbEdgeLength + offsetY;
 	}
+#endif
 
 private:
 

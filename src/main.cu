@@ -39,8 +39,8 @@ const int WIDTH = 2560;
 const int HEIGHT = 1440;
 //const int RENDER_WIDTH = 1920;
 //const int RENDER_HEIGHT = 1080;
-const int RENDER_WIDTH = 1280;
-const int RENDER_HEIGHT = 720;
+const int RENDER_WIDTH = 1920;
+const int RENDER_HEIGHT = 1080;
 
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency

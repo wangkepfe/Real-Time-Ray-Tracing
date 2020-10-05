@@ -4,8 +4,12 @@
 #include <cuda_runtime.h>
 #include "sampler.cuh"
 
-#define USE_CATMULL_ROM_SAMPLER 1
-#define USE_BICUBIC_SMOOTH_STEP_SAMPLER 0
+#define USE_CATMULL_ROM_SAMPLER 0
+#define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
+
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Tone mapping ---------------------------------------
+//----------------------------------------------------------------------------------------------
 
 __device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x)
 {
@@ -46,87 +50,9 @@ __global__ void ToneMapping(
 	Store2D(Float4(retColor, 1.0), colorBuffer, idx);
 }
 
-__global__ void TAA(
-	SurfObj   currentBuffer,
-	SurfObj   accumulateBuffer,
-	Int2      size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-	Float4 currentColor = Load2D(currentBuffer, idx);
-	Float4 historyColor = Load2D(accumulateBuffer, idx);
-
-	float blendFactor = 0.1f;
-	Float3 outColor = currentColor.xyz * blendFactor + historyColor.xyz * (1.0f - blendFactor);
-
-    Store2D(Float4(outColor, currentColor.w), currentBuffer, idx);
-	Store2D(Float4(outColor, currentColor.w), accumulateBuffer, idx);
-}
-
-__global__ void BufferCopy(
-	SurfObj   inBuffer,
-	SurfObj   OutBuffer,
-	Int2                  size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-    Store2D(Load2D(inBuffer, idx), OutBuffer, idx);
-}
-
-#if 0
-__global__ void BufferAdd(
-	SurfObj   OutBuffer,
-	SurfObj   inBuffer,
-	Int2                  size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-	Float3 color1 = Load2D(inBuffer, idx).xyz;
-	Float3 color2 = Load2D(OutBuffer, idx).xyz;
-
-    Store2D(Float4(color1 + color2, 1.0), OutBuffer, idx);
-}
-
-__global__ void BufferDivide(
-	SurfObj   OutBuffer,
-	float     a,
-	Int2                  size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-    Store2D(Float4(Load2D(OutBuffer, idx).xyz / a, 1.0), OutBuffer, idx);
-}
-
-__global__ void BufferInit(
-	SurfObj   OutBuffer,
-	Int2      size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-    Store2D(Float4(0), OutBuffer, idx);
-}
-
-#endif
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Scale Filter to Output ---------------------------------------
+//----------------------------------------------------------------------------------------------
 
 __global__ void FilterScale(
 	SurfObj* renderTarget,
@@ -142,10 +68,14 @@ __global__ void FilterScale(
 
 	Float2 uv((float)idx.x / outSize.x, (float)idx.y / outSize.y);
 
+#if 1
 #if USE_BICUBIC_SMOOTH_STEP_SAMPLER
 	Float3 sampledColor = SampleBicubicSmoothStep(finalColorBuffer, uv, texSize).xyz;
 #elif USE_CATMULL_ROM_SAMPLER
 	Float3 sampledColor = SampleBicubicCatmullRom(finalColorBuffer, uv, texSize).xyz;
+#endif
+#else
+	Float3 sampledColor = Load2D(finalColorBuffer, idx).xyz;
 #endif
 
 	sampledColor = clamp3f(sampledColor, Float3(0), Float3(1));
@@ -159,94 +89,9 @@ __global__ void FilterScale(
 				idx.y);
 }
 
-#if 0
-__global__ void Histogram(
-	float*    histogram,
-	SurfObj   InBuffer,
-	Int2      size)
-{
-	__shared__ float sharedHistogram[8][8][64];
-	Int2 threadId(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
-
-	for (int i = 0; i < 64; ++i)
-	{
-		sharedHistogram[threadIdx.x][threadIdx.y][i] = 0;
-	}
-
-	// shared histogram of 8x8 block
-	Float3 color = Load2D(InBuffer, threadId).xyz;
-
-	//float luminance = color.max();
-	float luminance = color.x * 0.3 + color.y * 0.6 + color.z * 0.1;
-	float logLuminance = log2f(luminance) * 0.1 + 0.9;
-
-	float fBucket = clampf(logLuminance, 0.0, 1.0) * 63 * 0.99999;
-
-	uint bucket0 = (uint)fBucket;
-	uint bucket1 = bucket0 + 1;
-
-	float bucketWeight0 = fmodf(fBucket, 1.0);
-	float bucketWeight1 = 1.0 - bucketWeight0;
-
-	sharedHistogram[threadId.x][threadId.y][bucket0] += bucketWeight0;
-	sharedHistogram[threadId.x][threadId.y][bucket1] += bucketWeight1;
-
-	// gather y dimension
-	#define unroll
-	for (int i = 0; i < 3; ++i)
-	{
-		int offset = 1 << i;
-		if (threadId.y % (offset * 2) == 0)
-		{
-			#define unroll
-			for (int j = 0; j < 16; ++j)
-			{
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 0] += sharedHistogram[threadId.x][threadId.y + offset][j * 4 + 0];
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 1] += sharedHistogram[threadId.x][threadId.y + offset][j * 4 + 1];
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 2] += sharedHistogram[threadId.x][threadId.y + offset][j * 4 + 2];
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 3] += sharedHistogram[threadId.x][threadId.y + offset][j * 4 + 3];
-			}
-		}
-	}
-
-	// gather x dimension
-	#define unroll
-	for (int i = 0; i < 3; ++i)
-	{
-		int offset = 1 << i;
-		if (threadId.x % (offset * 2) == 0)
-		{
-			#define unroll
-			for (int j = 0; j < 16; ++j)
-			{
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 0] += sharedHistogram[threadId.x + offset][threadId.y][j * 4 + 0];
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 1] += sharedHistogram[threadId.x + offset][threadId.y][j * 4 + 1];
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 2] += sharedHistogram[threadId.x + offset][threadId.y][j * 4 + 2];
-				sharedHistogram[threadId.x][threadId.y][j * 4 + 3] += sharedHistogram[threadId.x + offset][threadId.y][j * 4 + 3];
-			}
-		}
-	}
-
-	// iterate through all 8x8 blocks
-	if (threadId.x == 0 && threadId.y == 0)
-	{
-		for (int i = 0; i < gridDim.x; ++i)
-		{
-			for (int j = 0; j < gridDim.y; ++i)
-			{
-				#define unroll
-				for (int k = 0; k < 16; ++k)
-				{
-					histogram[k * 4 + 0] += sharedHistogram[0][0][k * 4 + 0];
-					histogram[k * 4 + 1] += sharedHistogram[0][0][k * 4 + 1];
-					histogram[k * 4 + 2] += sharedHistogram[0][0][k * 4 + 2];
-					histogram[k * 4 + 3] += sharedHistogram[0][0][k * 4 + 3];
-				}
-			}
-		}
-	}
-}
-#endif
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Histogram and Auto Exposure ---------------------------------------
+//----------------------------------------------------------------------------------------------
 
 __global__ void Histogram2(
 	uint*     histogram,
@@ -361,6 +206,10 @@ __global__ void AutoExposure(float* exposure, uint* histogram, float area, float
 	exposure[2] = lumBrightTemp;
 }
 
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Downscale ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
 __global__ void DownScale4_fp32_fp16(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
 {
 	Int2 idx;
@@ -421,6 +270,62 @@ __global__ void DownScale4_fp16_fp16(SurfObj InBuffer, SurfObj OutBuffer, Int2 s
 	}
 }
 
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Median Filter ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
+__device__ __inline__ float min3(float v1, float v2, float v3) { return min(min(v1, v2), v3); }
+__device__ __inline__ float max3(float v1, float v2, float v3) { return max(max(v1, v2), v3); }
+__device__ __inline__ Float3 min3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return Float3(min3(v1.x, v2.x, v3.x), min3(v1.y, v2.y, v3.y), min3(v1.z, v2.z, v3.z)); }
+__device__ __inline__ Float3 max3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return Float3(max3(v1.x, v2.x, v3.x), max3(v1.y, v2.y, v3.y), max3(v1.z, v2.z, v3.z)); }
+__device__ __inline__ void sort2(Float3& a, Float3& b) { if (a.x > b.x) { swap(a.x, b.x); } if (a.y > b.y) { swap(a.y, b.y); } if (a.z > b.z) { swap(a.z, b.z); } }
+__device__ __inline__ void sort3(Float3& v1, Float3& v2, Float3& v3) { sort2(v2, v3); sort2(v1, v2); sort2(v2, v3); }
+
+__device__ __inline__ void sort9(Float3* p)
+{
+    sort3(p[0], p[1], p[2]);
+    sort3(p[3], p[4], p[5]);
+    sort3(p[6], p[7], p[8]);
+
+    p[6] = max3f3(p[0], p[3], p[6]);
+    p[2] = min3f3(p[2], p[5], p[8]);
+
+    sort3(p[1], p[4], p[7]);
+    sort3(p[2], p[4], p[6]);
+}
+
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Temporal Filter ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
+__global__ void TemporalFilter(
+	SurfObj   colorBuffer, // [in/out]
+	SurfObj   accumulateBuffer,
+	Int2      size)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= size.x || idx.y >= size.y) return;
+
+	Float4 currentColor = Load2D(colorBuffer, idx);
+	Float4 historyColor = Load2D(accumulateBuffer, idx);
+	Float3 normalValue = DecodeNormal_R11_G10_B11(currentColor.w);
+
+	// Early return for background pixel
+	if (fabsf(normalValue.x) < 0.01 && fabsf(normalValue.y) < 0.01 && fabsf(normalValue.z) < 0.01) { return; }
+
+	float blendFactor = 1.0f / 16.0f;
+	Float3 outColor = currentColor.xyz * blendFactor + historyColor.xyz * (1.0f - blendFactor);
+
+    Store2D(Float4(outColor, currentColor.w), colorBuffer, idx);
+}
+
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Atous Filter ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
 __constant__ float filterKernel[25] = {
 		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0,
 		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
@@ -428,8 +333,10 @@ __constant__ float filterKernel[25] = {
 		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
 		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0 };
 
-__global__ void DenoiseKernel(
+
+__global__ void AtousFilter(
 	SurfObj   colorBuffer, // [in/out]
+	SurfObj   accumulateBuffer,
 	Int2      size)
 {
 	// index for pixel 28 x 28
@@ -443,79 +350,25 @@ __global__ void DenoiseKernel(
 	idx3.y = threadIdx.y;
 
 	// read global memory buffer. One-to-one mapping
-	Float4 bufferRead = Load2D(colorBuffer, idx2);
-	Float3 colorValue = bufferRead.xyz;
-	Float3 normalValue = DecodeNormal_R11_G10_B11(bufferRead.w);
+	Float4 colorNormal = Load2D(colorBuffer, idx2);
+	Float3 colorValue = colorNormal.xyz;
+	Float3 normalValue = DecodeNormal_R11_G10_B11(colorNormal.w);
 
 	// Save global memory to shared memory. One-to-one mapping
 	__shared__ Float4 sharedBuffer[32][32];
-	sharedBuffer[threadIdx.x][threadIdx.y] = bufferRead;
+
+	// -------------------------------- load lds with history --------------------------------
+	sharedBuffer[threadIdx.x][threadIdx.y] = colorNormal;
 	__syncthreads();
 
 	// Border margin pixel finish work
 	if (idx3.x < 2 || idx3.y < 2 || idx3.x > 29 || idx3.y > 29) { return; }
-
 	// Early return for background pixel
 	if (fabsf(normalValue.x) < 0.01 && fabsf(normalValue.y) < 0.01 && fabsf(normalValue.z) < 0.01) { return; }
 
-	float sumOfWeight = 0.0;
-
-#if 1
-
-	// gather 5x5 average
-	Float3 average = Float3(0.0);
-	for (int i = 0; i < 25; ++i)
-	{
-		Int2 uv(threadIdx.x + (i % 5) - 2, threadIdx.y + (i / 5) - 2);
-		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
-		Float3 color = bufferReadTmp.xyz;
-		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
-		Float3 t = normalValue - normal;
-        float dist2 = max1f(dot(t,t), 0.0);
-        float normalWeight = min1f(expf(-(dist2) / 1.0), 1.0);
-
-		float weight = normalWeight;
-		sumOfWeight += weight;
-		average += weight * color;
-	}
-	average /= sumOfWeight;
-
-	// gather 5x5 standard deviation
-	Float3 stddev = Float3(0.0);
-	for (int i = 0; i < 25; ++i)
-	{
-		Int2 uv(threadIdx.x + (i % 5) - 2, threadIdx.y + (i / 5) - 2);
-		Float4 bufferReadTmp = sharedBuffer[uv.x][uv.y];
-		Float3 color = bufferReadTmp.xyz;
-		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
-		Float3 t = normalValue - normal;
-        float dist2 = max1f(dot(t,t), 0.0);
-        float normalWeight = min1f(expf(-(dist2) / 1.0), 1.0);
-
-		Float3 temp = (color - average) * normalWeight;
-	 	stddev += temp * temp;
-	}
-	stddev = sqrt3f(stddev / (sumOfWeight - 0.99));
-
-	// set outliers to average
-	Float3 diff = abs(colorValue - average);
-	Float3 isNoise = diff - stddev;
-	Float3 averageAround = (average * sumOfWeight - colorValue) / (sumOfWeight - 0.99);
-
-	colorValue = Float3(
-		isNoise.x > 0 ? averageAround.x : colorValue.x,
-		isNoise.y > 0 ? averageAround.y : colorValue.y,
-		isNoise.z > 0 ? averageAround.z : colorValue.z);
-
-	sharedBuffer[threadIdx.x][threadIdx.y] = Float4(colorValue, bufferRead.w);
-
-#endif
-
-	Float3 sumOfColor = Float3(0.0);
-	sumOfWeight = 0.0;
-
-	// atrous
-	__syncthreads();
+	// -------------------------------- atrous filter --------------------------------
+	Float3 sumOfColor = 0;
+	float sumOfWeight = 0;
 	for (int i = 0; i < 25; ++i)
 	{
 		Int2 uv(threadIdx.x + (i % 5) - 2, threadIdx.y + (i / 5) - 2);
@@ -524,21 +377,28 @@ __global__ void DenoiseKernel(
 		Float3 normal = DecodeNormal_R11_G10_B11(bufferReadTmp.w);
 
 		Float3 t = normalValue - normal;
-        float dist2 = max1f(dot(t,t), 0.0);
+        float dist2 = dot(t,t);
         float normalWeight = min1f(expf(-(dist2) / 0.1), 1.0);
 
         t = colorValue - color;
         dist2 = dot(t,t);
-        float colorWeight = min1f(expf(-(dist2) / 10.0), 1.0);
+        float colorWeight = min1f(expf(-(dist2) / 100.0), 1.0);
 
 		float weight = colorWeight * normalWeight * filterKernel[i];
         sumOfColor += color * weight;
         sumOfWeight += weight;
 	}
 
-	// final output
-	Store2D(Float4(sumOfColor / sumOfWeight, 1.0), colorBuffer, idx2);
+	Float3 finalColor = sumOfColor / sumOfWeight;
+
+	Store2D(Float4(finalColor, 1.0), colorBuffer, idx2);
+	Store2D(Float4(finalColor, colorNormal.w), accumulateBuffer, idx2);
+
 }
+
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Bloom ---------------------------------------
+//----------------------------------------------------------------------------------------------
 
 __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, float* exposure)
 {
@@ -592,12 +452,16 @@ __global__ void Bloom(SurfObj colorBuffer, SurfObj buffer4, SurfObj buffer16, In
 	Store2D(Float4(color, 1.0), colorBuffer, idx);
 }
 
-inline __device__ float LensFlareRand(float w)
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Lens Flare ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
+__device__ __inline__ float LensFlareRand(float w)
 {
     return fract(sinf(w) * 1000.0);
 }
 
-inline __device__ float LensFlareRegShape(Float2 p, int N)
+__device__ __inline__ float LensFlareRegShape(Float2 p, int N)
 {
 	float a = atan2f(p.x, p.y) + 0.2;
 	float b = TWO_PI / float(N);
@@ -605,7 +469,7 @@ inline __device__ float LensFlareRegShape(Float2 p, int N)
     return f;
 }
 
-__device__ Float3 LensFlareCircle(Float2 p, float size, float dist, Float2 mouse)
+__device__ __inline__ Float3 LensFlareCircle(Float2 p, float size, float dist, Float2 mouse)
 {
 	float l = length(p + mouse * (dist * 4.0)) + size / 2.0;
 
@@ -640,7 +504,8 @@ __global__ void LensFlare(Float2 sunPos, SurfObj colorBuffer, Int2 size)
 	Float2 vec = uv - sunPos;
 	float len = vec.length();
 
-	for (float i = 0.0f; i < 10.0f; i++)
+	#pragma unroll
+	for (int i = 0; i < 2; ++i)
 	{
         color += LensFlareCircle(uv,
 			                     powf(LensFlareRand(i * 2000.0f) * 1.8f, 2.0f) + 1.41f,
@@ -657,3 +522,72 @@ __global__ void LensFlare(Float2 sunPos, SurfObj colorBuffer, Int2 size)
 
 	Store2D(Float4(color, 1.0), colorBuffer, idx);
 }
+
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Bilateral Filter ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
+__constant__ float cGaussian[64];
+
+__device__ __inline__ float euclideanLen(Float4 a, Float4 b, float d)
+{
+
+    float mod = (b.x - a.x) * (b.x - a.x) +
+                (b.y - a.y) * (b.y - a.y) +
+                (b.z - a.z) * (b.z - a.z);
+
+    return __expf(-mod / (2.f * d * d));
+}
+
+void updateGaussian(float delta, int radius)
+{
+    float  fGaussian[64];
+
+    for (int i = 0; i < 2*radius + 1; ++i)
+    {
+        float x = i-radius;
+        fGaussian[i] = expf(-(x*x) / (2*delta*delta));
+    }
+
+    checkCudaErrors(cudaMemcpyToSymbol(cGaussian, fGaussian, sizeof(float)*(2*radius+1)));
+}
+
+__global__ void BilateralFilter(SurfObj colorBuffer, Int2 size, float e_d,  int r)
+{
+    int x = blockIdx.x*blockDim.x + threadIdx.x;
+    int y = blockIdx.y*blockDim.y + threadIdx.y;
+
+    if (x >= size.x || y >= size.y)
+    {
+        return;
+    }
+
+    float sum = 0.0f;
+    float factor;
+    Float4 t = {0.f, 0.f, 0.f, 0.f};
+	Float4 center = Load2D(colorBuffer, Int2(x, y));
+
+    for (int i = -r; i <= r; i++)
+    {
+        for (int j = -r; j <= r; j++)
+        {
+			Float4 curPix = Load2D(colorBuffer, Int2(x + j, y + i));
+            factor = cGaussian[i + r] * cGaussian[j + r] * euclideanLen(curPix, center, e_d);
+
+            t += factor * curPix;
+            sum += factor;
+        }
+    }
+
+	// if (x == blockDim.x * gridDim.x * 0.5 && y == blockDim.y * gridDim.y * 0.8)
+	// {
+	// 	Print("\nin", center);
+	// 	Print("sum", sum);
+	// 	Print("t", t);
+	// 	Print("out", t / sum);
+	// }
+
+    Store2D(Float4(t / sum), colorBuffer, Int2(x, y));
+	//Store2D(center, colorBuffer, Int2(x, y));
+}
+

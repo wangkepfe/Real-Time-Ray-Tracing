@@ -142,8 +142,7 @@ __device__ void PerfectReflectionRefraction(float etaI, float etaT, bool isRayIn
 }
 
 __device__ void MacrofacetReflectionSample(
-	float r1,
-	float r2,
+	Float2 r,
 
 	const Float3& raydir,
 	Float3& nextdir,
@@ -163,9 +162,9 @@ __device__ void MacrofacetReflectionSample(
 
 	// sample normal
 	Float3 sampledNormalLocal;
-	float cosTheta = 1.0f / sqrt(1.0f + alpha2 * r1 / (1.0f - r1));
+	float cosTheta = 1.0f / sqrt(1.0f + alpha2 * r[0] / (1.0f - r[0]));
 	float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
-	float phi = TWO_PI * r2;
+	float phi = TWO_PI * r[1];
 	sampledNormalLocal = Float3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
 
 	// local to world space

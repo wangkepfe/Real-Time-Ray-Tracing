@@ -3,7 +3,7 @@
 #include <cuda_runtime.h>
 
 // fast 4-byte integer hash by Thomas Wang
-static __forceinline__ __device__ unsigned int WangHash(unsigned int a)
+__forceinline__ __device__ unsigned int WangHash(unsigned int a)
 {
 	a = (a ^ 61) ^ (a >> 16);
 	a = a + (a << 3);

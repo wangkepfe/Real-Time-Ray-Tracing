@@ -188,7 +188,7 @@ inline __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3&
 
 inline __device__ float GetWaves(Float2 pos, int iterations, float clockTime)
 {
-	pos *= 0.1;
+	pos *= 0.15;
 
 	float iter      = 0.0;
     float weight    = 1.0;
@@ -276,7 +276,7 @@ inline __device__ void RayMarchWater(float& dist, Float3& hitpos, Float3 camera,
 #endif
 }
 
-#define WATER_NORMAL_QUALITY 20
+#define WATER_NORMAL_QUALITY 30
 
 inline __device__ Float3 GetWaterNormal(Float2 pos, float depth, float clockTime, float distFallOff)
 {
@@ -302,7 +302,7 @@ inline __device__ Float3 GetWaterNormal(Float2 pos, float depth, float clockTime
 	return normal;
 }
 
-#define GEOMETRY_WATER 0
+#define GEOMETRY_WATER 1
 
 inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime)
 {
@@ -367,6 +367,9 @@ inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime
 #endif
 }
 
+#define USE_OCEAN 0
+#define USE_STAR 0
+
 inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, float clockTime, bool isDiffuseRay)
 {
 	Float3 sunOrMoonDir = sunDir;
@@ -377,7 +380,11 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 	int numSkySample = 16;
 	int numSkyLightSample = 8;
 
+#if USE_OCEAN
 	if (rayDirOrRefl.y < 0.01 && isDiffuseRay == false) { OceanShader(rayDirOrRefl, beta, clockTime * 0.7); }
+#else
+	if (rayDirOrRefl.y < 0.01) { return 0; }
+#endif
 
 	if (rayDirOrRefl.y < 0) { rayDirOrRefl.y = -rayDirOrRefl.y; }
 
@@ -398,7 +405,7 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 			moonColor += Float3(0.9608, 0.9529, 0.8078) * 0.1;
 
 		float starColor = 0;
-#if 0
+#if USE_STAR
 		if (isDiffuseRay == false)
 		{
 			Float2 uv = Float2((atan2f(rayDirOrRefl.x, rayDirOrRefl.z) + clockTime / 300) / TWO_PI, acosf(rayDirOrRefl.y) / PI) * 6000.0;
@@ -414,7 +421,11 @@ inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool i
 	Float3 rayDirOrRefl = raydir;
 	Float3 beta = Float3(1.0);
 
+#if USE_OCEAN
 	if (rayDirOrRefl.y < 0.01 && isDiffuseRay == false) { OceanShader(rayDirOrRefl, beta, clockTime * 0.7); }
+#else
+	if (rayDirOrRefl.y < 0) { rayDirOrRefl.y *= -1; }
+#endif
 
 	float u = atan2f(-rayDirOrRefl.z, -rayDirOrRefl.x) / TWO_PI + 0.5f;
 	float v = abs(rayDirOrRefl.y);
@@ -485,7 +496,7 @@ __global__ void Scan(float *data, int n)
 	float orig1 = temp[2 * i + 1];
 
 	// build sum in place up the tree
-	for (int d = n>>1; d > 0; d >>= 1)
+	for (int d = n >> 1; d > 0; d >>= 1)
 	{
 		__syncthreads();
 		if (i < d)
