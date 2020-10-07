@@ -23,16 +23,16 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	//AABB* aabbs = terrain.generateAabbs(numAabbs);
 	int numAabbs = 3;
 	AABB* aabbs = new AABB[numAabbs];
-	aabbs[0] = AABB({-0.05f, 0.005f, 0.0f}, 0.01f);
-	aabbs[1] = AABB({-0.03f, 0.005f, 0.0f}, 0.01f);
-	aabbs[2] = AABB({0.05f, 0.005f, 0.0f}, 0.01f);
+	aabbs[0] = AABB({-0.03f, 0.005f, 0.0f}, 0.01f);
+	aabbs[1] = AABB({-0.01f, 0.005f, 0.0f}, 0.01f);
+	aabbs[2] = AABB({0.025f, 0.005f, 0.0f}, 0.01f);
 
 	// sphere
 	numSpheres = 3;
 	spheres    = new Sphere[numSpheres];
-	spheres[0] = Sphere({-0.05f, 0.015f, 0.0f}, 0.005f);
-	spheres[1] = Sphere({-0.03f, 0.015f, 0.0f}, 0.005f);
-	spheres[2] = Sphere({0.05f, 0.015f, 0.0f}, 0.005f);
+	spheres[0] = Sphere({-0.03f, 0.015f, 0.0f}, 0.005f);
+	spheres[1] = Sphere({0.025f, 0.015f, 0.0f}, 0.005f);
+	spheres[2] = Sphere({-0.01f, 0.015f, 0.0f}, 0.005f);
 
 	// triangles
 	numTriangles   = 2;
@@ -42,7 +42,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	//for (int i = 0 ; i < numTriangles; ++i) { triangles[i].WatertightTransform(); }
 
 	// surface materials
-	const int numMaterials     = 6;
+	const int numMaterials     = 7;
 	SurfaceMaterial* materials = new SurfaceMaterial[numMaterials];
 
 	materials[0].type          = EMISSIVE;
@@ -54,13 +54,21 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	materials[2].albedo        = Float3(0.9f, 0.2f, 0.1f);
 
 	materials[3].type          = LAMBERTIAN_DIFFUSE;
-	materials[3].albedo        = Float3(0.5f);
+	materials[3].albedo        = Float3(0.9f);
 
-	materials[4].type          = PERFECT_REFLECTION;
+	materials[4].type          = MICROFACET_REFLECTION;
+	materials[4].albedo        = Float3(0.9f);
+	materials[4].F0            = Float3(0.56, 0.57, 0.58);
+	materials[4].alpha         = 0.05f;
 
 	materials[5].type          = MICROFACET_REFLECTION;
-	materials[5].albedo        = Float3(0.5f);
-	materials[5].alpha         = TrowbridgeReitzRoughnessToAlpha(0.01f);
+	materials[5].albedo        = Float3(0.9f);
+	materials[5].F0            = Float3(0.56, 0.57, 0.58);
+	materials[5].alpha         = 0.01f;
+
+	materials[6].type          = LAMBERTIAN_DIFFUSE;
+	materials[6].useTex0       = true;
+	materials[6].texId0        = 0;
 
 	// material index for each object
 	const int numObjects = numAabbs + numSpheres;
@@ -68,8 +76,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	// sphere
 	materialsIdx[0] = 0;
-	materialsIdx[1] = 1;
-	materialsIdx[2] = 2;
+	materialsIdx[1] = 2;
+	materialsIdx[2] = 1;
 
 	// aabb
 	materialsIdx[3] = 3;
@@ -84,7 +92,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	numSphereLights = 2;
 	sphereLights = new Sphere[numSphereLights];
 	sphereLights[0] = spheres[0];
-	sphereLights[1] = spheres[2];
+	sphereLights[1] = spheres[1];
 
 	// init cuda
 	gpuDeviceInit(0);
@@ -107,8 +115,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	scaleGridDim = dim3(divRoundUp(screenWidth, scaleBlockDim.x), divRoundUp(screenHeight, scaleBlockDim.y), 1);
 
 	// ------------------------ surface/texture object ---------------------------
-	cudaChannelFormatDesc channelFormatRgba32 = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
-	cudaChannelFormatDesc channelFormatRgba16 = cudaCreateChannelDescHalf4();
+	cudaChannelFormatDesc format_color_RGB16_mask_A16 = cudaCreateChannelDescHalf4();
+	cudaChannelFormatDesc format_normal_R11_G10_B11_depth_R32 = cudaCreateChannelDesc<float2>();
 
 	// resource desription
 	cudaResourceDesc resDesc = {};
@@ -123,48 +131,57 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	texDesc.normalizedCoords = 1;
 
 	// array A: main render buffer
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayA, &channelFormatRgba32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&colorBufferArrayA, &format_color_RGB16_mask_A16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = colorBufferArrayA;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferA, &resDesc));
 
 	// array B: TAA buffer
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayB, &channelFormatRgba32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&colorBufferArrayB, &format_color_RGB16_mask_A16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = colorBufferArrayB;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferB, &resDesc));
+
+	// normal depth
+	GpuErrorCheck(cudaMallocArray(&normalDepthBufferArrayA, &format_normal_R11_G10_B11_depth_R32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = normalDepthBufferArrayA;
+	GpuErrorCheck(cudaCreateSurfaceObject(&normalDepthBufferA, &resDesc));
+
+	GpuErrorCheck(cudaMallocArray(&normalDepthBufferArrayB, &format_normal_R11_G10_B11_depth_R32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = normalDepthBufferArrayB;
+	GpuErrorCheck(cudaCreateSurfaceObject(&normalDepthBufferB, &resDesc));
 
 	// color buffer 1/4 size
 	bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
 	gridDim4 = dim3(divRoundUp(bufferSize4.x, blockDim.x), divRoundUp(bufferSize4.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray4, &channelFormatRgba16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&colorBufferArray4, &format_color_RGB16_mask_A16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = colorBufferArray4;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer4, &resDesc));
 
 	// bloom buffer 1/4 size
-	GpuErrorCheck(cudaMallocArray(&bloomBufferArray4, &channelFormatRgba16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&bloomBufferArray4, &format_color_RGB16_mask_A16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = bloomBufferArray4;
 	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer4, &resDesc));
 
 	// color buffer 1/16 size
 	bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
 	gridDim16 = dim3(divRoundUp(bufferSize16.x, blockDim.x), divRoundUp(bufferSize16.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray16, &channelFormatRgba16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&colorBufferArray16, &format_color_RGB16_mask_A16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = colorBufferArray16;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer16, &resDesc));
 
 	// bloom buffer 1/16 size
-	GpuErrorCheck(cudaMallocArray(&bloomBufferArray16, &channelFormatRgba16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&bloomBufferArray16, &format_color_RGB16_mask_A16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = bloomBufferArray16;
 	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer16, &resDesc));
 
 	// color buffer 1/64 size
 	bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
 	gridDim64 = dim3(divRoundUp(bufferSize64.x, blockDim.x), divRoundUp(bufferSize64.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray64, &channelFormatRgba16, bufferSize64.x, bufferSize64.y, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&colorBufferArray64, &format_color_RGB16_mask_A16, bufferSize64.x, bufferSize64.y, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = colorBufferArray64;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer64, &resDesc));
 
 	// ----------------------- sky buffer ------------------------
-	GpuErrorCheck(cudaMallocArray(&skyArray, &channelFormatRgba32, skyWidth, skyHeight, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&skyArray, &format_color_RGB16_mask_A16, skyWidth, skyHeight, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = skyArray;
 	GpuErrorCheck(cudaCreateSurfaceObject(&skyBuffer, &resDesc));
 	GpuErrorCheck(cudaCreateTextureObject(&skyTex, &resDesc, &texDesc, NULL));
@@ -221,12 +238,11 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	d_randGen = h_randGen;
 
 	// camera
-	cameraFocusPos = {0, 0, 0};
 	Camera& camera = cbo.camera;
 	CameraSetup(camera);
 
 	// textures
-	LoadTextureRgba8("resources/textures/uv.png", texArrayUv, sceneTextures.uv);
+	LoadTextureRgba8("resources/textures/Checker.png", texArrayUv, sceneTextures.uv);
 	LoadTextureRgb8("resources/textures/sand.png", texArraySandAlbedo, sceneTextures.sandAlbedo);
 	LoadTextureRgb8("resources/textures/sand_n.png", texArraySandNormal, sceneTextures.sandNormal);
 
@@ -236,7 +252,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 void RayTracer::CameraSetup(Camera& camera)
 {
-	camera.pos = cameraFocusPos + Float3(0.0f, 0.01f, -0.1f);
+	cameraFocusPos = Float3(0, 0.005f, 0);
+	camera.pos = cameraFocusPos + Float3(0.0f, 0.003f, -0.05f);
 
 	Float3 cameraLookAtPoint = cameraFocusPos;
 	Float3 camToObj = cameraLookAtPoint - camera.pos;
@@ -281,6 +298,12 @@ void RayTracer::cleanup()
 	cudaDestroySurfaceObject(bloomBuffer16);
 	cudaFreeArray(bloomBufferArray4);
 	cudaFreeArray(bloomBufferArray16);
+
+	// normal depth buffer
+	cudaDestroySurfaceObject(normalDepthBufferA);
+	cudaDestroySurfaceObject(normalDepthBufferB);
+	cudaFreeArray(normalDepthBufferArrayA);
+	cudaFreeArray(normalDepthBufferArrayB);
 
 	// ---------------------- destroy texture objects --------------------------
 	cudaDestroyTextureObject(sceneTextures.sandAlbedo);

@@ -20,7 +20,37 @@ __forceinline__ __device__ void Store2D(
     surf2Dwrite(make_float4(val.x, val.y, val.z, val.w), tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
 }
 
-__forceinline__ __device__ Float4 Load2Dfp16(
+struct Float3Ushort1 { Float3 xyz; ushort w; };
+
+__forceinline__ __device__ void Store2DHalf3Ushort1(
+    Float3Ushort1 val,
+	SurfObj       tex,
+	Int2          uv)
+{
+    Half4 hf4 = float4ToHalf4(Float4(val.xyz, 0));
+
+    ushort4ToHalf4Converter conv(hf4);
+    ushort4 us4 = conv.us4;
+
+    us4.w = val.w;
+
+    surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+}
+
+__forceinline__ __device__ Float3Ushort1 Load2DHalf3Ushort1(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+
+	ushort4ToHalf4Converter conv(ret);
+	Half4 hf4 = conv.hf4;
+    Float4 fl4 = half4ToFloat4(hf4);
+
+	return { fl4.xyz, ret.w };
+}
+
+__forceinline__ __device__ Float4 Load2DHalf4(
 	SurfObj tex,
 	Int2    uv)
 {
@@ -32,7 +62,7 @@ __forceinline__ __device__ Float4 Load2Dfp16(
 	return half4ToFloat4(hf4);
 }
 
-__forceinline__ __device__ void Store2Dfp16(
+__forceinline__ __device__ void Store2DHalf4(
     Float4  fl4,
 	SurfObj tex,
 	Int2    uv)
@@ -43,6 +73,17 @@ __forceinline__ __device__ void Store2Dfp16(
     ushort4 us4 = conv.us4;
 
     surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+}
+
+__forceinline__ __device__ Float2 Load2DFloat2(SurfObj tex, Int2 uv)
+{
+    float2 ret = surf2Dread<float2>(tex, uv.x * 2 * sizeof(float), uv.y, cudaBoundaryModeClamp);
+	return Float2(ret.x, ret.y);
+}
+
+__forceinline__ __device__ void Store2DFloat2(Float2 val, SurfObj tex, Int2 uv)
+{
+    surf2Dwrite(make_float2(val.x, val.y), tex, uv.x * 2 * sizeof(float), uv.y, cudaBoundaryModeClamp);
 }
 
 __device__ Float4 SampleBicubicSmoothStep(
@@ -177,7 +218,7 @@ __device__ Float4 SampleBicubicSmoothStepfp16(
 	for (int i = 0; i < 4; i++)
 	{
         sumWeight += weights[i];
-		OutColor += Load2Dfp16(tex, sampleUV[i]) * weights[i];
+		OutColor += Load2DHalf4(tex, sampleUV[i]) * weights[i];
 	}
 
 	OutColor /= sumWeight;
@@ -229,7 +270,7 @@ __device__ Float4 SampleBicubicCatmullRomfp16(
 	for (int i = 0; i < 16; i++)
 	{
         sumWeight += weights[i];
-		OutColor += Load2Dfp16(tex, sampleUV[i]) * weights[i];
+		OutColor += Load2DHalf4(tex, sampleUV[i]) * weights[i];
 	}
 
 	OutColor /= sumWeight;

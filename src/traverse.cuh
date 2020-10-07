@@ -10,9 +10,9 @@ __device__ inline void UpdateMaterial(
 	const SceneMaterial& sceneMaterial)
 {
 	// get mat id
-	if (rayState.objectIdx == MAGIC_NUMBER_PLANE)
+	if (rayState.objectIdx == PLANE_OBJECT_IDX)
 	{
-		rayState.matId = 3;
+		rayState.matId = 6;
 	}
 	else
 	{
@@ -26,7 +26,22 @@ __device__ inline void UpdateMaterial(
 	rayState.matType = (rayState.hit == false) ? MAT_SKY : mat.type;
 
 	// hit light
-	rayState.hitLight = (rayState.matType == MAT_SKY) || (rayState.matType == EMISSIVE);
+	if (rayState.matType == EMISSIVE)
+	{
+		if (rayState.lightIdx == rayState.objectIdx || rayState.lightIdx == DEFAULT_LIGHT_ID)
+		{
+			rayState.hitLight = true;
+		}
+		else
+		{
+			rayState.hitLight = false;
+			rayState.matType = PERFECT_REFLECTION;
+		}
+	}
+	else if (rayState.matType == MAT_SKY)
+	{
+		rayState.hitLight = true;
+	}
 
 	// is diffuse
 	rayState.isDiffuse = (rayState.matType == LAMBERTIAN_DIFFUSE) || (rayState.matType == MICROFACET_REFLECTION);
@@ -127,7 +142,7 @@ __device__ inline void RaySceneIntersect(
 	if (t_temp < t)
 	{
 		t               = t_temp;
-		objectIdx       = MAGIC_NUMBER_PLANE;
+		objectIdx       = PLANE_OBJECT_IDX;
 		intersectPoint  = GetRayPlaneIntersectPoint(plane, ray, t, errorP);
 		intersectNormal = plane.xyz;
 		rayOffset       = errorT + errorP;
@@ -145,6 +160,7 @@ __device__ inline void RaySceneIntersect(
 	}
 
 	rayState.hit = (t < RayMax);
+	rayState.depth = t;
 
 	UpdateMaterial(cbo, rayState, sceneMaterial);
 }

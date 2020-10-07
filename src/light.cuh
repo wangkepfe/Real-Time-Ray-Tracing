@@ -6,7 +6,17 @@
 
 #define TOTAL_LIGHT_MAX_COUNT 8
 
-__device__ __inline__ bool SampleLight(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, Float3& lightSampleDir, float& lightSamplePdf, float& isDeltaLight, float* skyCdf, BlueNoiseRandGenerator& randGen, int loopIdx)
+__device__ __inline__ bool SampleLight(
+    ConstBuffer&            cbo,
+    RayState&               rayState,
+    SceneMaterial           sceneMaterial,
+    Float3&                 lightSampleDir,
+    float&                  lightSamplePdf,
+    float&                  isDeltaLight,
+    float*                  skyCdf,
+    BlueNoiseRandGenerator& randGen,
+    int                     loopIdx,
+    int&                    lightIdx)
 {
 	const int numSphereLight = sceneMaterial.numSphereLights;
 	Sphere* sphereLights = sceneMaterial.sphereLights;
@@ -24,8 +34,11 @@ __device__ __inline__ bool SampleLight(ConstBuffer& cbo, RayState& rayState, Sce
 	for (; i < numSphereLight; ++i)
 	{
 		Float3 vec = sphereLights[i].center - rayState.pos;
-		if (dot(rayState.normal, vec) > 0 && vec.length2() < 1.0)
-			indexRemap[idx++] = i; // sphere light
+        float dist2 = vec.length2();
+		if (dot(rayState.normal, vec) > 0 && dist2 < 10.0f)
+        {
+            indexRemap[idx++] = i; // sphere light
+        }
 	}
 
 	indexRemap[idx++] = i++; // sun/moon light
@@ -33,9 +46,9 @@ __device__ __inline__ bool SampleLight(ConstBuffer& cbo, RayState& rayState, Sce
 
 	// choose light
     float chooseLightRand = randGen.Rand(4 + loopIdx * 6 + 5);
-	int sampledValue = chooseLightRand * idx;
+	int sampledValue = (int)floorf(chooseLightRand * idx);
 	sampledIdx = indexRemap[sampledValue];
-	lightChoosePdf = 1.0 / idx;
+	lightChoosePdf = 1.0f / (float)idx;
 
 	// sample
 	Float2 lightSampleRand2 = randGen.Rand2(4 + loopIdx * 6 + 2);
@@ -46,9 +59,11 @@ __device__ __inline__ bool SampleLight(ConstBuffer& cbo, RayState& rayState, Sce
         {
             Float3 moonDir = cbo.sunDir;
             moonDir        = -moonDir;
+
             lightSampleDir = cbo.sunDir.y > -0.05 ? cbo.sunDir : moonDir;
-            lightSamplePdf = 1.0f;
             isDeltaLight   = true;
+
+            lightIdx = ENV_LIGHT_ID;
         }
         else
         {
@@ -97,7 +112,7 @@ __device__ __inline__ bool SampleLight(ConstBuffer& cbo, RayState& rayState, Sce
             lightSampleDir = rayDir;
 		    lightSamplePdf = sampledSkyPdf * lightChoosePdf;
 
-            //printf("sampledSkyValue = %f, skyCdf[mid] = %f, skyCdf[mid+1] = %f, sampledSkyIdx = %d, sampledSkyPdf = %f, rayDir = (%f, %f, %f)\n", sampledSkyValue, skyCdf[mid], skyCdf[mid + 1], sampledSkyIdx, sampledSkyPdf, rayDir.x, rayDir.y, rayDir.z);
+            lightIdx = ENV_LIGHT_ID;
         }
         else
         {
@@ -108,16 +123,33 @@ __device__ __inline__ bool SampleLight(ConstBuffer& cbo, RayState& rayState, Sce
 	{
 		Sphere sphereLight = sphereLights[sampledIdx];
 
-		Float3 lightDir   = sphereLight.center - rayState.pos;
-		float dist2       = lightDir.length2();
-		float radius2     = sphereLight.radius * sphereLight.radius;
-		float cosThetaMax = sqrtf(max1f(dist2 - radius2, 0)) / sqrtf(dist2);
+        // light vector / direction
+		Float3 lightVec   = sphereLight.center - rayState.pos;
+        Float3 lightDir   = normalize(lightVec);
 
-		Float3 u, v;
-		LocalizeSample(lightDir, u, v);
-		lightSampleDir = UniformSampleCone(lightSampleRand2, cosThetaMax, u, v, lightDir);
-		lightSampleDir = normalize(lightSampleDir);
-		lightSamplePdf = UniformConePdf(cosThetaMax) * lightChoosePdf;
+        // cos theta max
+        float dist2       = lightVec.length2();
+        float radius2     = sphereLight.radius * sphereLight.radius;
+        float cosThetaMax = sqrtf(max1f(dist2 - radius2, 0)) / sqrtf(dist2);
+
+        // sample direction based on light direction and cosThetaMax
+        Float3 u, v;
+        LocalizeSample(lightDir, u, v);
+        lightSampleDir = UniformSampleCone(lightSampleRand2, cosThetaMax, u, v, lightDir);
+        lightSampleDir = normalize(lightSampleDir);
+
+        // if direction in sight
+        if (dot(rayState.normal, lightSampleDir) > 0)
+        {
+            // calculate pdf of the sample
+            lightSamplePdf = UniformConePdf(cosThetaMax) * lightChoosePdf;
+
+            lightIdx = sampledIdx;
+        }
+        else
+        {
+            return false;
+        }
 	}
 
 	return true;

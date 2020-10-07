@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 
 #define uint unsigned int
+#define ushort unsigned short
 
 #define PI_OVER_4               0.7853981633974483096156608458198757210492f
 #define PI_OVER_2               1.5707963267948966192313216916397514420985f
@@ -77,7 +78,6 @@ struct Int2
 	__host__ __device__ Int2()              : x{0}, y{0} {}
 	__host__ __device__ Int2(int a)         : x{a}, y{a} {}
     __host__ __device__ Int2(int x, int y)  : x{x}, y{y} {}
-	__host__ __device__ Int2(const Int2& v) : x{v.x}, y{v.y} {}
 
     inline __host__ __device__ Int2 operator + (int a) const         { return Int2(x + a, y + a); }
     inline __host__ __device__ Int2 operator - (int a) const         { return Int2(x - a, y - a); }
@@ -160,6 +160,7 @@ inline __host__ __device__ Float2 operator / (const Int2& vi, const Float2& vf) 
 inline __device__ float  fract (float a) { float intPart; return modff(a, &intPart); }
 inline __device__ Float2 floor (const Float2& v) { return Float2(floorf(v.x), floorf(v.y)); }
 inline __device__ Int2   floori(const Float2& v) { return Int2((int)(floorf(v.x)), (int)(floorf(v.y))); }
+inline __host__   Int2   floor2(const Float2& v) { return Int2((int)(floor(v.x)), (int)(floor(v.y))); }
 inline __device__ Float2 fract (const Float2& v) { float intPart; return Float2(modff(v.x, &intPart), modff(v.y, &intPart)); }
 inline __device__ Int2   roundi(const Float2& v) { return Int2((int)(rintf(v.x)), (int)(rintf(v.y))); }
 
@@ -268,6 +269,8 @@ struct Float4
 	__host__ __device__ Float4(const Float2& v1, const Float2& v2)     : x(v1.x), y(v1.y), z(v2.x), w(v2.y) {}
 	__host__ __device__ Float4(const Float3& v)                        : x(v.x), y(v.y), z(v.z), w(0)       {}
 	__host__ __device__ Float4(const Float3& v, float a)               : x(v.x), y(v.y), z(v.z), w(a)       {}
+	__host__ __device__ Float4(const Float4& v)                        : x(v.x), y(v.y), z(v.z), w(v.w)     {}
+	__host__ __device__ Float4(volatile const Float4& v)               : x(v.x), y(v.y), z(v.z), w(v.w)     {}
 
 	inline __host__ __device__ Float4  operator+(const Float4& v) const { return Float4(x + v.x, y + v.y, z + v.z, z + v.z); }
 	inline __host__ __device__ Float4  operator-(const Float4& v) const { return Float4(x - v.x, y - v.y, z - v.z, z - v.z); }
@@ -389,6 +392,7 @@ struct Mat4
 
 	__host__ __device__ Mat4() { for (int i = 0; i < 16; ++i) { _v[i] = 0; } m00 = m11 = m22 = m33 = 1; }
 	__host__ __device__ Mat4(const Float4& v0, const Float4& v1, const Float4& v2, const Float4& v3) : v0{v0}, v1{v1}, v2{v2}, v3{v3} {}
+	__host__ __device__ Mat4(const Mat4& m) : v0{ m.v0 }, v1{ m.v1 }, v2{ m.v2 }, v3{ m.v3 } {}
 
 	inline __host__ __device__ void          setCol(uint i, const Float4& v)       { _v4[i] = v; }
 	inline __host__ __device__ Float4        getCol(uint i) const                  { return _v4[i]; }

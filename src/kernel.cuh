@@ -16,7 +16,10 @@
 #include "terrain.hpp"
 #include "blueNoiseRandGen.h"
 
-#define MAGIC_NUMBER_PLANE 666666
+#define PLANE_OBJECT_IDX 666666
+#define ENV_LIGHT_ID 9999
+#define SUN_LIGHT_ID 8888
+#define DEFAULT_LIGHT_ID 7777
 
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
@@ -202,6 +205,8 @@ struct __align__(16) RayState
 	Float3     tangent;
 
 	int        bounceLimit;
+	float      depth;
+	int        lightIdx;
 };
 
 //__device__ __inline__ float rd(RandState* rdState) { return curand_uniform(rdState); }
@@ -315,6 +320,11 @@ private:
 	cudaArray*                  bloomBufferArray4;
 	cudaArray*                  bloomBufferArray16;
 
+	SurfObj                     normalDepthBufferA;
+	SurfObj                     normalDepthBufferB;
+	cudaArray*                  normalDepthBufferArrayA;
+	cudaArray*                  normalDepthBufferArrayB;
+
 	// sky
 	const unsigned int          skyWidth = 64;
 	const unsigned int          skyHeight = 16;
@@ -354,6 +364,7 @@ private:
 
 	// cpu update
 	Float2                      sunPos;
+	Int2                        sunUv;
 	Float3                      sunDir;
 	float                       deltaTime;
 	float                       clockTime;

@@ -472,7 +472,7 @@ __global__ void Sky(SurfObj skyBuffer, float* skyCdf, Int2 size, Float3 sunDir)
 	}
 
 	// store
-	Store2D(Float4(color, 0), skyBuffer, Int2(x, y));
+	Store2DHalf4(Float4(color, 0), skyBuffer, Int2(x, y));
 
 	// sky cdf
 	int i = size.x * y + x;

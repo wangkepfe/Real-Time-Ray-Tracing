@@ -376,3 +376,33 @@ __global__ void TAA(
     Store2D(Float4(outColor, currentColor.w), currentBuffer, idx);
 	Store2D(Float4(outColor, currentColor.w), accumulateBuffer, idx);
 }
+
+__global__ void DownScale4_fp32_fp16(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	__shared__ Float4 sharedBuffer[8][8];
+	sharedBuffer[threadIdx.x][threadIdx.y] = Load2D(InBuffer, idx) / 16;
+
+	if (threadIdx.x % 2 == 0 && threadIdx.y % 2 == 0)
+	{
+		sharedBuffer[threadIdx.x][threadIdx.y] =
+			sharedBuffer[threadIdx.x][threadIdx.y] +
+			sharedBuffer[threadIdx.x + 1][threadIdx.y] +
+			sharedBuffer[threadIdx.x][threadIdx.y + 1] +
+			sharedBuffer[threadIdx.x + 1][threadIdx.y + 1];
+	}
+
+	if (threadIdx.x % 4 == 0 && threadIdx.y % 4 == 0)
+	{
+		Float4 result =
+			sharedBuffer[threadIdx.x][threadIdx.y] +
+			sharedBuffer[threadIdx.x + 2][threadIdx.y] +
+			sharedBuffer[threadIdx.x][threadIdx.y + 2] +
+			sharedBuffer[threadIdx.x + 2][threadIdx.y + 2];
+
+		Store2DHalf4(result, OutBuffer, Int2(idx.x / 4, idx.y / 4));
+	}
+}

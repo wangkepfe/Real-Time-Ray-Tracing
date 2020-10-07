@@ -3,14 +3,14 @@
 #include <cuda_runtime.h>
 #include "linear_math.h"
 
-__device__  void LocalizeSample(
+__device__ __forceinline__ void LocalizeSample(
 	const Float3& n,
 	Float3& u,
 	Float3& v)
 {
 	Float3 w;
 
-	if (abs(n.y) < 1.0 - 1e-5)
+	if (abs(n.y) < 1.0f - 1e-5f)
 		w = Float3(0, 1, 0);
 	else
 		w = Float3(1, 0, 0);
@@ -19,12 +19,12 @@ __device__  void LocalizeSample(
 	v = cross(n, u);
 }
 
-__device__  Float2 ConcentricSampleDisk(Float2 u) {
+__device__ __forceinline__ Float2 ConcentricSampleDisk(Float2 u) {
 	// Map uniform random numbers to [-1, 1]
 	Float2 uOffset = 2.0 * u - 1.0;
 
 	// Handle degeneracy at the origin
-	if (abs(uOffset.x) < 1e-10 && abs(uOffset.y) < 1e-10) {
+	if (abs(uOffset.x) < 1e-10f && abs(uOffset.y) < 1e-10f) {
 		return Float2(0, 0);
 	}
 
@@ -46,21 +46,27 @@ __device__  Float2 ConcentricSampleDisk(Float2 u) {
 	return r * Float2(cosf(theta), sinf(theta));
 }
 
-__device__  Float3 CosineSampleHemisphere(Float2 u)
+__device__ __forceinline__ Float2 UniformSampleDisk(Float2 u) {
+    float r = sqrtf(u[0]);
+    float theta = TWO_PI * u[1];
+    return Float2(r * cosf(theta), r * sinf(theta));
+}
+
+__device__ __forceinline__ Float3 CosineSampleHemisphere(Float2 u)
 {
-	Float2 d = ConcentricSampleDisk(u);
+	Float2 d = UniformSampleDisk(u);
 	float z = sqrtf(max1f(0.0f, 1.0f - d.x * d.x - d.y * d.y));
 	return Float3(d.x, z, d.y);
 }
 
-__device__  Float3 CosineSampleHemisphere(Float2 u, const Float3& x, const Float3& y, const Float3& z)
+__device__ __forceinline__ Float3 CosineSampleHemisphere(Float2 u, const Float3& x, const Float3& y, const Float3& z)
 {
-	Float2 d = ConcentricSampleDisk(u);
+	Float2 d = UniformSampleDisk(u);
 	float dz = sqrtf(max1f(0.0f, 1.0f - d.x * d.x - d.y * d.y));
 	return x * d.x + y * d.y + z * dz;
 }
 
-__device__  void LambertianSample(
+__device__ __forceinline__ void LambertianSample(
 	Float2         randNum,
 	Float3&        wo,
 	const Float3&  n)
@@ -74,11 +80,11 @@ __device__  void LambertianSample(
 	wo.normalize();
 }
 
-__device__ inline Float3 LambertianBsdf(const Float3& albedo) { return albedo / PI; }
-__device__ inline float  LambertianPdf(const Float3& wo, const Float3& n) { return max1f(dot(wo, n), 0) / PI; }
-__device__ inline Float3 LambertianBsdfOverPdf(const Float3& albedo) { return albedo; }
+__device__ __forceinline__ Float3 LambertianBsdf(const Float3& albedo) { return albedo / PI; }
+__device__ __forceinline__ float  LambertianPdf(const Float3& wo, const Float3& n) { return max1f(dot(wo, n), 0) / PI; }
+__device__ __forceinline__ Float3 LambertianBsdfOverPdf(const Float3& albedo) { return albedo; }
 
-__device__ float FresnelDialetric(float etaI, float etaT, float cosThetaI, float cosThetaT)
+__device__ __forceinline__ float FresnelDialetric(float etaI, float etaT, float cosThetaI, float cosThetaT)
 {
 	float R1 = etaT * cosThetaI;
 	float R2 = etaI * cosThetaT;
@@ -91,16 +97,16 @@ __device__ float FresnelDialetric(float etaI, float etaT, float cosThetaI, float
 	return (Rparl * Rparl + Rperp * Rperp) / 2.0;
 }
 
-__device__ inline float pow5(float e) {
+__device__ __forceinline__ float pow5(float e) {
 	float e2 = e * e;
 	return e2 * e2 * e;
 }
 
-__device__ inline Float3 FresnelShlick(const Float3& F0, float cosTheta) {
+__device__ __forceinline__ Float3 FresnelShlick(const Float3& F0, float cosTheta) {
 	return F0 + (Float3(1.0f) - F0) * pow5(1.0f - cosTheta);
 }
 
-__device__ inline float FresnelShlick(float F0, float cosTheta) {
+__device__ __forceinline__ float FresnelShlick(float F0, float cosTheta) {
 	return F0 + (1.0f - F0) * pow5(1.0f - cosTheta);
 }
 
@@ -201,7 +207,7 @@ __device__ void MacrofacetReflectionSample(
 	pdf = (D * cosThetaWh) / (4.0f * cosThetaWoWh);
 
 	// beta
-	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(1.0f));
+	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(2.0f));
 }
 
 __device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& pdf,const Float3& wn, const Float3& wo, const Float3& wi, const Float3& F0, Float3& albedo, float alpha)
@@ -233,23 +239,23 @@ __device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& p
 	pdf = (D * cosThetaWh) / (4.0f * cosThetaWoWh);
 
 	// beta
-	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(1.0f));
+	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(2.0f));
 }
 
-__device__ Float3 UniformSampleCone(const Float2 &u, float cosThetaMax, const Float3 &x, const Float3 &y, const Float3 &z)
+__device__ __forceinline__ Float3 UniformSampleCone(const Float2 &u, float cosThetaMax, const Float3 &x, const Float3 &y, const Float3 &z)
 {
-    float cosTheta = ((float)1 - u[0]) + u[0] * cosThetaMax;
-    float sinTheta = sqrtf((float)1 - cosTheta * cosTheta);
-    float phi = u[1] * 2 * PI;
+    float cosTheta = (1.0f - u[0]) + u[0] * cosThetaMax;
+    float sinTheta = sqrtf(1.0f - cosTheta * cosTheta);
+    float phi = u[1] * TWO_PI;
     return cosf(phi) * sinTheta * x + sinf(phi) * sinTheta * y + cosTheta * z;
 }
 
-__device__ float UniformConePdf(float cosThetaMax)
+__device__ __forceinline__ float UniformConePdf(float cosThetaMax)
 {
 	return 1 / (2 * PI * (1.0 - cosThetaMax));
 }
 
-__device__ Float3 UniformSampleSphere(const Float2 &u)
+__device__ __forceinline__ Float3 UniformSampleSphere(const Float2 &u)
 {
     float z = 1 - 2 * u[0];
     float r = sqrtf(max1f((float)0, (float)1 - z * z));
@@ -257,9 +263,9 @@ __device__ Float3 UniformSampleSphere(const Float2 &u)
     return Float3(r * cosf(phi), r * sinf(phi), z);
 }
 
-__device__ constexpr float UniformSpherePdf() { return 1.0f / (4.0f * PI); }
+__device__ __forceinline__ constexpr float UniformSpherePdf() { return 1.0f / (4.0f * PI); }
 
-__device__ Float3 UniformSampleHemisphere(const Float2 &u)
+__device__ __forceinline__ Float3 UniformSampleHemisphere(const Float2 &u)
 {
     float z = u[0];
     float r = sqrtf(max1f((float)0, (float)1. - z * z));
@@ -267,6 +273,6 @@ __device__ Float3 UniformSampleHemisphere(const Float2 &u)
     return Float3(r * cosf(phi), r * sinf(phi), z);
 }
 
-__device__ constexpr float UniformHemispherePdf() { return 1.0f / (2.0f * PI); }
+__device__ __forceinline__ constexpr float UniformHemispherePdf() { return 1.0f / (2.0f * PI); }
 
 __device__ __forceinline__ constexpr float PowerHeuristic(float f, float g) { return (f * f) / (f * f + g * g); }
