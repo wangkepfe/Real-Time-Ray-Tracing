@@ -22,14 +22,15 @@
 - Edge-aware `Atrous
 - Temporal spatial filter
 
-### Adaptive sampling
-### Dynamic resolution
+### Other
+- Adaptive sampling
+- Dynamic resolution
 
-### Post-processing
+## Post-processing
 - Eye adaptive histogram based auto exposure
-- Tone mapping
 - Bloom effect
 - Lens flare
+- Tone mapping
 - Sharpening
 
 ## References
