@@ -7,6 +7,7 @@
 __device__ void GenerateRay(
 	Float3& orig,
 	Float3& dir,
+	Float2& sampleUv,
 	Camera camera,
 	Int2   idx,
 	Float2 randPixelOffset,
@@ -14,6 +15,7 @@ __device__ void GenerateRay(
 {
 	// [0, 1] coordinates
 	Float2 uv = (Float2(idx.x, idx.y) + randPixelOffset) * camera.inversedResolution;
+	sampleUv = uv; // Float2(idx.x, idx.y) * camera.inversedResolution;
 
 	// [0, 1] -> [1, -1], since left/up vector should be 1 when uv is 0
 	uv = uv * -2.0 + 1.0;

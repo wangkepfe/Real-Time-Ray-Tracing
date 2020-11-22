@@ -8,25 +8,27 @@
 #include <cuda_runtime_api.h>
 
 #include <stdio.h>
+#include <iostream>
 
 #include "helper_cuda.h"
 #include "linear_math.h"
 #include "geometry.h"
 #include "timer.h"
-#include "terrain.hpp"
 #include "blueNoiseRandGen.h"
+#include "bvhNode.cuh"
 
 #define PLANE_OBJECT_IDX 666666
 #define ENV_LIGHT_ID 9999
 #define SUN_LIGHT_ID 8888
 #define DEFAULT_LIGHT_ID 7777
 
+#define USE_INTERPOLATED_FAKE_NORMAL 0
+
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
 #define RandInitVec curandDirectionVectors32_t
 #define SurfObj cudaSurfaceObject_t
 #define TexObj cudaTextureObject_t
-#define ullint unsigned long long int
 
 // ---------------------- error handling ----------------------
 #define CheckCurandErrors(x) do { if((x)!=CURAND_STATUS_SUCCESS) { printf("Error at %s:%d\n",__FILE__,__LINE__); return EXIT_FAILURE;}} while(0)
@@ -44,13 +46,13 @@ inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort =
 struct __align__(16) Camera
 {
 	Float3 pos;
-	float  unused1;
+	float  pitch;
 	Float3 dir;
 	float  focal;
 	Float3 left;
 	float  aperture;
 	Float3 up;
-	float  unused2;
+	float  yaw;
 	Float2 resolution;
 	Float2 inversedResolution;
 	Float2 fov;
@@ -68,10 +70,13 @@ struct __align__(16) Camera
 
 	void update()
 	{
+		dir = Float3(sinf(yaw) * cosf(pitch), sinf(pitch), cosf(yaw) * cosf(pitch));
+
 		inversedResolution = 1.0f / resolution;
 		fov.y = fov.x / resolution.x * resolution.y;
 		tanHalfFov = Float2(tanf(fov.x / 2), tanf(fov.y / 2));
 
+		up = Float3(0, 1, 0);
 		left = normalize(cross(up, dir));
 		up = normalize(cross(dir, left));
 
@@ -82,6 +87,39 @@ struct __align__(16) Camera
 		apertureLeft = left * aperture;
 		apertureUp = up * aperture;
 	}
+
+	inline __device__ __host__ Float2 WorldToScreenSpace(Float3 worldPos)
+	{
+		Mat3 invCamMat(left, up, dir);                                   // build view matrix
+		invCamMat.transpose();                                           // orthogonal matrix, inverse is transpose
+		Float3 viewSpacePos   = invCamMat * (worldPos - pos);            // transform world pos to view space
+		Float2 screenPlanePos = viewSpacePos.xy / viewSpacePos.z;        // projection onto plane
+		Float2 ndcSpacePos    = screenPlanePos / tanHalfFov;             // [-1, 1]
+		Float2 screenSpacePos = Float2(0.5) - ndcSpacePos * Float2(0.5); // [0, 1]
+		return screenSpacePos;
+	}
+};
+
+struct __align__(16) HistoryCamera
+{
+	inline __device__ __host__ void Setup(const Camera& cam)
+	{
+		invCamMat = Mat3(cam.left, cam.up, cam.dir);  // build view matrix
+		invCamMat.transpose();                      // orthogonal matrix, inverse is transpose
+		pos = cam.pos;
+	}
+
+	inline __device__ __host__ Float2 WorldToScreenSpace(Float3 worldPos, Float2 tanHalfFov)
+	{
+		Float3 viewSpacePos   = invCamMat * (worldPos - pos);            // transform world pos to view space
+		Float2 screenPlanePos = viewSpacePos.xy / viewSpacePos.z;        // projection onto plane
+		Float2 ndcSpacePos    = screenPlanePos / tanHalfFov;             // [-1, 1]
+		Float2 screenSpacePos = Float2(0.5) - ndcSpacePos * Float2(0.5); // [0, 1]
+		return screenSpacePos;
+	}
+
+	Mat3 invCamMat;
+	Float3 pos;
 };
 
 struct __align__(16) SceneGeometry
@@ -89,6 +127,7 @@ struct __align__(16) SceneGeometry
 	Sphere* spheres;
 	AABB*   aabbs;
 	Triangle* triangles;
+	BVHNode* bvhNodes;
 	int numAabbs;
 	int numSpheres;
 	int numTriangles;
@@ -107,7 +146,7 @@ enum SurfaceMaterialType : uint
 struct __align__(16) SurfaceMaterial
 {
 	__device__ __host__ SurfaceMaterial() :
-		albedo {Float3(0.8)},
+		albedo {Float3(0.8f)},
 		type {PERFECT_REFLECTION},
 		useTex0 {false},
 		useTex1 {false},
@@ -117,8 +156,8 @@ struct __align__(16) SurfaceMaterial
 		texId1 {0},
 		texId2 {0},
 		texId3 {0},
-		F0 {Float3(0.56, 0.57, 0.58)},
-		alpha {0.05}
+		F0 {Float3(0.56f, 0.57f, 0.58f)},
+		alpha {0.05f}
 	{}
 
 	Float3 albedo;
@@ -154,17 +193,10 @@ struct __align__(16) ConstBuffer
 	Float3 sunDir;
 	float  clockTime;
 
-	int maxSceneLoop;
 	int frameNum;
-	int aaSampleNum;
-	int pad1;
+	int bvhDebugLevel;
 
-	UInt2 gridDim;
-	UInt2 bufferDim;
-
-	uint bufferSize;
-	uint gridSize;
-	UInt2 pad2;
+	HistoryCamera historyCamera;
 };
 
 struct __align__(16) RayState
@@ -174,9 +206,6 @@ struct __align__(16) RayState
 
 	Float3     dir;
 	int        matId;
-
-	Float3     probeDir;
-	int        objectIdx;
 
 	Float3     L;
 	bool       isRayIntoSurface;
@@ -190,23 +219,23 @@ struct __align__(16) RayState
 	Float3     normal;
 	bool       hitLight;
 
-	Float3     lightBeta;
-	bool       isDiffuse;
+	Float3     fakeNormal;
+	int        lightIdx;
 
 	Int2       idx;
-	int        i;
-	bool       hit;
-
-	float      surfaceBetaWeight;
-	float      normalDotRayDir;
 	Float2     uv;
 
+	int        i;
+	bool       hit;
+	float      normalDotRayDir;
 	bool       isDiffuseRay;
-	Float3     tangent;
 
+	Float3     tangent;
 	int        bounceLimit;
+
 	float      depth;
-	int        lightIdx;
+	bool       isDiffuse;
+	int        objectIdx;
 };
 
 //__device__ __inline__ float rd(RandState* rdState) { return curand_uniform(rdState); }
@@ -229,15 +258,10 @@ public:
 
     RayTracer(
 		int screenWidth,
-		int screenHeight,
-		int renderWidth,
-		int renderHeight)
+		int screenHeight)
 		:
 		screenWidth {screenWidth},
-		screenHeight {screenHeight},
-		renderWidth {renderWidth},
-		renderHeight {renderHeight},
-		renderBufferSize {renderWidth * renderHeight}
+		screenHeight {screenHeight}
 	{}
 
     ~RayTracer()
@@ -249,20 +273,31 @@ public:
 	void draw(SurfObj* d_renderTarget);
 	void cleanup();
 
+	void keyboardUpdate(int key, int scancode, int action, int mods);
+	void cursorPosUpdate(double xpos, double ypos);
+	void scrollUpdate(double xoffset, double yoffset);
+	void mouseButtenUpdate(int button, int action, int mods);
+	void SaveCameraToFile(const std::string &camFileName);
+	void LoadCameraFromFile(const std::string &camFileName);
+
 private:
 
 	void CameraSetup(Camera& camera);
 	void UpdateFrame();
+	void InputControlUpdate();
 
 	// resolution
 	const int                   screenWidth;
 	const int                   screenHeight;
 
-	const int                   renderWidth;
-	const int                   renderHeight;
+	int                         renderWidth;
+	int                         renderHeight;
 
-	// buffer size
-	const int                   renderBufferSize;
+	int                         historyRenderWidth;
+	int                         historyRenderHeight;
+
+	int                         maxRenderWidth;
+	int                         maxRenderHeight;
 
 	// kernel dimension
 	dim3                        blockDim;
@@ -284,8 +319,7 @@ private:
 
 	// primitives
 	Sphere*                     d_spheres;
-	AABB*                       d_aabbs;
-	Triangle*                   d_triangles;
+	AABB*                       d_sceneAabbs;
 	Sphere*                     d_sphereLights;
 
 	// materials
@@ -325,6 +359,12 @@ private:
 	cudaArray*                  normalDepthBufferArrayA;
 	cudaArray*                  normalDepthBufferArrayB;
 
+	SurfObj                     motionVectorBuffer;
+	cudaArray*                  motionVectorBufferArray;
+
+	SurfObj                     sampleCountBuffer;
+	cudaArray*                  sampleCountBufferArray;
+
 	// sky
 	const unsigned int          skyWidth = 64;
 	const unsigned int          skyHeight = 16;
@@ -346,9 +386,6 @@ private:
 	// timer
 	Timer                       timer;
 
-	// terrain
-	Terrain                     terrain;
-
 	// streams
 	cudaStream_t*               streams;
 
@@ -356,11 +393,9 @@ private:
 	Float3                      cameraFocusPos;
 	Sphere*                     spheres;
 	Sphere*                     sphereLights;
-	AABB*                       aabbs;
-	Triangle*                   triangles;
+	AABB*                       sceneAabbs;
 	int                         numSpheres;
 	int                         numSphereLights;
-	int                         numTriangles;
 
 	// cpu update
 	Float2                      sunPos;
@@ -371,5 +406,17 @@ private:
 
 	// save to file
 	Float4*                     saveToFileBuffer;
+
+	// bvh and triangles
+	uint       triCount;
+	static const uint BVHcapacity = 1024;
+	Triangle*  constTriangles;
+	Triangle*  triangles;
+	AABB*      aabbs;
+	AABB*      sceneBoundingBox;
+	uint*      morton;
+	uint*      reorderIdx;
+	BVHNode*   bvhNodes;
+	uint*      isAabbDone;
 };
 

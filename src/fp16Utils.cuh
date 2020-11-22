@@ -47,3 +47,12 @@ union ushort4ToHalf4Converter
 	ushort4 us4;
 	Half4 hf4;
 };
+
+union ushort2ToHalf2Converter
+{
+    __device__ ushort2ToHalf2Converter(const ushort2& v) : us2{v} {}
+	__device__ ushort2ToHalf2Converter(const half2& v) : hf2{v} {}
+
+	ushort2 us2;
+	half2 hf2;
+};

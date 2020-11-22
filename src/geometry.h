@@ -19,7 +19,7 @@ struct  __align__(16) AABB
 	Float3 min;
 	float pad32;
 
-	__host__ __device__ AABB() {}
+	__host__ __device__ AABB() : max(), min() {}
 	__host__ __device__ AABB(const Float3& max, const Float3& min) : max{ max }, min{ min } {}
 	__host__ __device__ AABB(const Float3& center, float edgeLength) : max{ center + Float3(edgeLength / 2.0f) }, min{ center - Float3(edgeLength / 2.0f) } {}
 };
@@ -36,47 +36,54 @@ struct  __align__(16) Ray
 	__host__ __device__ Ray(Float3 orig, Float3 dir) : orig{ orig }, dir{ dir }{}
 };
 
-struct __align__(16) AabbPair
-{
-	union {
-		struct {
-			Float4 n0xy; // childnode 0, xy-bounds (c0.lo.x, c0.hi.x, c0.lo.y, c0.hi.y)
-			Float4 n1xy; // childnode 1, xy-bounds (c1.lo.x, c1.hi.x, c1.lo.y, c1.hi.y)
-			Float4 nz;   // childnode 0 and 1, z-bounds (c0.lo.z, c0.hi.z, c1.lo.z, c1.hi.z)
-		};
-		Float4 v[3];
-	};
-
-	__host__ __device__ AabbPair() : n0xy(), n1xy(), nz() {}
-};
-
 struct __align__(16) Triangle
 {
-	union
-	{
-		struct { Float4 p0, p1, p2; };
-		Float4 v[3];
-	};
+	__host__ __device__ Triangle() {}
+	__host__ __device__ Triangle(const Float3& v1, const Float3& v2, const Float3& v3) : v1(v1), v2(v2), v3(v3) {}
 
-	__host__ __device__ Triangle() : v{} {}
-	__host__ __device__ Triangle(const Float3& p0, const Float3& p1, const Float3& p2) : p0{p0}, p1{p1}, p2{p2} {}
+	Float3 v1; float w1;
+	Float3 v2; float w2;
+	Float3 v3; float w3;
+	Float3 v4; float w4;
 
+	Float3 n1; float u1;
+	Float3 n2; float u2;
+	Float3 n3; float u3;
+};
 
-	// __host__ __device__ void PreTransform()
-	// {
-	// 	const Float3& v0 = v[0].xyz;
-	// 	const Float3& v1 = v[1].xyz;
-	// 	const Float3& v2 = v[2].xyz;
+struct __align__(16) AABBCompact
+{
+	__host__ __device__ AABBCompact() {}
+	__host__ __device__ AABBCompact(const AABB& aabb1, const AABB& aabb2)
+	: box1maxX (aabb1.max.x), box1maxY (aabb1.max.y), box1minX (aabb1.min.x), box1minY (aabb1.min.y),
+	  box2maxX (aabb2.max.x), box2maxY (aabb2.max.y), box2minX (aabb2.min.x), box2minY (aabb2.min.y),
+	  box1maxZ (aabb1.max.z), box1minZ (aabb1.min.z), box2maxZ (aabb2.max.z), box2minZ (aabb2.min.z) {}
 
-	// 	Mat4 mtx;
-	// 	mtx.setCol(0, Float4(v0 - v2, 0.0f));
-	// 	mtx.setCol(1, Float4(v1 - v2, 0.0f));
-	// 	mtx.setCol(2, Float4(cross(v0 - v2, v1 - v2), 0.0f));
-	// 	mtx.setCol(3, Float4(v2, 1.0f));
-	// 	mtx = mtx.invert();
+	__host__ __device__ AABB GetMerged() const {
+		return AABB(Float3(max(box1maxX, box2maxX), max(box1maxY, box2maxY), max(box1maxZ, box2maxZ)),
+		            Float3(min(box1minX, box2minX), min(box1minY, box2minY), min(box1minZ, box2minZ)));
+	}
 
-	// 	v[0] = Float4(mtx(2, 0), mtx(2, 1), mtx(2, 2), -mtx(2, 3));
-	// 	v[1] = mtx.getRow(0);
-	// 	v[2] = mtx.getRow(1);
-	// }
+	__host__ __device__ AABB GetLeftAABB() const {
+		return AABB(Float3(box1maxX, box1maxY, box1maxZ), Float3(box1minX, box1minY, box1minZ));
+	}
+
+	__host__ __device__ AABB GetRightAABB() const  {
+		return AABB(Float3(box2maxX, box2maxY, box2maxZ), Float3(box2minX, box2minY, box2minZ));
+	}
+
+	float box1maxX;
+	float box1maxY;
+	float box1maxZ;
+	float box2minX;
+
+	float box1minX;
+	float box1minY;
+	float box1minZ;
+	float box2minY;
+
+	float box2maxX;
+	float box2maxY;
+	float box2maxZ;
+	float box2minZ;
 };

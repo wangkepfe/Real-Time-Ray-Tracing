@@ -64,7 +64,7 @@ inline __device__ float RayleighPhaseFunc(float mu)
 	return
 			3. * (1. + mu*mu)
 	/ //------------------------
-				(16. * PI);
+				(16. * M_PI);
 }
 
 
@@ -73,7 +73,7 @@ inline __device__ float HenyeyGreensteinPhaseFunc(float mu, float g)
 	return
 						(1. - g*g)
 	/ //---------------------------------------------
-		((4. * PI) * pow(1. + g*g - 2.*g*mu, 1.5));
+		((4. * M_PI) * pow(1. + g*g - 2.*g*mu, 1.5));
 }
 
 inline __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3& sunDir, int numSamples, int numSamplesLight)
@@ -360,7 +360,7 @@ inline __device__ void OceanShader(Float3& rayDir, Float3& beta, float clockTime
 #if GEOMETRY_WATER
 
 	// add light wave color
-	float height = min1f(powf(cosf((pos.y / waterDepth) * PI / 2), 16) * 10, 1.0);
+	float height = min1f(powf(cosf((pos.y / waterDepth) * M_PI / 2), 16) * 10, 1.0);
 	beta += height * (Float3(1.0) - fresnel) * Float3(0.8, 0.9, 0.6);
 	beta = min3f(beta, Float3(1.0));
 
@@ -408,7 +408,7 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 #if USE_STAR
 		if (isDiffuseRay == false)
 		{
-			Float2 uv = Float2((atan2f(rayDirOrRefl.x, rayDirOrRefl.z) + clockTime / 300) / TWO_PI, acosf(rayDirOrRefl.y) / PI) * 6000.0;
+			Float2 uv = Float2((atan2f(rayDirOrRefl.x, rayDirOrRefl.z) + clockTime / 300) / TWO_PI, acosf(rayDirOrRefl.y) / M_PI) * 6000.0;
 			starColor = StableStarField(uv, 0.995f) * 0.1;
 		}
 #endif
@@ -471,70 +471,12 @@ __global__ void Sky(SurfObj skyBuffer, float* skyCdf, Int2 size, Float3 sunDir)
 		color = moonColor;
 	}
 
+	//color = Float3(0.8f);
+
 	// store
 	Store2DHalf4(Float4(color, 0), skyBuffer, Int2(x, y));
 
 	// sky cdf
 	int i = size.x * y + x;
-	skyCdf[i] = color.max();
-}
-
-__global__ void Scan(float *data, int n)
-{
-	// allocated on invocation
-	extern __shared__ float temp[];
-
-	int i = threadIdx.x;
-	int offset = 1;
-
-	// load input into shared memory
-	temp[2 * i] = data[2 * i];
-	temp[2 * i + 1] = data[2 * i + 1];
-
-	// save orig value
-	float orig0 = temp[2 * i];
-	float orig1 = temp[2 * i + 1];
-
-	// build sum in place up the tree
-	for (int d = n >> 1; d > 0; d >>= 1)
-	{
-		__syncthreads();
-		if (i < d)
-		{
-			int ai = offset * (2 * i + 1) - 1;
-			int bi = offset * (2 * i + 2) - 1;
-			temp[bi] += temp[ai];
-		}
-		offset *= 2;
-	}
-
-	// clear the last element
-	if (i == 0)
-	{
-		temp[n - 1] = 0;
-	}
-
-	// traverse down tree & build scan
-	for (int d = 1; d < n; d *= 2)
-	{
-		offset >>= 1;
-		__syncthreads();
-		if (i < d)
-		{
-			int ai = offset * (2 * i + 1) - 1;
-			int bi = offset * (2 * i + 2) - 1;
-
-			float t = temp[ai];
-			temp[ai] = temp[bi];
-			temp[bi] += t;
-		}
-	}
-	__syncthreads();
-
-	// write results to device memory
-	data[2 * i] = temp[2 * i] + orig0;
-	data[2 * i + 1] = temp[2 * i + 1] + orig1;
-
-	//printf("data[%d] = %f\n", 2 * i, data[2 * i]);
-	//("data[%d] = %f\n", 2 * i + 1, data[2 * i + 1]);
+	skyCdf[i] = color.getmax();
 }

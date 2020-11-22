@@ -8,89 +8,11 @@
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
 
 //----------------------------------------------------------------------------------------------
-//------------------------------------- Tone mapping ---------------------------------------
-//----------------------------------------------------------------------------------------------
-
-__device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x)
-{
-	const float A = 0.15;
-	const float B = 0.50;
-	const float C = 0.10;
-	const float D = 0.20;
-	const float E = 0.02;
-	const float F = 0.30;
-
-	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
-}
-
-__global__ void ToneMapping(
-	SurfObj   colorBuffer,
-	Int2      size,
-	float*    exposure)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-	const float W = 11.2;
-
-	Float3 texColor = Load2DHalf4(colorBuffer, idx).xyz;
-	texColor *= exposure[0];
-
-	float ExposureBias = 2.0f;
-	Float3 curr = Uncharted2Tonemap(ExposureBias * texColor);
-
-	Float3 whiteScale = 1.0f/Uncharted2Tonemap(W);
-	Float3 color = curr * whiteScale;
-
-	Float3 retColor = clamp3f(pow3f(color, 1.0f / 2.2f), Float3(0), Float3(1));
-
-	Store2DHalf4(Float4(retColor, 1.0), colorBuffer, idx);
-}
-
-//----------------------------------------------------------------------------------------------
-//------------------------------------- Scale Filter to Output ---------------------------------------
-//----------------------------------------------------------------------------------------------
-
-__global__ void FilterScale(
-	SurfObj* renderTarget,
-	SurfObj  finalColorBuffer,
-	Int2                 outSize,
-	Int2                 texSize)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= outSize.x || idx.y >= outSize.y) return;
-
-	Float2 uv((float)idx.x / outSize.x, (float)idx.y / outSize.y);
-
-#if 1
-	Float3 sampledColor = SampleBicubicCatmullRomfp16(finalColorBuffer, uv, texSize).xyz;
-#else
-	Float3 sampledColor = Load2D(finalColorBuffer, idx).xyz;
-#endif
-
-	sampledColor = clamp3f(sampledColor, Float3(0), Float3(1));
-
-	surf2Dwrite(make_uchar4(sampledColor.x * 255,
-							sampledColor.y * 255,
-							sampledColor.z * 255,
-							1.0),
-		        renderTarget[0],
-				idx.x * 4,
-				idx.y);
-}
-
-//----------------------------------------------------------------------------------------------
 //------------------------------------- Histogram and Auto Exposure ---------------------------------------
 //----------------------------------------------------------------------------------------------
 
 __global__ void Histogram2(
-	uint*     histogram,
+	uint     *histogram,
 	SurfObj   InBuffer,
 	Int2      size)
 {
@@ -100,7 +22,7 @@ __global__ void Histogram2(
 	if (idx.x >= size.x || idx.y >= size.y) return;
 
 	Float3 color = Load2DHalf4(InBuffer, idx).xyz;
-	float luminance = color.max();//dot(color, Float3(0.3, 0.6, 0.1));
+	float luminance = color.getmax();//dot(color, Float3(0.3, 0.6, 0.1));
 	float logLuminance = log2f(luminance) * 0.1 + 0.75;
 	uint fBucket = (uint)rintf(clampf(logLuminance, 0.0, 1.0) * 63 * 0.99999);
 	atomicInc(&histogram[fBucket], size.x * size.y);
@@ -242,8 +164,8 @@ __global__ void DownScale4(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
 
 __device__ __inline__ float min3(float v1, float v2, float v3) { return min(min(v1, v2), v3); }
 __device__ __inline__ float max3(float v1, float v2, float v3) { return max(max(v1, v2), v3); }
-__device__ __inline__ Float3 min3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return Float3(min3(v1.x, v2.x, v3.x), min3(v1.y, v2.y, v3.y), min3(v1.z, v2.z, v3.z)); }
-__device__ __inline__ Float3 max3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return Float3(max3(v1.x, v2.x, v3.x), max3(v1.y, v2.y, v3.y), max3(v1.z, v2.z, v3.z)); }
+__device__ __inline__ Float3 min3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return min3f(min3f(v1, v2), v3); }
+__device__ __inline__ Float3 max3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return max3f(max3f(v1, v2), v3); }
 __device__ __inline__ void sort2(Float3& a, Float3& b) { if (a.x > b.x) { swap(a.x, b.x); } if (a.y > b.y) { swap(a.y, b.y); } if (a.z > b.z) { swap(a.z, b.z); } }
 __device__ __inline__ void sort3(Float3& v1, Float3& v2, Float3& v3) { sort2(v2, v3); sort2(v1, v2); sort2(v2, v3); }
 __device__ __inline__ void sort9(Float3* p)
@@ -266,53 +188,8 @@ __global__ void MedianFilter(
 {
 
 }
-
 //----------------------------------------------------------------------------------------------
-//------------------------------------- Temporal Filter ---------------------------------------
-//----------------------------------------------------------------------------------------------
-
-__global__ void TemporalFilter(
-	SurfObj   colorBuffer,
-	SurfObj   accumulateBuffer,
-	SurfObj   normalDepthBuffer,
-	SurfObj   normalDepthHistoryBuffer,
-	Int2      size)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= size.x || idx.y >= size.y) return;
-
-	// load buffers
-	Float3Ushort1 colorAndMask = Load2DHalf3Ushort1(colorBuffer, idx);
-	Float3 color = colorAndMask.xyz;
-	ushort mask = colorAndMask.w;
-
-	Float3Ushort1 colorAndMaskHistory = Load2DHalf3Ushort1(accumulateBuffer, idx);
-	Float3 colorHistory = colorAndMaskHistory.xyz;
-	ushort maskHistory = colorAndMaskHistory.w;
-
-	Float2 normalAndDepth = Load2DFloat2(normalDepthBuffer, idx);
-	Float3 normal = DecodeNormal_R11_G10_B11(normalAndDepth.x);
-	float depth = normalAndDepth.y;
-
-	Float2 normalAndDepthHistory = Load2DFloat2(normalDepthHistoryBuffer, idx);
-	Float3 normalHistory = DecodeNormal_R11_G10_B11(normalAndDepthHistory.x);
-	float depthHistory = normalAndDepthHistory.y;
-
-	// Early return for background pixel
-	if (depth >= RayMax) { return; }
-
-	float blendFactor = 1.0f / 32.0f;
-	Float3 outColor = color * blendFactor + colorHistory * (1.0f - blendFactor);
-
-	// store to current
-	Store2DHalf3Ushort1( { outColor, mask } , colorBuffer, idx);
-}
-
-//----------------------------------------------------------------------------------------------
-//------------------------------------- Atous Filter ---------------------------------------
+//------------------------------------- Bloom ---------------------------------------
 //----------------------------------------------------------------------------------------------
 
 __constant__ float filterKernel[25] = {
@@ -321,107 +198,6 @@ __constant__ float filterKernel[25] = {
 		3.0 / 128.0, 3.0 / 32.0, 9.0 / 64.0,  3.0 / 32.0, 3.0 / 128.0,
 		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
 		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0 };
-
-__global__ void AtousFilter(
-	SurfObj   colorBuffer,
-	SurfObj   accumulateBuffer,
-	SurfObj   normalDepthBuffer,
-	SurfObj   normalDepthHistoryBuffer,
-	Int2      size)
-{
-	Int2 idx2 (blockIdx.x * 28 + threadIdx.x - 2, blockIdx.y * 28 + threadIdx.y - 2); // index for pixel 28 x 28
-	Int2 idx3 (threadIdx.x, threadIdx.y); // index for shared memory buffer
-
-	// read global memory buffer. One-to-one mapping
-	Float3Ushort1 colorAndMask = Load2DHalf3Ushort1(colorBuffer, idx2);
-	Float3 colorValue = colorAndMask.xyz;
-	ushort maskValue = colorAndMask.w;
-
-	Float2 normalAndDepth  = Load2DFloat2(normalDepthBuffer, idx2);
-	float normalEncoded = normalAndDepth.x;
-	Float3 normalValue = DecodeNormal_R11_G10_B11(normalEncoded);
-	float depthValue = normalAndDepth.y;
-
-	// Save global memory to shared memory. One-to-one mapping
-	struct AtrousLDS {
-		Float3 color;
-		float depth;
-		Float3 normal;
-		ushort mask;
-	};
-	__shared__ AtrousLDS sharedBuffer[32][32];
-
-	// -------------------------------- load lds with history --------------------------------
-	sharedBuffer[threadIdx.x][threadIdx.y] = { colorValue, depthValue, normalValue, maskValue };
-	__syncthreads();
-
-	// Border margin pixel finish work
-	if (idx3.x < 2 || idx3.y < 2 || idx3.x > 29 || idx3.y > 29) { return; }
-	// Early return for background pixel
-	if (depthValue >= RayMax) { return; }
-
-	// -------------------------------- atrous filter --------------------------------
-	// Reference: https://jo.dreggn.org/home/2010_atrous.pdf
-	Float3 sumOfColor = 0;
-	float sumOfWeight = 0;
-	for (int i = 0; i < 25; ++i)
-	{
-		// get correct uv offset
-		Int2 uv(threadIdx.x + (i % 5) - 2, threadIdx.y + (i / 5) - 2);
-
-		// read lds
-		AtrousLDS bufferReadTmp = sharedBuffer[uv.x][uv.y];
-
-		// get data
-		Float3 color = bufferReadTmp.color;
-		float depth = bufferReadTmp.depth;
-		Float3 normal = bufferReadTmp.normal;
-		ushort mask = bufferReadTmp.mask;
-
-		Float3 t;
-		float dist2;
-		float weight = 1.0f;
-
-		// normal diff factor
-		t = normalValue - normal;
-        dist2 = dot(t,t);
-        weight *= min1f(expf(-(dist2) / 0.1f), 1.0f);
-
-		// color diff factor
-        t = colorValue - color;
-        dist2 = dot(t,t);
-        weight *= min1f(expf(-(dist2) / 0.1f), 1.0f);
-
-		// depth diff fatcor
-		dist2 = depthValue - depth;
-		dist2 = dist2 * dist2;
-        weight *= min1f(expf(-(dist2) / 0.1f), 1.0f);
-
-		// material mask diff factor
-		dist2 = (maskValue != mask) ? 1.0f : 0.0f;
-		weight *= min1f(expf(-(dist2) / 0.1f), 1.0f);
-
-		// gaussian filter weight
-		weight *= filterKernel[i];
-
-		// accumulate
-        sumOfColor += color * weight;
-        sumOfWeight += weight;
-	}
-
-	Float3 finalColor = sumOfColor / sumOfWeight;
-
-	// store to current
-	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, idx2);
-
-	// store to history
-	Store2DHalf3Ushort1( { finalColor, maskValue } , accumulateBuffer, idx2);
-	Store2DFloat2( { normalEncoded, depthValue } , normalDepthHistoryBuffer, idx2);
-}
-
-//----------------------------------------------------------------------------------------------
-//------------------------------------- Bloom ---------------------------------------
-//----------------------------------------------------------------------------------------------
 
 __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, float* exposure)
 {
@@ -434,7 +210,7 @@ __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, fl
 	Float3 inColor = Load2DHalf4(inBuffer, idx2).xyz;
 
 	// discard dark pixels
-	float lum = inColor.max();
+	float lum = inColor.getmax();
 	float brightLum = exposure[2];
 	//inColor = lum > brightLum ? inColor : 0;
 	inColor *= max(sqrtf(lum * lum - brightLum), 0.0);
@@ -466,8 +242,8 @@ __global__ void Bloom(SurfObj colorBuffer, SurfObj buffer4, SurfObj buffer16, In
 	if (idx.x >= size.x || idx.y >= size.y) return;
 	Float2 uv((float)idx.x / size.x, (float)idx.y / size.y);
 
-	Float3 sampledColor4 = SampleBicubicCatmullRomfp16(buffer4, uv, size4).xyz;
-	Float3 sampledColor16 = SampleBicubicCatmullRomfp16(buffer16, uv, size16).xyz;
+	Float3 sampledColor4 = SampleBicubicCatmullRom(buffer4, Load2DHalf4ToFloat3, uv, size4);
+	Float3 sampledColor16 = SampleBicubicCatmullRom(buffer16, Load2DHalf4ToFloat3, uv, size16);
 	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
 
 	color = color + (sampledColor4 + sampledColor16) * 0.05;
@@ -633,3 +409,146 @@ __global__ void BilateralFilter(
     // Store2D(Float4(t / sum), colorBuffer, Int2(x, y));
 }
 
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Tone mapping ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
+__device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x)
+{
+	const float A = 0.15;
+	const float B = 0.50;
+	const float C = 0.10;
+	const float D = 0.20;
+	const float E = 0.02;
+	const float F = 0.30;
+
+	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+}
+
+__global__ void ToneMapping(
+	SurfObj   colorBuffer,
+	Int2      size,
+	float*    exposure)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= size.x || idx.y >= size.y) return;
+
+	const float W = 11.2;
+
+	Float3 texColor = Load2DHalf4(colorBuffer, idx).xyz;
+	texColor *= exposure[0];
+
+	float ExposureBias = 2.0f;
+	Float3 curr = Uncharted2Tonemap(ExposureBias * texColor);
+
+	Float3 whiteScale = 1.0f/Uncharted2Tonemap(W);
+	Float3 color = curr * whiteScale;
+
+	Float3 retColor = clamp3f(pow3f(color, 1.0f / 2.2f), Float3(0), Float3(1));
+
+	Store2DHalf4(Float4(retColor, 1.0), colorBuffer, idx);
+}
+
+//----------------------------------------------------------------------------------------------
+//------------------------------------- Scale Filter to Output ---------------------------------------
+//----------------------------------------------------------------------------------------------
+
+__device__ __forceinline__ Float3 SoftMin(Float3 **a, int x, int y)
+{
+	Float3 tmp1 = min3f3(a[x][y], a[x - 1][y], a[x + 1][y]);
+	Float3 tmp2 = min3f3(tmp1, a[x][y - 1], a[x][y + 1]);
+	Float3 tmp3 = min3f3(tmp2, a[x - 1][y - 1], a[x - 1][y + 1]);
+	Float3 tmp4 = min3f3(tmp3, a[x + 1][y - 1], a[x + 1][y + 1]);
+	return (tmp2 + tmp4);
+}
+
+__global__ void SharpeningFilter(SurfObj colorBuffer, Int2 texSize)
+{
+	// Reference: https://github.com/GPUOpen-Effects/FidelityFX-CAS
+
+	const float sharpness = 1.0f;
+
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= texSize.x || idx.y >= texSize.y) return;
+
+	Float3 color[3][3];
+
+	#pragma unroll
+	for (int i = 0; i <= 2; ++i)
+	{
+		#pragma unroll
+		for (int j = 0; j <= 2; ++j)
+		{
+			color[i][j] = Load2DHalf4(colorBuffer, idx + Int2(i - 1, j - 1)).xyz;
+		}
+	}
+
+	// ----------------soft max------------------
+	//        a b c             b
+	// (max ( d e f ) + max ( d e f )) * 0.5
+	//        g h i             h
+	int x = 1, y = 1;
+	Float3 tmp1 = max3f3(color[x][y], color[x - 1][y], color[x + 1][y]);
+	Float3 tmp2 = max3f3(tmp1, color[x][y - 1], color[x][y + 1]);
+	Float3 tmp3 = max3f3(tmp2, color[x - 1][y - 1], color[x - 1][y + 1]);
+	Float3 tmp4 = max3f3(tmp3, color[x + 1][y - 1], color[x + 1][y + 1]);
+	Float3 softmax = tmp2 + tmp4;
+
+	// soft min
+	tmp1 = min3f3(color[x][y], color[x - 1][y], color[x + 1][y]);
+	tmp2 = min3f3(tmp1, color[x][y - 1], color[x][y + 1]);
+	tmp3 = min3f3(tmp2, color[x - 1][y - 1], color[x - 1][y + 1]);
+	tmp4 = min3f3(tmp3, color[x + 1][y - 1], color[x + 1][y + 1]);
+	Float3 softmin = tmp2 + tmp4;
+
+	// amp factor
+	Float3 amp = clamp3f(min3f(softmin, 2.0f - softmax) / softmax);
+	amp = rsqrt3f(amp);
+
+	// weight
+	float peak = 8.0f - 3.0f * sharpness;
+    Float3 w = - Float3(1.0f) / (amp * peak);
+
+	// 0 w 0
+	// w 1 w
+	// 0 w 0
+	Float3 outColor = (color[0][1] + color[2][1] + color[1][0] + color[1][2]) * w + color[1][1];
+	outColor /= (Float3(1.0f) + Float3(4.0f) * w);
+}
+
+__global__ void BicubicFilterScale(
+	SurfObj* renderTarget,
+	SurfObj  finalColorBuffer,
+	Int2                 outSize,
+	Int2                 texSize)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= outSize.x || idx.y >= outSize.y) return;
+
+	Float2 uv((float)idx.x / outSize.x, (float)idx.y / outSize.y);
+
+#if 1
+	Float3 sampledColor = SampleBicubicCatmullRom(finalColorBuffer, Load2DHalf4ToFloat3, uv, texSize);
+#else
+	Float3 sampledColor = Load2D(finalColorBuffer, idx).xyz;
+#endif
+
+	sampledColor = clamp3f(sampledColor, Float3(0), Float3(1));
+
+	surf2Dwrite(make_uchar4(sampledColor.x * 255,
+							sampledColor.y * 255,
+							sampledColor.z * 255,
+							1.0),
+		        renderTarget[0],
+				idx.x * 4,
+				idx.y);
+}

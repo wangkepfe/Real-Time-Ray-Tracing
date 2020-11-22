@@ -52,16 +52,29 @@ __device__ __forceinline__ Float2 UniformSampleDisk(Float2 u) {
     return Float2(r * cosf(theta), r * sinf(theta));
 }
 
+#define DISK_SAMPLE_CONCENTRIC 1
+#define DISK_SAMPLE_UNIFORM !DISK_SAMPLE_CONCENTRIC
+
 __device__ __forceinline__ Float3 CosineSampleHemisphere(Float2 u)
 {
+#if DISK_SAMPLE_CONCENTRIC
+	Float2 d = ConcentricSampleDisk(u);
+#elif DISK_SAMPLE_UNIFORM
 	Float2 d = UniformSampleDisk(u);
+#endif
+
 	float z = sqrtf(max1f(0.0f, 1.0f - d.x * d.x - d.y * d.y));
 	return Float3(d.x, z, d.y);
 }
 
 __device__ __forceinline__ Float3 CosineSampleHemisphere(Float2 u, const Float3& x, const Float3& y, const Float3& z)
 {
+#if DISK_SAMPLE_CONCENTRIC
+	Float2 d = ConcentricSampleDisk(u);
+#elif DISK_SAMPLE_UNIFORM
 	Float2 d = UniformSampleDisk(u);
+#endif
+
 	float dz = sqrtf(max1f(0.0f, 1.0f - d.x * d.x - d.y * d.y));
 	return x * d.x + y * d.y + z * dz;
 }
@@ -80,8 +93,8 @@ __device__ __forceinline__ void LambertianSample(
 	wo.normalize();
 }
 
-__device__ __forceinline__ Float3 LambertianBsdf(const Float3& albedo) { return albedo / PI; }
-__device__ __forceinline__ float  LambertianPdf(const Float3& wo, const Float3& n) { return max1f(dot(wo, n), 0) / PI; }
+__device__ __forceinline__ Float3 LambertianBsdf(const Float3& albedo) { return albedo / M_PI; }
+__device__ __forceinline__ float  LambertianPdf(const Float3& wo, const Float3& n) { return max(dot(wo, n), 0.0f) / M_PI; }
 __device__ __forceinline__ Float3 LambertianBsdfOverPdf(const Float3& albedo) { return albedo; }
 
 __device__ __forceinline__ float FresnelDialetric(float etaI, float etaT, float cosThetaI, float cosThetaT)
@@ -147,12 +160,13 @@ __device__ void PerfectReflectionRefraction(float etaI, float etaT, bool isRayIn
 	nextRayDir.normalize();
 }
 
-__device__ void MacrofacetReflectionSample(
+__forceinline__ __device__ void MacrofacetReflectionSample(
 	Float2 r,
 
 	const Float3& raydir,
 	Float3& nextdir,
 	const Float3& normal,
+	const Float3& surfaceNormal,
 
 	Float3& brdfOverPdf,
 	Float3& brdf,
@@ -180,8 +194,8 @@ __device__ void MacrofacetReflectionSample(
 	sampledNormal.normalize();
 
 	// reflect
-	nextdir = raydir - sampledNormal * dot(sampledNormal, raydir) * 2.0f;
-	nextdir.normalize();
+	nextdir = normalize(reflect3f(raydir, sampledNormal));
+	nextdir = dot(nextdir, surfaceNormal) < 0 ? normalize(reflect3f(nextdir, surfaceNormal)) : nextdir;
 
 	// Fresnel
 	float cosThetaWoWh = max(0.01f, dot(sampledNormal, nextdir));
@@ -198,7 +212,7 @@ __device__ void MacrofacetReflectionSample(
 	float cosTheta2Wh = cosThetaWh * cosThetaWh;
 	float tanTheta2Wh = (1.0f - cosTheta2Wh) / cosTheta2Wh;
 	float e = tanTheta2Wh / alpha2 + 1.0f;
-	float D = 1.0f / (PI * (alpha2 * cosTheta2Wh * cosTheta2Wh) * (e * e));
+	float D = 1.0f / (M_PI * (alpha2 * cosTheta2Wh * cosTheta2Wh) * (e * e));
 
 	// brdf
 	brdf = (albedo * F) * (D * G) / (4.0f * cosThetaWo * cosThetaWi);
@@ -210,7 +224,7 @@ __device__ void MacrofacetReflectionSample(
 	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(2.0f));
 }
 
-__device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& pdf,const Float3& wn, const Float3& wo, const Float3& wi, const Float3& F0, Float3& albedo, float alpha)
+__forceinline__ __device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& pdf,const Float3& wn, const Float3& wo, const Float3& wi, const Float3& F0, Float3& albedo, float alpha)
 {
 	float alpha2 = alpha * alpha;
 	Float3 wh    = normalize(wi + wo);
@@ -230,7 +244,7 @@ __device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& p
 	float cosTheta2Wh = cosThetaWh * cosThetaWh;
 	float tanTheta2Wh = (1.0f - cosTheta2Wh) / cosTheta2Wh;
 	float e           = tanTheta2Wh / alpha2 + 1.0f;
-	float D           = 1.0f / (PI * (alpha2 * cosTheta2Wh * cosTheta2Wh) * (e * e));
+	float D           = 1.0f / (M_PI * (alpha2 * cosTheta2Wh * cosTheta2Wh) * (e * e));
 
 	// brdf
 	brdf = (albedo * F) * (D * G) / (4.0f * cosThetaWo * cosThetaWi);
@@ -252,27 +266,27 @@ __device__ __forceinline__ Float3 UniformSampleCone(const Float2 &u, float cosTh
 
 __device__ __forceinline__ float UniformConePdf(float cosThetaMax)
 {
-	return 1 / (2 * PI * (1.0 - cosThetaMax));
+	return 1 / (2 * M_PI * (1.0 - cosThetaMax));
 }
 
 __device__ __forceinline__ Float3 UniformSampleSphere(const Float2 &u)
 {
     float z = 1 - 2 * u[0];
     float r = sqrtf(max1f((float)0, (float)1 - z * z));
-    float phi = 2 * PI * u[1];
+    float phi = 2 * M_PI * u[1];
     return Float3(r * cosf(phi), r * sinf(phi), z);
 }
 
-__device__ __forceinline__ constexpr float UniformSpherePdf() { return 1.0f / (4.0f * PI); }
+__device__ __forceinline__ constexpr float UniformSpherePdf() { return 1.0f / (4.0f * M_PI); }
 
 __device__ __forceinline__ Float3 UniformSampleHemisphere(const Float2 &u)
 {
     float z = u[0];
     float r = sqrtf(max1f((float)0, (float)1. - z * z));
-    float phi = 2 * PI * u[1];
+    float phi = 2 * M_PI * u[1];
     return Float3(r * cosf(phi), r * sinf(phi), z);
 }
 
-__device__ __forceinline__ constexpr float UniformHemispherePdf() { return 1.0f / (2.0f * PI); }
+__device__ __forceinline__ constexpr float UniformHemispherePdf() { return 1.0f / (2.0f * M_PI); }
 
 __device__ __forceinline__ constexpr float PowerHeuristic(float f, float g) { return (f * f) / (f * f + g * g); }

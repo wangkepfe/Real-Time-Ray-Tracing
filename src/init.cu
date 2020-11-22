@@ -1,115 +1,144 @@
 
 #include "kernel.cuh"
-#include "textureUtils.cuh"
+#include "fileUtils.cuh"
 #include "blueNoiseRandGenData.h"
 
-inline float TrowbridgeReitzRoughnessToAlpha(float roughness)
+__global__ void InitSampleCountBuffer(SurfObj buffer, Int2 bufferSize)
 {
-    roughness = max1f(roughness, (float)1e-3);
-    float x = std::log(roughness);
-    return 1.62142f + 0.819955f * x + 0.1734f * x * x + 0.0171201f * x * x * x + 0.000640711f * x * x * x * x;
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (idx.x >= bufferSize.x || idx.y >= bufferSize.y) return;
+
+	//Store2D_uchar1(1, buffer, idx);
+	surf2Dwrite(make_uchar1(1), buffer, idx.x, idx.y, cudaBoundaryModeClamp);
 }
 
 void RayTracer::init(cudaStream_t* cudaStreams)
 {
+	maxRenderWidth = screenWidth / 2 * 3;
+	maxRenderHeight = screenHeight / 2 * 3;
+
+	renderWidth = maxRenderWidth;
+	renderHeight = maxRenderHeight;
+
+	uint i;
+
 	// set streams
 	streams = cudaStreams;
-
-	// init terrain
-	//terrain.generateHeightMap();
-
-	// AABB
-	//int numAabbs;
-	//AABB* aabbs = terrain.generateAabbs(numAabbs);
-	int numAabbs = 3;
-	AABB* aabbs = new AABB[numAabbs];
-	aabbs[0] = AABB({-0.03f, 0.005f, 0.0f}, 0.01f);
-	aabbs[1] = AABB({-0.01f, 0.005f, 0.0f}, 0.01f);
-	aabbs[2] = AABB({0.025f, 0.005f, 0.0f}, 0.01f);
-
-	// sphere
-	numSpheres = 3;
-	spheres    = new Sphere[numSpheres];
-	spheres[0] = Sphere({-0.03f, 0.015f, 0.0f}, 0.005f);
-	spheres[1] = Sphere({0.025f, 0.015f, 0.0f}, 0.005f);
-	spheres[2] = Sphere({-0.01f, 0.015f, 0.0f}, 0.005f);
-
-	// triangles
-	numTriangles   = 2;
-	triangles = new Triangle[numTriangles];
-	triangles[0] = Triangle({0.0f, 0.0f, 0.0f}, {0.02f, 0.0f, 0.0f}, {0.02f, 0.02f, 0.0f});
-	triangles[1] = Triangle({0.0f, 0.0f, 0.0f}, {0.02f, 0.02f, 0.0f}, {0.0f, 0.02f, 0.0f});
-	//for (int i = 0 ; i < numTriangles; ++i) { triangles[i].WatertightTransform(); }
-
-	// surface materials
-	const int numMaterials     = 7;
-	SurfaceMaterial* materials = new SurfaceMaterial[numMaterials];
-
-	materials[0].type          = EMISSIVE;
-	materials[0].albedo        = Float3(0.1f, 0.2f, 0.9f);
-
-	materials[1].type          = PERFECT_FRESNEL_REFLECTION_REFRACTION;
-
-	materials[2].type          = EMISSIVE;
-	materials[2].albedo        = Float3(0.9f, 0.2f, 0.1f);
-
-	materials[3].type          = LAMBERTIAN_DIFFUSE;
-	materials[3].albedo        = Float3(0.9f);
-
-	materials[4].type          = MICROFACET_REFLECTION;
-	materials[4].albedo        = Float3(0.9f);
-	materials[4].F0            = Float3(0.56, 0.57, 0.58);
-	materials[4].alpha         = 0.05f;
-
-	materials[5].type          = MICROFACET_REFLECTION;
-	materials[5].albedo        = Float3(0.9f);
-	materials[5].F0            = Float3(0.56, 0.57, 0.58);
-	materials[5].alpha         = 0.01f;
-
-	materials[6].type          = LAMBERTIAN_DIFFUSE;
-	materials[6].useTex0       = true;
-	materials[6].texId0        = 0;
-
-	// material index for each object
-	const int numObjects = numAabbs + numSpheres;
-	int* materialsIdx = new int[numObjects];
-
-	// sphere
-	materialsIdx[0] = 0;
-	materialsIdx[1] = 2;
-	materialsIdx[2] = 1;
-
-	// aabb
-	materialsIdx[3] = 3;
-	materialsIdx[4] = 4;
-	materialsIdx[5] = 5;
-
-	// triangle
-	materialsIdx[6] = 5;
-	materialsIdx[7] = 5;
-
-	// light source
-	numSphereLights = 2;
-	sphereLights = new Sphere[numSphereLights];
-	sphereLights[0] = spheres[0];
-	sphereLights[1] = spheres[1];
 
 	// init cuda
 	gpuDeviceInit(0);
 
+	// scope for shorter cpu buffer lifetime
+	{
+		// load triangles
+		std::vector<Triangle> h_triangles;
+		//const chat* filename = "resources/models/testCube.obj";
+		const char* filename = "resources/models/monkey.obj";
+		LoadScene(filename, h_triangles);
+		triCount = static_cast<uint>(h_triangles.size());
+
+		GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCount * sizeof(Triangle)));
+		GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCount * sizeof(Triangle), cudaMemcpyHostToDevice));
+	}
+
+	// bvh
+	GpuErrorCheck(cudaMalloc((void**)& triangles, triCount * sizeof(Triangle)));
+	GpuErrorCheck(cudaMalloc((void**)& aabbs, triCount * sizeof(AABB)));
+
+	GpuErrorCheck(cudaMalloc((void**) &sceneBoundingBox, sizeof(AABB)));
+
+	GpuErrorCheck(cudaMalloc((void**)& morton, BVHcapacity * sizeof(uint)));
+	GpuErrorCheck(cudaMemset(morton, UINT_MAX, BVHcapacity * sizeof(uint)));
+
+	GpuErrorCheck(cudaMalloc((void**)& reorderIdx, BVHcapacity * sizeof(uint)));
+
+	GpuErrorCheck(cudaMalloc((void**)& bvhNodes, (triCount - 1) * sizeof(BVHNode)));
+	GpuErrorCheck(cudaMalloc((void**)& isAabbDone, (triCount - 1) * sizeof(uint)));
+	GpuErrorCheck(cudaMemset(isAabbDone, 0, (triCount - 1) * sizeof(uint)));
+
+	// AABB
+	int numAabbs = 2;
+	sceneAabbs = new AABB[numAabbs];
+	i = 0;
+	sceneAabbs[i++] = AABB({0.0f, 0.0f, 0.0f}, 0.01f);
+	sceneAabbs[i++] = AABB({0.0f, 0.0f, 0.0f}, 0.01f);
+
+	// sphere
+	numSpheres = 2;
+	spheres    = new Sphere[numSpheres];
+	i = 0;
+	spheres[i++] = Sphere({0.0f, 1.0f, 4.0f}, 1.0f);
+	spheres[i++] = Sphere({0.0f, 1.0f, -4.0f}, 1.0f);
+
+	// surface materials
+	const int numMaterials     = 10;
+	SurfaceMaterial* materials = new SurfaceMaterial[numMaterials];
+	i = 0;
+	materials[i].type          = EMISSIVE;
+	materials[i].albedo        = Float3(0.1f, 0.2f, 0.9f);
+	++i;
+	materials[i].type          = PERFECT_FRESNEL_REFLECTION_REFRACTION;
+	++i;
+	materials[i].type          = EMISSIVE;
+	materials[i].albedo        = Float3(0.9f, 0.2f, 0.1f);
+	++i;
+	materials[i].type          = LAMBERTIAN_DIFFUSE;
+	materials[i].albedo        = Float3(0.9f);
+	++i;
+	materials[i].type          = MICROFACET_REFLECTION;
+	materials[i].albedo        = Float3(0.9f);
+	materials[i].F0            = Float3(0.56f, 0.57f, 0.58f);
+	materials[i].alpha         = 0.05f;
+	++i;
+	materials[i].type          = MICROFACET_REFLECTION;
+	materials[i].albedo        = Float3(0.9f);
+	materials[i].F0            = Float3(0.56f, 0.57f, 0.58f);
+	materials[i].alpha         = 0.01f;
+	++i;
+	materials[i].type          = LAMBERTIAN_DIFFUSE;
+	materials[i].useTex0       = true;
+	materials[i].texId0        = 0;
+	++i;
+	materials[i].type          = LAMBERTIAN_DIFFUSE;
+	materials[i].albedo        = Float3(0.9f, 0.2f, 0.1f);
+	++i;
+	materials[i].type          = LAMBERTIAN_DIFFUSE;
+	materials[i].albedo        = Float3(0.2f, 0.9f, 0.1f);
+	++i;
+	materials[i].type          = LAMBERTIAN_DIFFUSE;
+	materials[i].albedo        = Float3(0.1f, 0.2f, 0.9f);
+
+
+	// number of objects
+	const int numObjects = triCount + numSpheres;
+
+	// material index
+	int* materialsIdx = new int[numObjects];
+	for (i = 0; i < triCount; ++i)
+	{
+		materialsIdx[i] = 4;
+	}
+	materialsIdx[i++] = 0;
+	materialsIdx[i++] = 2;
+
+	// light source
+	numSphereLights = 2;
+	sphereLights = new Sphere[numSphereLights];
+	for (i = 0; i < numSphereLights; ++i)
+	{
+		sphereLights[i] = spheres[i];
+	}
+
 	// constant buffer
-	cbo.maxSceneLoop = 4;
 	cbo.frameNum = 0;
-	cbo.aaSampleNum = 8;
-	cbo.bufferSize = renderBufferSize;
-	cbo.bufferDim = UInt2(renderWidth, renderHeight);
+	cbo.bvhDebugLevel = -1;
 
 	// launch param
 	blockDim = dim3(8, 8, 1);
 	gridDim = dim3(divRoundUp(renderWidth, blockDim.x), divRoundUp(renderHeight, blockDim.y), 1);
-
-	cbo.gridDim = UInt2(gridDim.x, gridDim.y);
-	cbo.gridSize = gridDim.x * gridDim.y;
 
 	scaleBlockDim = dim3(8, 8, 1);
 	scaleGridDim = dim3(divRoundUp(screenWidth, scaleBlockDim.x), divRoundUp(screenHeight, scaleBlockDim.y), 1);
@@ -117,6 +146,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	// ------------------------ surface/texture object ---------------------------
 	cudaChannelFormatDesc format_color_RGB16_mask_A16 = cudaCreateChannelDescHalf4();
 	cudaChannelFormatDesc format_normal_R11_G10_B11_depth_R32 = cudaCreateChannelDesc<float2>();
+	cudaChannelFormatDesc format_motionVector_UV16 = cudaCreateChannelDescHalf2();
+	cudaChannelFormatDesc format_sampleCount_R8 = cudaCreateChannelDesc<uchar1>();
 
 	// resource desription
 	cudaResourceDesc resDesc = {};
@@ -148,6 +179,18 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMallocArray(&normalDepthBufferArrayB, &format_normal_R11_G10_B11_depth_R32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = normalDepthBufferArrayB;
 	GpuErrorCheck(cudaCreateSurfaceObject(&normalDepthBufferB, &resDesc));
+
+	// motion vector buffer
+	GpuErrorCheck(cudaMallocArray(&motionVectorBufferArray, &format_motionVector_UV16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = motionVectorBufferArray;
+	GpuErrorCheck(cudaCreateSurfaceObject(&motionVectorBuffer, &resDesc));
+
+	// sample count buffer
+	GpuErrorCheck(cudaMallocArray(&sampleCountBufferArray, &format_sampleCount_R8, gridDim.x, gridDim.y, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = sampleCountBufferArray;
+	GpuErrorCheck(cudaCreateSurfaceObject(&sampleCountBuffer, &resDesc));
+
+	InitSampleCountBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (sampleCountBuffer, Int2(gridDim.x, gridDim.y));
 
 	// color buffer 1/4 size
 	bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
@@ -200,28 +243,23 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	// scene
 	GpuErrorCheck(cudaMalloc((void**)& d_spheres          , numSpheres *       sizeof(Sphere)));
-	GpuErrorCheck(cudaMalloc((void**)& d_aabbs            , numAabbs *         sizeof(AABB)));
+	GpuErrorCheck(cudaMalloc((void**)& d_sceneAabbs       , numAabbs *         sizeof(AABB)));
 	GpuErrorCheck(cudaMalloc((void**)& d_materialsIdx     , numObjects *       sizeof(int)));
 	GpuErrorCheck(cudaMalloc((void**)& d_surfaceMaterials , numMaterials *     sizeof(SurfaceMaterial)));
 	GpuErrorCheck(cudaMalloc((void**)& d_sphereLights     , numSphereLights *  sizeof(Float4)));
-	GpuErrorCheck(cudaMalloc((void**)& d_triangles        , numTriangles *     sizeof(Triangle)));
 
 	GpuErrorCheck(cudaMemcpy(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_surfaceMaterials , materials    , numMaterials *    sizeof(SurfaceMaterial), cudaMemcpyHostToDevice));
-	GpuErrorCheck(cudaMemcpy(d_aabbs            , aabbs        , numAabbs *        sizeof(AABB)           , cudaMemcpyHostToDevice));
+	GpuErrorCheck(cudaMemcpy(d_sceneAabbs       , sceneAabbs   , numAabbs *        sizeof(AABB)           , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_materialsIdx     , materialsIdx , numObjects *      sizeof(int)            , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice));
-	GpuErrorCheck(cudaMemcpy(d_triangles        , triangles    , numTriangles *    sizeof(Triangle)       , cudaMemcpyHostToDevice));
 
 	// setup scene
 	d_sceneGeometry.numSpheres      = numSpheres;
 	d_sceneGeometry.spheres         = d_spheres;
 
 	d_sceneGeometry.numAabbs        = numAabbs;
-	d_sceneGeometry.aabbs           = d_aabbs;
-
-	d_sceneGeometry.numTriangles    = numTriangles;
-	d_sceneGeometry.triangles       = d_triangles;
+	d_sceneGeometry.aabbs           = d_sceneAabbs;
 
 	d_sceneMaterial.numSphereLights = numSphereLights;
 	d_sceneMaterial.sphereLights    = d_sphereLights;
@@ -229,6 +267,10 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	d_sceneMaterial.materials       = d_surfaceMaterials;
 	d_sceneMaterial.materialsIdx    = d_materialsIdx;
 	d_sceneMaterial.numMaterials    = numMaterials;
+
+	d_sceneGeometry.triangles       = triangles;
+	d_sceneGeometry.bvhNodes        = bvhNodes;
+	d_sceneGeometry.numTriangles    = triCount;
 
 	delete[] materials;
 	delete[] materialsIdx;
@@ -238,13 +280,12 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	d_randGen = h_randGen;
 
 	// camera
-	Camera& camera = cbo.camera;
-	CameraSetup(camera);
+	CameraSetup(cbo.camera);
 
 	// textures
-	LoadTextureRgba8("resources/textures/Checker.png", texArrayUv, sceneTextures.uv);
-	LoadTextureRgb8("resources/textures/sand.png", texArraySandAlbedo, sceneTextures.sandAlbedo);
-	LoadTextureRgb8("resources/textures/sand_n.png", texArraySandNormal, sceneTextures.sandNormal);
+	texArrayUv = LoadTextureRgba8("resources/textures/colorChecker.png", sceneTextures.uv);
+	//texArraySandAlbedo = LoadTextureRgb8("resources/textures/sand.png", sceneTextures.sandAlbedo);
+	//texArraySandNormal = LoadTextureRgb8("resources/textures/sand_n.png", sceneTextures.sandNormal);
 
 	// timer init
 	timer.init();
@@ -252,17 +293,21 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 void RayTracer::CameraSetup(Camera& camera)
 {
-	cameraFocusPos = Float3(0, 0.005f, 0);
-	camera.pos = cameraFocusPos + Float3(0.0f, 0.003f, -0.05f);
+	//cameraFocusPos = Float3(0, 1.0f, 0);
+	//camera.pos = cameraFocusPos + Float3(7.3f, 2.0f, -6.9f);
+	camera.pos = Float3(7.3f, 2.0f, -6.9f);
 
-	Float3 cameraLookAtPoint = cameraFocusPos;
-	Float3 camToObj = cameraLookAtPoint - camera.pos;
+	//Float3 cameraLookAtPoint = cameraFocusPos;
+	//Float3 camToObj = cameraLookAtPoint - camera.pos;
 
-	camera.dir = normalize(camToObj);
+	//camera.dir = normalize(camToObj);
+	camera.yaw = 0;
+	camera.pitch = 0;
 	camera.up  = { 0.0f, 1.0f, 0.0f };
 
-	camera.focal = camToObj.length();
-	camera.aperture = 0.0001f;
+	//camera.focal = camToObj.length();
+	camera.focal = 5.0f;
+	camera.aperture = 0.000001f;
 
 	camera.resolution = { (float)renderWidth, (float)renderHeight };
 	camera.fov.x = 90.0f * Pi_over_180;
@@ -272,13 +317,17 @@ void RayTracer::CameraSetup(Camera& camera)
 
 void RayTracer::cleanup()
 {
-	// free cpu buffer
-	delete[] aabbs;
-	delete[] spheres;
-	delete[] sphereLights;
-	delete[] triangles;
-
 	// ---------------- Destroy surface objects ----------------------
+	// bvh
+	cudaFree(constTriangles);
+	cudaFree(triangles);
+	cudaFree(sceneAabbs);
+	cudaFree(sceneBoundingBox);
+	cudaFree(morton);
+	cudaFree(reorderIdx);
+	cudaFree(bvhNodes);
+	cudaFree(isAabbDone);
+
 	// color buffer
     cudaDestroySurfaceObject(colorBufferA);
 	cudaDestroySurfaceObject(colorBufferB);
@@ -305,13 +354,21 @@ void RayTracer::cleanup()
 	cudaFreeArray(normalDepthBufferArrayA);
 	cudaFreeArray(normalDepthBufferArrayB);
 
+	// motion vector buffer
+	cudaDestroySurfaceObject(motionVectorBuffer);
+	cudaFreeArray(motionVectorBufferArray);
+
+	// sample count buffer
+	cudaDestroySurfaceObject(sampleCountBuffer);
+	cudaFreeArray(sampleCountBufferArray);
+
 	// ---------------------- destroy texture objects --------------------------
 	cudaDestroyTextureObject(sceneTextures.sandAlbedo);
 	cudaDestroyTextureObject(sceneTextures.uv);
 	cudaDestroyTextureObject(sceneTextures.sandNormal);
-	cudaFreeArray(texArraySandAlbedo);
-	cudaFreeArray(texArrayUv);
-	cudaFreeArray(texArraySandNormal);
+	if (texArraySandAlbedo != nullptr) cudaFreeArray(texArraySandAlbedo);
+	if (texArrayUv         != nullptr) cudaFreeArray(texArrayUv);
+	if (texArraySandNormal != nullptr) cudaFreeArray(texArraySandNormal);
 
 	// sky
 	cudaDestroyTextureObject(skyTex);
@@ -327,10 +384,15 @@ void RayTracer::cleanup()
 	// scene
 	cudaFree(d_spheres);
 	cudaFree(d_surfaceMaterials);
-	cudaFree(d_aabbs);
+	cudaFree(d_sceneAabbs);
 	cudaFree(d_materialsIdx);
 	cudaFree(d_sphereLights);
 
 	// random
 	h_randGen.clear();
+
+	// free cpu buffer
+	delete sceneAabbs;
+	delete spheres;
+	delete sphereLights;
 }

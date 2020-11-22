@@ -5,11 +5,15 @@
 
 #define uint unsigned int
 #define ushort unsigned short
+#define ullint unsigned long long int
+#define ushort unsigned short
 
 #define PI_OVER_4               0.7853981633974483096156608458198757210492f
 #define PI_OVER_2               1.5707963267948966192313216916397514420985f
 #define SQRT_OF_ONE_THIRD       0.5773502691896257645091487805019574556476f
-#define PI                      3.1415926535897932384626422832795028841971f
+#ifndef M_PI
+#define M_PI                    3.1415926535897932384626422832795028841971f
+#endif // !M_PI
 #define TWO_PI                  6.2831853071795864769252867665590057683943f
 #define Pi_over_180             0.01745329251f
 #define INV_PI                  0.31830988618f
@@ -211,8 +215,8 @@ struct Float3
 
 	inline __host__ __device__ float   length() const                   { return sqrtf(x*x + y*y + z*z); }
 	inline __host__ __device__ float   length2() const                  { return x*x + y*y + z*z; }
-	inline __host__ __device__ float   max() const                      { return max1f(max1f(x, y), z); }
-	inline __host__ __device__ float   min() const                      { return min1f(min1f(x, y), z); }
+	inline __host__ __device__ float   getmax() const                   { return max(max(x, y), z); }
+	inline __host__ __device__ float   getmin() const                   { return min(min(x, y), z); }
 	inline __host__ __device__ Float3& normalize()                      { float norm = sqrtf(x*x + y*y + z*z); x /= norm; y /= norm; z /= norm; return *this; }
 	inline __host__ __device__ Float3  normalized() const               { float norm = sqrtf(x*x + y*y + z*z); return Float3(x / norm, y / norm, z / norm); }
 };
@@ -270,7 +274,6 @@ struct Float4
 	__host__ __device__ Float4(const Float3& v)                        : x(v.x), y(v.y), z(v.z), w(0)       {}
 	__host__ __device__ Float4(const Float3& v, float a)               : x(v.x), y(v.y), z(v.z), w(a)       {}
 	__host__ __device__ Float4(const Float4& v)                        : x(v.x), y(v.y), z(v.z), w(v.w)     {}
-	__host__ __device__ Float4(volatile const Float4& v)               : x(v.x), y(v.y), z(v.z), w(v.w)     {}
 
 	inline __host__ __device__ Float4  operator+(const Float4& v) const { return Float4(x + v.x, y + v.y, z + v.z, z + v.z); }
 	inline __host__ __device__ Float4  operator-(const Float4& v) const { return Float4(x - v.x, y - v.y, z - v.z, z - v.z); }
@@ -316,10 +319,10 @@ inline __host__ __device__ Float4 operator / (float a, const Float4& v) { return
 // };
 
 inline __host__ __device__ Float3 abs(const Float3& v)                                { return Float3(fabsf(v.x), fabsf(v.y), fabsf(v.z)); }
-inline __host__ __device__ Float3 max(const Float3& v1, const Float3& v2)             { return Float3(max1f(v1.x, v2.x), max1f(v1.y, v2.y), max1f(v1.z, v2.z)); }
 inline __host__ __device__ Float2 normalize(const Float2& v)                          { float norm = sqrtf(v.x * v.x + v.y * v.y); return Float2(v.x / norm, v.y / norm); }
 inline __host__ __device__ Float3 normalize(const Float3& v)                          { float norm = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); return Float3(v.x / norm, v.y / norm, v.z / norm); }
 inline __host__ __device__ Float3 sqrt3f(const Float3& v)                             { return Float3(sqrtf(v.x), sqrtf(v.y), sqrtf(v.z)); }
+inline __host__ __device__ Float3 rsqrt3f(const Float3& v)                            { return Float3(rsqrtf(v.x), rsqrtf(v.y), rsqrtf(v.z)); }
 inline __host__ __device__ Float3 min3f(const Float3 & v1, const Float3 & v2)         { return Float3(min(v1.x, v2.x), min(v1.y, v2.y), min(v1.z, v2.z)); }
 inline __host__ __device__ Float3 max3f(const Float3 & v1, const Float3 & v2)         { return Float3(max(v1.x, v2.x), max(v1.y, v2.y), max(v1.z, v2.z)); }
 inline __host__ __device__ Float3 cross(const Float3 & v1, const Float3 & v2)         { return Float3(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x); }
@@ -333,8 +336,8 @@ inline __host__ __device__ float  mix1f(float v1, float v2, float a)            
 inline __host__ __device__ Float3 minf3f(const float a, const Float3 & v)             { return Float3(v.x < a ? v.x : a, v.y < a ? v.y : a, v.y < a ? v.y : a); }
 inline __host__ __device__ void   swap(float& v1, float& v2)                          { float tmp = v1; v1 = v2; v2 = tmp; }
 inline __host__ __device__ void   swap(Float3 & v1, Float3 & v2)                      { Float3 tmp = v1; v1 = v2; v2 = tmp; }
-inline __host__ __device__ float  clampf(float a, float lo = 1.0f, float hi = 1.0f)   { return a < lo ? lo : a > hi ? hi : a; }
-inline __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo, Float3 hi)             { return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
+inline __host__ __device__ float  clampf(float a, float lo = 0.0f, float hi = 1.0f)   { return a < lo ? lo : a > hi ? hi : a; }
+inline __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo = Float3(0.0f), Float3 hi = Float3(1.0f)){ return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
 inline __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)     { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
 inline __host__ __device__ float  dot(const Float2 & v1, const Float2 & v2)           { return v1.x * v2.x + v1.y * v2.y; }
 inline __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z; }
@@ -363,8 +366,8 @@ struct Mat3
 		Float3 _v3[3];
 		float _v[9];
 	};
-	Mat3() { for (int i = 0; i < 9; ++i) _v[i] = 0; }
-	Mat3(const Float3& v0, const Float3& v1, const Float3& v2) : v0{v0}, v1{v1}, v2{v2} {}
+	__host__ __device__ Mat3() { for (int i = 0; i < 9; ++i) _v[i] = 0; }
+	__host__ __device__ Mat3(const Float3& v0, const Float3& v1, const Float3& v2) : v0{v0}, v1{v1}, v2{v2} {}
 
 	inline __host__ __device__ Float3&       operator[](int i)       { return _v3[i]; }
 	inline __host__ __device__ const Float3& operator[](int i) const { return _v3[i]; }
@@ -372,7 +375,13 @@ struct Mat3
 	inline __host__ __device__ void transpose() { swap(m01, m10); swap(m20, m02); swap(m21, m12); }
 };
 
-inline __host__ __device__ Float3 operator*(const Float3& v, const Mat3& m) { return v.x * m.v0 +  v.y * m.v1 +  v.z * m.v2; }
+// column major multiply
+inline __host__ __device__ Float3 operator*(const Mat3& m, const Float3& v) { return v.x * m.v0 +  v.y * m.v1 +  v.z * m.v2; }
+
+// Rotation matrix
+inline __host__ __device__ Mat3 RotationMatrixX(float a) { return { Float3(1, 0, 0), Float3(0, cosf(a), sinf(a)), Float3(0, -sinf(a), cosf(a)) }; }
+inline __host__ __device__ Mat3 RotationMatrixY(float a) { return { Float3(cosf(a), 0, -sinf(a)), Float3(0, 1, 0), Float3(sinf(a), 0, cosf(a)) }; }
+inline __host__ __device__ Mat3 RotationMatrixZ(float a) { return { Float3(cosf(a), sinf(a), 0), Float3(-sinf(a), cosf(a), 0), Float3(0, 0, 1) }; }
 
 struct Mat4
 {
@@ -383,70 +392,57 @@ struct Mat4
 			float m02, m12, m22, m32;
 			float m03, m13, m23, m33;
 		};
-		struct {
-			Float4 v0, v1, v2, v3;
-		};
-		Float4 _v4[4];
 		float _v[16];
 	};
 
 	__host__ __device__ Mat4() { for (int i = 0; i < 16; ++i) { _v[i] = 0; } m00 = m11 = m22 = m33 = 1; }
-	__host__ __device__ Mat4(const Float4& v0, const Float4& v1, const Float4& v2, const Float4& v3) : v0{v0}, v1{v1}, v2{v2}, v3{v3} {}
-	__host__ __device__ Mat4(const Mat4& m) : v0{ m.v0 }, v1{ m.v1 }, v2{ m.v2 }, v3{ m.v3 } {}
+	__host__ __device__ Mat4(const Mat4& m) { for (int i = 0; i < 16; ++i) { _v[i] = m[i]; } }
 
-	inline __host__ __device__ void          setCol(uint i, const Float4& v)       { _v4[i] = v; }
-	inline __host__ __device__ Float4        getCol(uint i) const                  { return _v4[i]; }
+	// row
+	inline __host__ __device__ void          setRow(uint i, const Float4& v)       { /*assert(i < 4);*/ _v[i] = v[0]; _v[i+4] = v[1]; _v[i+8] = v[2]; _v[i+12] = v[3]; }
+	inline __host__ __device__ Float4        getRow(uint i) const                  { /*assert(i < 4);*/ return Float4(_v[i], _v[i+4], _v[i+8], _v[i+12]); }
 
-	inline __host__ __device__ void          setRow(uint i, const Float4& v)       { _v[i] = v[0]; _v[i+4] = v[1]; _v[i+8] = v[2]; _v[i+12] = v[3]; }
-	inline __host__ __device__ Float4        getRow(uint i) const                  { return Float4(_v[i], _v[i+4], _v[i+8], _v[i+12]); }
+	// column
+	inline __host__ __device__ void          setCol(uint i, const Float4& v)       { /*assert(i < 4);*/ _v[i*4] = v[0]; _v[i*4+1] = v[1]; _v[i*4+2] = v[2]; _v[i*4+3] = v[3]; }
+	inline __host__ __device__ Float4        getCol(uint i) const                  { /*assert(i < 4);*/ return Float4(_v[i*4], _v[i*4+1], _v[i*4+2], _v[i*4+3]); }
 
-	inline __host__ __device__ float&        get(uint r, uint c)                   { return _v[r + c * 4]; }
-	inline __host__ __device__ float         get(uint r, uint c) const             { return _v[r + c * 4]; }
+	// element
+	inline __host__ __device__ void          set(uint r, uint c, float v)          { /*assert(r < 4 && c < 4);*/ _v[r + c * 4] = v; }
+	inline __host__ __device__ float         get(uint r, uint c) const             { /*assert(r < 4 && c < 4);*/ return _v[r + c * 4]; }
 
-	inline __host__ __device__ float&        operator()(int r, int c)              { return get(r, c); }
-	inline __host__ __device__ float         operator()(int r, int c) const        { return get(r, c); }
-
-	inline __host__ __device__ Float4&       operator[](int i)                     { return _v4[i]; }
-	inline __host__ __device__ const Float4& operator[](int i) const               { return _v4[i]; }
-
-	inline __host__ __device__ Mat4 invert()
-	{
-		float inv[16];
-		float m[16] = {	m00, m10, m20, m30,
-						m01, m11, m21, m31,
-						m02, m12, m22, m32,
-						m03, m13, m23, m33 };
-
-		inv[0]  =  m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
-		inv[4]  = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
-		inv[8]  =  m[4] * m[9] *  m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
-		inv[12] = -m[4] * m[9] *  m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
-		inv[1]  = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
-		inv[5]  =  m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
-		inv[9]  = -m[0] * m[9] *  m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
-		inv[13] =  m[0] * m[9] *  m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
-		inv[2]  =  m[1] * m[6] *  m[15] - m[1] * m[7] *  m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] -  m[13] * m[3] * m[6];
-		inv[6]  = -m[0] * m[6] *  m[15] + m[0] * m[7] *  m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] +  m[12] * m[3] * m[6];
-		inv[10] =  m[0] * m[5] *  m[15] - m[0] * m[7] *  m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] -  m[12] * m[3] * m[5];
-		inv[14] = -m[0] * m[5] *  m[14] + m[0] * m[6] *  m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] +  m[12] * m[2] * m[5];
-		inv[3]  = -m[1] * m[6] *  m[11] + m[1] * m[7] *  m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] *  m[2] * m[7] +  m[9] *  m[3] * m[6];
-		inv[7]  =  m[0] * m[6] *  m[11] - m[0] * m[7] *  m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] *  m[2] * m[7] -  m[8] *  m[3] * m[6];
-		inv[11] = -m[0] * m[5] *  m[11] + m[0] * m[7] *  m[9] +  m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -  m[8] *  m[1] * m[7] +  m[8] *  m[3] * m[5];
-		inv[15] =  m[0] * m[5] *  m[10] - m[0] * m[6] *  m[9] -  m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +  m[8] *  m[1] * m[6] -  m[8] *  m[2] * m[5];
-
-		float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
-
-		if (det == 0)
-			return Mat4();
-
-		det = 1.f / det;
-		Mat4 inverse;
-		for (int i = 0; i < 16; i++)
-			inverse[i] = inv[i] * det;
-
-		return inverse;
-	}
+	inline __host__ __device__ float         operator[](uint i) const { return _v[i]; }
+	inline __host__ __device__ float&        operator[](uint i)       { return _v[i]; }
 };
+
+inline __host__ __device__ Mat4 invert(const Mat4& m)
+{
+	Mat4 inv;
+
+	inv[0]  =  m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+	inv[4]  = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+	inv[8]  =  m[4] * m[9] *  m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+	inv[12] = -m[4] * m[9] *  m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+	inv[1]  = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+	inv[5]  =  m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+	inv[9]  = -m[0] * m[9] *  m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+	inv[13] =  m[0] * m[9] *  m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+	inv[2]  =  m[1] * m[6] *  m[15] - m[1] * m[7] *  m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] -  m[13] * m[3] * m[6];
+	inv[6]  = -m[0] * m[6] *  m[15] + m[0] * m[7] *  m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] +  m[12] * m[3] * m[6];
+	inv[10] =  m[0] * m[5] *  m[15] - m[0] * m[7] *  m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] -  m[12] * m[3] * m[5];
+	inv[14] = -m[0] * m[5] *  m[14] + m[0] * m[6] *  m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] +  m[12] * m[2] * m[5];
+	inv[3]  = -m[1] * m[6] *  m[11] + m[1] * m[7] *  m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] *  m[2] * m[7] +  m[9] *  m[3] * m[6];
+	inv[7]  =  m[0] * m[6] *  m[11] - m[0] * m[7] *  m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] *  m[2] * m[7] -  m[8] *  m[3] * m[6];
+	inv[11] = -m[0] * m[5] *  m[11] + m[0] * m[7] *  m[9] +  m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -  m[8] *  m[1] * m[7] +  m[8] *  m[3] * m[5];
+	inv[15] =  m[0] * m[5] *  m[10] - m[0] * m[6] *  m[9] -  m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +  m[8] *  m[1] * m[6] -  m[8] *  m[2] * m[5];
+
+	float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+
+	if (det == 0) { return Mat4(); }
+	det = 1.f / det;
+	for (int i = 0; i < 16; i++) { inv[i] *= det; }
+
+	return inv;
+}
 
 struct Quat
 {
@@ -487,5 +483,5 @@ inline __host__ __device__ Float3 rotate3f         (const Float3& axis, float an
 inline __host__ __device__ Float3 slerp3f          (const Float3& q, const Float3& r, float t)        { return slerp(Quat(q), Quat(r), t).v; }
 inline __host__ __device__ Float3 rotationBetween3f(const Float3& p, const Float3& q)                 { return rotationBetween(Quat(p), Quat(q)).v; }
 
-__host__ __device__ __inline__ float SafeDivede(float a, float b) { float eps = exp2f(-80.0f); return a / ((fabsf(b) > eps) ? b : copysignf(eps, b)); };
-__host__ __device__ __inline__ Float3 SafeDivede3f(const Float3& a, const Float3& b) { return Float3(SafeDivede(a.x, b.x), SafeDivede(a.y, b.y), SafeDivede(a.z, b.z)); };
+__host__ __device__ __inline__ float SafeDivide(float a, float b) { float eps = exp2f(-80.0f); return a / ((fabsf(b) > eps) ? b : copysignf(eps, b)); };
+__host__ __device__ __inline__ Float3 SafeDivide3f(const Float3& a, const Float3& b) { return Float3(SafeDivide(a.x, b.x), SafeDivide(a.y, b.y), SafeDivide(a.z, b.z)); };

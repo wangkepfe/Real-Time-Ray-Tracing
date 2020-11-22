@@ -37,10 +37,6 @@
 // resolution
 const int WIDTH = 2560;
 const int HEIGHT = 1440;
-//const int RENDER_WIDTH = 1920;
-//const int RENDER_HEIGHT = 1080;
-const int RENDER_WIDTH = 1920;
-const int RENDER_HEIGHT = 1080;
 
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
@@ -183,6 +179,31 @@ WindowsSecurityAttributes::~WindowsSecurityAttributes() {
 //    alignas(16) mat4x4 proj;
 //};
 
+RayTracer* g_rayTracer;
+
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+
+    g_rayTracer->keyboardUpdate(key, scancode, action, mods);
+}
+
+static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos)
+{
+    g_rayTracer->cursorPosUpdate(xpos, ypos);
+}
+
+static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    g_rayTracer->scrollUpdate(xoffset, yoffset);
+}
+
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
+{
+    g_rayTracer->mouseButtenUpdate(button, action, mods);
+}
+
 // main structure
 class HelloTriangleApplication {
 public:
@@ -192,12 +213,12 @@ public:
         initVulkan();
         initCuda();
 
-        m_rayTracer = new RayTracer(WIDTH, HEIGHT, RENDER_WIDTH, RENDER_HEIGHT);
-        m_rayTracer->init(m_streams);
+        g_rayTracer = new RayTracer(WIDTH, HEIGHT);
+        g_rayTracer->init(m_streams);
 
         mainLoop();
 
-        delete m_rayTracer;
+        delete g_rayTracer;
 
         cleanup();
     }
@@ -313,9 +334,6 @@ private:
     cudaExternalSemaphore_t            m_cudaExtCudaUpdateVkSemaphore;
     cudaExternalSemaphore_t            m_cudaExtVkUpdateCudaSemaphore;
 
-    //
-    RayTracer* m_rayTracer;
-
     // ----------------------------------------------------------------------------------- functions
 
     // init window
@@ -328,6 +346,19 @@ private:
 
         // window width, height, title
         m_window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+
+        // keyboard
+        glfwSetKeyCallback(m_window, key_callback);
+
+        // mouse
+        glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		if (glfwRawMouseMotionSupported())
+		{
+			glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+		}
+        glfwSetCursorPosCallback(m_window, cursor_position_callback);
+        glfwSetScrollCallback(m_window, scroll_callback);
+        glfwSetMouseButtonCallback(m_window, mouse_button_callback);
     }
 
     // init vulkan
@@ -1205,7 +1236,7 @@ private:
         extSemaphoreWaitParams.flags = 0;
         checkCudaErrors(cudaWaitExternalSemaphoresAsync(&m_cudaExtVkUpdateCudaSemaphore, &extSemaphoreWaitParams, 1, m_streams[0]));
 
-        m_rayTracer->draw(d_surfaceObjectList);
+        g_rayTracer->draw(d_surfaceObjectList);
 
         cudaExternalSemaphoreSignalParams extSemaphoreSignalParams;
         memset(&extSemaphoreSignalParams, 0, sizeof(extSemaphoreSignalParams));

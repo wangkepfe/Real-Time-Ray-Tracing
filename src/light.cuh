@@ -21,6 +21,8 @@ __device__ __inline__ bool SampleLight(
 	const int numSphereLight = sceneMaterial.numSphereLights;
 	Sphere* sphereLights = sceneMaterial.sphereLights;
 
+    const Float3& normal = rayState.normal;
+
 	float lightChoosePdf;
 	int sampledIdx;
 
@@ -33,12 +35,16 @@ __device__ __inline__ bool SampleLight(
 
 	for (; i < numSphereLight; ++i)
 	{
+#if 0
 		Float3 vec = sphereLights[i].center - rayState.pos;
         float dist2 = vec.length2();
-		if (dot(rayState.normal, vec) > 0 && dist2 < 10.0f)
+		if (dot(normal, vec) > 0/* && dist2 < 10.0f*/)
         {
             indexRemap[idx++] = i; // sphere light
         }
+#else
+        indexRemap[idx++] = i;
+#endif
 	}
 
 	indexRemap[idx++] = i++; // sun/moon light
@@ -53,16 +59,16 @@ __device__ __inline__ bool SampleLight(
 	// sample
 	Float2 lightSampleRand2 = randGen.Rand2(4 + loopIdx * 6 + 2);
 
+    //DEBUG_PRINT(sampledIdx);
+
 	if (sampledIdx == sunLightIdx)
 	{
-        if (dot(rayState.normal, cbo.sunDir) > 0)
+        Float3 moonDir = -cbo.sunDir;
+        lightSampleDir = cbo.sunDir.y > 0.0f ? cbo.sunDir : moonDir;
+
+        if (dot(normal, lightSampleDir) > 0)
         {
-            Float3 moonDir = cbo.sunDir;
-            moonDir        = -moonDir;
-
-            lightSampleDir = cbo.sunDir.y > -0.05 ? cbo.sunDir : moonDir;
             isDeltaLight   = true;
-
             lightIdx = ENV_LIGHT_ID;
         }
         else
@@ -75,6 +81,9 @@ __device__ __inline__ bool SampleLight(
         float maxSkyCdf = skyCdf[1023];
         float sampledSkyValue = lightSampleRand2[0] * maxSkyCdf;
 
+        // DEBUG_PRINT(maxSkyCdf);
+        // DEBUG_PRINT(sampledSkyValue);
+
         int left = 0;
         int right = 1022;
         int mid;
@@ -82,6 +91,10 @@ __device__ __inline__ bool SampleLight(
         {
             mid = (left + right) / 2;
             float midVal = skyCdf[mid];
+
+            // DEBUG_PRINT(j);
+            // DEBUG_PRINT(mid);
+            // DEBUG_PRINT(midVal);
 
             if (midVal < sampledSkyValue)
             {
@@ -95,11 +108,18 @@ __device__ __inline__ bool SampleLight(
         mid = (left + right) / 2;
 
         int sampledSkyIdx = mid + 1;
-        float sampledSkyPdf = (skyCdf[mid + 1] - skyCdf[mid]) / maxSkyCdf * 1024.0f / TWO_PI;
+        float sampledSkyPdf = (skyCdf[mid + 1] - skyCdf[mid]) / maxSkyCdf; // choose 1 from 1024 tiles
+        sampledSkyPdf = sampledSkyPdf * 1024 / TWO_PI; // each tile has area 2Pi / 1024
+
+        // DEBUG_PRINT(sampledSkyIdx);
+        // DEBUG_PRINT(sampledSkyPdf);
 
         // index to 2D coordinates
         float u = ((sampledSkyIdx % 64) + 0.5f) / 64;
         float v = ((sampledSkyIdx / 64) + 0.5f) / 16;
+
+        // DEBUG_PRINT(u);
+        // DEBUG_PRINT(v);
 
         // hemisphere projection
         float z = v;
@@ -107,7 +127,9 @@ __device__ __inline__ bool SampleLight(
         float phi = TWO_PI * u;
         Float3 rayDir(r * cosf(phi), z, r * sinf(phi));
 
-        if (dot(rayDir, rayState.normal) > 0)
+        // DEBUG_PRINT(rayDir);
+
+        if (dot(rayDir, normal) > 0)
         {
             lightSampleDir = rayDir;
 		    lightSamplePdf = sampledSkyPdf * lightChoosePdf;
@@ -125,10 +147,9 @@ __device__ __inline__ bool SampleLight(
 
         // light vector / direction
 		Float3 lightVec   = sphereLight.center - rayState.pos;
-        Float3 lightDir   = normalize(lightVec);
-
-        // cos theta max
         float dist2       = lightVec.length2();
+
+        Float3 lightDir   = normalize(lightVec);
         float radius2     = sphereLight.radius * sphereLight.radius;
         float cosThetaMax = sqrtf(max1f(dist2 - radius2, 0)) / sqrtf(dist2);
 
@@ -139,11 +160,10 @@ __device__ __inline__ bool SampleLight(
         lightSampleDir = normalize(lightSampleDir);
 
         // if direction in sight
-        if (dot(rayState.normal, lightSampleDir) > 0)
+        if (dot(normal, lightSampleDir) > 0.0)
         {
             // calculate pdf of the sample
             lightSamplePdf = UniformConePdf(cosThetaMax) * lightChoosePdf;
-
             lightIdx = sampledIdx;
         }
         else
@@ -151,6 +171,8 @@ __device__ __inline__ bool SampleLight(
             return false;
         }
 	}
+
+    //DEBUG_PRINT(lightSampleDir);
 
 	return true;
 }

@@ -18,11 +18,9 @@ add_definitions(-DNOMINMAX)
 
 # cuda
 target_include_directories(myproject PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/cuda-samples/Common")
-#target_link_libraries(myproject curand.lib)
 target_link_libraries(myproject cudadevrt.lib)
 set_target_properties(myproject PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_compile_options(myproject PRIVATE "--keep")
-#target_compile_options(myproject PRIVATE "--default-stream per-thread")
 
 # vulkan
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -38,7 +36,11 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/ext/glfw")
 target_link_libraries(myproject glfw)
 
-# ext
+# assimp
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/ext/assimp")
+target_link_libraries(myproject assimp)
+
+# header only
 target_include_directories(myproject PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/stb")
 target_include_directories(myproject PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/TinyTIFF")
 

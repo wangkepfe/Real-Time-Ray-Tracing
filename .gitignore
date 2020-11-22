@@ -1,5 +1,7 @@
 build
 *.vscode
+*.exe
 settings.json
 ref
 bin
+resources/unused
