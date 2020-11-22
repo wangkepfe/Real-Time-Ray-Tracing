@@ -3,7 +3,7 @@
 - GPU Compute workload implemented in CUDA.
 - Real time rendering framework implemented with Vulkan.
 
-### Physically based rendering
+## Physically based rendering
 - Monte Carlo path tracing
 - Surface BSDF models
 - Rayleigh-Mie sky model
