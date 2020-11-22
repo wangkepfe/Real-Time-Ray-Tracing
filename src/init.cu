@@ -119,7 +119,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	int* materialsIdx = new int[numObjects];
 	for (i = 0; i < triCount; ++i)
 	{
-		materialsIdx[i] = 4;
+		materialsIdx[i] = 1;
 	}
 	materialsIdx[i++] = 0;
 	materialsIdx[i++] = 2;

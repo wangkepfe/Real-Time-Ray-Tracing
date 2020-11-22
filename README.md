@@ -5,11 +5,11 @@
 
 ## Screenshot
 <table> <tr>
-    <td> <img src="screenshot/screenShot1-11-21-2020.png" alt="Drawing" style="width: 600px;"/> </td>
+    <td> <img src="screenshot/screenShot1-11-21-2020.png" alt="Drawing" style="width: 300px;"/> </td>
+    <td> <img src="screenshot/screenShot2-11-21-2020.png" alt="Drawing" style="width: 300px;"/> </td>
 </tr> <tr>
-    <td> <img src="screenshot/screenShot2-11-21-2020.png" alt="Drawing" style="width: 600px;"/> </td>
-</tr> <tr>
-    <td> <img src="screenshot/screenShot3-11-21-2020.png" alt="Drawing" style="width: 600px;"/> </td>
+    <td> <img src="screenshot/screenShot3-11-21-2020.png" alt="Drawing" style="width: 300px;"/> </td>
+    <td> <img src="screenshot/screenShot4-11-21-2020.png" alt="Drawing" style="width: 300px;"/> </td>
 </tr> </table>
 
 ## Physically based rendering
