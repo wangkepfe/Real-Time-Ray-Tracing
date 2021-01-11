@@ -18,6 +18,8 @@
 #define USE_TEXTURE_0 1
 #define USE_TEXTURE_1 0
 
+const float TargetFPS = 60.0f;
+
 __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, TexObj skyTex)
 {
     // check for termination and hit light
@@ -399,17 +401,20 @@ void RayTracer::UpdateFrame()
     cbo.clockTime     = clockTime;
 
     // dynamic resolution
+    const int minRenderWidth = 640;
+    const int minRenderHeight = 480;
+
     historyRenderWidth = renderWidth;
     historyRenderHeight = renderHeight;
 
-    if (deltaTime > 17.0f)
+    if (deltaTime > 1000.0f / (TargetFPS - 1.0f) && renderWidth > minRenderWidth && renderHeight > minRenderHeight)
     {
         renderWidth -= 16;
         renderHeight -= 9;
         cbo.camera.resolution = Float2(renderWidth, renderHeight);
         cbo.camera.update();
     }
-    else if (deltaTime < 16.0f && renderWidth < maxRenderWidth && renderHeight < maxRenderHeight)
+    else if (deltaTime < 1000.0f / (TargetFPS + 1.0f) && renderWidth < maxRenderWidth && renderHeight < maxRenderHeight)
     {
         renderWidth += 16;
         renderHeight += 9;

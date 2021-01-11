@@ -141,6 +141,12 @@ __global__ void TemporalFilter(
 		outColor = color * blendFactor + colorHistory * (1.0f - blendFactor);
 	}
 
+	if (isnan(outColor.x) || isnan(outColor.y) || isnan(outColor.z))
+    {
+        printf("nan found at (%d, %d)\n", x, y);
+        outColor = 0;
+    }
+
 	// store to current
 	Store2DHalf3Ushort1( { outColor, mask } , colorBuffer, Int2(x, y));
 }
@@ -288,6 +294,12 @@ __global__ void AtousFilter2(
 		Int2 gridLocation = Int2(x >> 3, y >> 3);
 		Store2D_uchar1(2, sampleCountBuffer, gridLocation);
 	}
+
+	if (isnan(finalColor.x) || isnan(finalColor.y) || isnan(finalColor.z))
+    {
+        printf("nan found at (%d, %d)\n", x, y);
+        finalColor = 0;
+    }
 
 	// store to current
 	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, Int2(x, y));
