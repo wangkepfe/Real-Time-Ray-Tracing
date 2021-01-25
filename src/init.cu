@@ -2,8 +2,10 @@
 #include "kernel.cuh"
 #include "fileUtils.cuh"
 #include "blueNoiseRandGenData.h"
+#include "cuda_fp16.h"
 
-__global__ void InitSampleCountBuffer(SurfObj buffer, Int2 bufferSize)
+template<typename T>
+__global__ void InitBuffer(T val, SurfObj buffer, Int2 bufferSize)
 {
 	Int2 idx;
 	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -11,17 +13,24 @@ __global__ void InitSampleCountBuffer(SurfObj buffer, Int2 bufferSize)
 
     if (idx.x >= bufferSize.x || idx.y >= bufferSize.y) return;
 
-	//Store2D_uchar1(1, buffer, idx);
-	surf2Dwrite(make_uchar1(1), buffer, idx.x, idx.y, cudaBoundaryModeClamp);
+	surf2Dwrite(val, buffer, idx.x, idx.y, cudaBoundaryModeClamp);
 }
 
 void RayTracer::init(cudaStream_t* cudaStreams)
 {
-	maxRenderWidth = screenWidth / 2 * 3;
-	maxRenderHeight = screenHeight / 2 * 3;
+	maxRenderWidth = 3840;
+	maxRenderHeight = 2160;
 
-	renderWidth = maxRenderWidth;
-	renderHeight = maxRenderHeight;
+	if (UseDynamicResolution)
+	{
+		renderWidth = maxRenderWidth;
+		renderHeight = maxRenderHeight;
+	}
+	else
+	{
+		renderWidth = screenWidth;
+		renderHeight = screenHeight;
+	}
 
 	uint i;
 
@@ -148,6 +157,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	cudaChannelFormatDesc format_normal_R11_G10_B11_depth_R32 = cudaCreateChannelDesc<float2>();
 	cudaChannelFormatDesc format_motionVector_UV16 = cudaCreateChannelDescHalf2();
 	cudaChannelFormatDesc format_sampleCount_R8 = cudaCreateChannelDesc<uchar1>();
+	cudaChannelFormatDesc format_noiseLevel_R16 = cudaCreateChannelDescHalf1();
 
 	// resource desription
 	cudaResourceDesc resDesc = {};
@@ -190,7 +200,14 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	resDesc.res.array.array = sampleCountBufferArray;
 	GpuErrorCheck(cudaCreateSurfaceObject(&sampleCountBuffer, &resDesc));
 
-	InitSampleCountBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (sampleCountBuffer, Int2(gridDim.x, gridDim.y));
+	InitBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (make_uchar1(1), sampleCountBuffer, Int2(gridDim.x, gridDim.y));
+
+	// noise level uffer
+	GpuErrorCheck(cudaMallocArray(&noiseLevelBufferArray, &format_noiseLevel_R16, gridDim.x, gridDim.y, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = noiseLevelBufferArray;
+	GpuErrorCheck(cudaCreateSurfaceObject(&noiseLevelBuffer, &resDesc));
+
+	InitBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (make_ushort1(0), noiseLevelBuffer, Int2(gridDim.x, gridDim.y));
 
 	// color buffer 1/4 size
 	bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
@@ -289,6 +306,10 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	// timer init
 	timer.init();
+
+	// set render dim to screen dim
+	renderWidth = screenWidth;
+	renderHeight = screenHeight;
 }
 
 void RayTracer::CameraSetup(Camera& camera)
@@ -361,6 +382,10 @@ void RayTracer::cleanup()
 	// sample count buffer
 	cudaDestroySurfaceObject(sampleCountBuffer);
 	cudaFreeArray(sampleCountBufferArray);
+
+	// noise level buffer
+	cudaDestroySurfaceObject(noiseLevelBuffer);
+	cudaFreeArray(noiseLevelBufferArray);
 
 	// ---------------------- destroy texture objects --------------------------
 	cudaDestroyTextureObject(sceneTextures.sandAlbedo);

@@ -6,6 +6,10 @@
 
 #define uchar unsigned char
 
+//------------------------------------------- 2d float4 ---------------------------------------------------
+// byte    4     4     4     4
+// data  float float float float
+
 __forceinline__ __device__ Float4 Load2D(
 	SurfObj tex,
 	Int2    uv)
@@ -22,7 +26,42 @@ __forceinline__ __device__ void Store2D(
     surf2Dwrite(make_float4(val.x, val.y, val.z, val.w), tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
 }
 
+//------------------------------------------- 2d float2 ---------------------------------------------------
+// byte    4     4
+// data  float float
+
+__forceinline__ __device__ Float2 Load2DFloat2(SurfObj tex, Int2 uv)
+{
+    float2 ret = surf2Dread<float2>(tex, uv.x * 2 * sizeof(float), uv.y, cudaBoundaryModeClamp);
+	return Float2(ret.x, ret.y);
+}
+
+__forceinline__ __device__ void Store2DFloat2(Float2 val, SurfObj tex, Int2 uv)
+{
+    surf2Dwrite(make_float2(val.x, val.y), tex, uv.x * 2 * sizeof(float), uv.y, cudaBoundaryModeClamp);
+}
+
+
+//------------------------------------------- 2d half3 ushort1 ---------------------------------------------------
+// byte    2     2     2     2
+// data  half  half  half  ushort
+
 struct Float3Ushort1 { Float3 xyz; ushort w; };
+
+__forceinline__ __device__ Float3Ushort1 Load2DHalf3Ushort1(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+
+	ushort4ToHalf4Converter conv(ret);
+	Half4 hf4 = conv.hf4;
+    Float4 fl4 = half4ToFloat4(hf4);
+
+	return { fl4.xyz, ret.w };
+}
+
+__forceinline__ __device__ Float3 Load2DHalf3Ushort1Float3(SurfObj tex, Int2 uv) { return Load2DHalf3Ushort1(tex, uv).xyz; }
 
 __forceinline__ __device__ void Store2DHalf3Ushort1(
     Float3Ushort1 val,
@@ -39,18 +78,10 @@ __forceinline__ __device__ void Store2DHalf3Ushort1(
     surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
 }
 
-__forceinline__ __device__ Float3Ushort1 Load2DHalf3Ushort1(
-	SurfObj tex,
-	Int2    uv)
-{
-	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+//------------------------------------------- 2d half4 ---------------------------------------------------
+// byte    2     2     2     2
+// data  half  half  half  half
 
-	ushort4ToHalf4Converter conv(ret);
-	Half4 hf4 = conv.hf4;
-    Float4 fl4 = half4ToFloat4(hf4);
-
-	return { fl4.xyz, ret.w };
-}
 
 __forceinline__ __device__ Float4 Load2DHalf4(
 	SurfObj tex,
@@ -63,9 +94,6 @@ __forceinline__ __device__ Float4 Load2DHalf4(
 
 	return half4ToFloat4(hf4);
 }
-
-__forceinline__ __device__ Float3 Load2DHalf4ToFloat3(SurfObj tex, Int2 uv) { return Load2DHalf4(tex, uv).xyz; }
-__forceinline__ __device__ Float3 Load2DHalf3Ushort1Float3(SurfObj tex, Int2 uv) { return Load2DHalf3Ushort1(tex, uv).xyz; }
 
 __forceinline__ __device__ void Store2DHalf4(
     Float4  fl4,
@@ -80,16 +108,11 @@ __forceinline__ __device__ void Store2DHalf4(
     surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
 }
 
-__forceinline__ __device__ Float2 Load2DFloat2(SurfObj tex, Int2 uv)
-{
-    float2 ret = surf2Dread<float2>(tex, uv.x * 2 * sizeof(float), uv.y, cudaBoundaryModeClamp);
-	return Float2(ret.x, ret.y);
-}
+__forceinline__ __device__ Float3 Load2DHalf4ToFloat3(SurfObj tex, Int2 uv) { return Load2DHalf4(tex, uv).xyz; }
 
-__forceinline__ __device__ void Store2DFloat2(Float2 val, SurfObj tex, Int2 uv)
-{
-    surf2Dwrite(make_float2(val.x, val.y), tex, uv.x * 2 * sizeof(float), uv.y, cudaBoundaryModeClamp);
-}
+//------------------------------------------- 2d half2 ---------------------------------------------------
+// byte    2     2
+// data  half  half
 
 __forceinline__ __device__ Float2 Load2DHalf2(SurfObj tex, Int2 uv)
 {
@@ -104,6 +127,26 @@ __forceinline__ __device__ void Store2DHalf2(Float2 val, SurfObj tex, Int2 uv)
     surf2Dwrite(conv.us2, tex, uv.x * 2 * sizeof(short), uv.y, cudaBoundaryModeClamp);
 }
 
+//------------------------------------------- 2d half1 ---------------------------------------------------
+// byte    2
+// data  half
+
+__forceinline__ __device__ float Load2DHalf1(SurfObj tex, Int2 uv)
+{
+    ushort1ToHalf1Converter conv(surf2Dread<ushort1>(tex, uv.x * 1 * sizeof(short), uv.y, cudaBoundaryModeClamp));
+    return __half2float(conv.hf1);
+}
+
+__forceinline__ __device__ void Store2DHalf1(float val, SurfObj tex, Int2 uv)
+{
+    ushort1ToHalf1Converter conv(__float2half(val));
+    surf2Dwrite(conv.us1, tex, uv.x * 1 * sizeof(short), uv.y, cudaBoundaryModeClamp);
+}
+
+//------------------------------------------- 2d uchar1 ---------------------------------------------------
+// byte    1
+// data  uchar
+
 __forceinline__ __device__ int Load2D_uchar1(SurfObj tex, Int2 uv)
 {
     return surf2Dread<uchar1>(tex, uv.x, uv.y, cudaBoundaryModeClamp).x;
@@ -113,6 +156,8 @@ __forceinline__ __device__ void Store2D_uchar1(int val, SurfObj tex, Int2 uv)
 {
     surf2Dwrite(make_uchar1(val), tex, uv.x, uv.y, cudaBoundaryModeClamp);
 }
+
+//------------------------------------------- bicubic sample func ---------------------------------------------------
 
 typedef Float3 (*SampleFunc)(SurfObj, Int2);
 
@@ -213,6 +258,8 @@ __device__ Float3 SampleBicubicSmoothStep(
 
     return OutColor;
 }
+
+//------------------------------------------- encode/decode R11_G10_B11 ---------------------------------------------------
 
 union UintFloatConverter { uint ui; float f; __device__ UintFloatConverter() : ui(0) {} };
 

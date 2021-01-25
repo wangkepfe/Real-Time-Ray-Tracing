@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 #include "sampler.cuh"
+#include "common.cuh"
 
 #define USE_CATMULL_ROM_SAMPLER 0
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
@@ -162,20 +163,30 @@ __global__ void DownScale4(SurfObj InBuffer, SurfObj OutBuffer, Int2 size)
 //------------------------------------- Median Filter ---------------------------------------
 //----------------------------------------------------------------------------------------------
 
-__device__ __inline__ float min3(float v1, float v2, float v3) { return min(min(v1, v2), v3); }
-__device__ __inline__ float max3(float v1, float v2, float v3) { return max(max(v1, v2), v3); }
-__device__ __inline__ Float3 min3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return min3f(min3f(v1, v2), v3); }
-__device__ __inline__ Float3 max3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return max3f(max3f(v1, v2), v3); }
-__device__ __inline__ void sort2(Float3& a, Float3& b) { if (a.x > b.x) { swap(a.x, b.x); } if (a.y > b.y) { swap(a.y, b.y); } if (a.z > b.z) { swap(a.z, b.z); } }
-__device__ __inline__ void sort3(Float3& v1, Float3& v2, Float3& v3) { sort2(v2, v3); sort2(v1, v2); sort2(v2, v3); }
-__device__ __inline__ void sort9(Float3* p)
+struct LumaIdxPair
+{
+	float luma;
+	int idx;
+};
+
+__device__ __inline__ LumaIdxPair min(const LumaIdxPair& a, const LumaIdxPair& b) { return (a.luma < b.luma) ? a : b; }
+__device__ __inline__ LumaIdxPair max(const LumaIdxPair& a, const LumaIdxPair& b) { return (a.luma > b.luma) ? a : b; }
+
+__device__ __inline__ LumaIdxPair min3(const LumaIdxPair& v1, const LumaIdxPair& v2, const LumaIdxPair& v3) { return min(min(v1, v2), v3); }
+__device__ __inline__ LumaIdxPair max3(const LumaIdxPair& v1, const LumaIdxPair& v2, const LumaIdxPair& v3) { return max(max(v1, v2), v3); }
+
+__device__ __inline__ void swap(LumaIdxPair& a, LumaIdxPair& b) { LumaIdxPair temp = a; a = b; b = temp; }
+__device__ __inline__ void sort2(LumaIdxPair& a, LumaIdxPair& b) { if (a.luma > b.luma) { swap(a, b); } }
+__device__ __inline__ void sort3(LumaIdxPair& v1, LumaIdxPair& v2, LumaIdxPair& v3) { sort2(v2, v3); sort2(v1, v2); sort2(v2, v3); }
+
+__device__ __inline__ void sort9(LumaIdxPair* p)
 {
     sort3(p[0], p[1], p[2]);
     sort3(p[3], p[4], p[5]);
     sort3(p[6], p[7], p[8]);
 
-    p[6] = max3f3(p[0], p[3], p[6]);
-    p[2] = min3f3(p[2], p[5], p[8]);
+    p[6] = max3(p[0], p[3], p[6]);
+    p[2] = min3(p[2], p[5], p[8]);
 
     sort3(p[1], p[4], p[7]);
     sort3(p[2], p[4], p[6]);
@@ -183,11 +194,143 @@ __device__ __inline__ void sort9(Float3* p)
 
 __global__ void MedianFilter(
 	SurfObj   colorBuffer, // [in/out]
+	SurfObj   normalDepthBuffer,
 	SurfObj   accumulateBuffer,
 	Int2      size)
 {
+	struct LDS
+	{
+		Float3 color;
+		float depth;
+		Float3 normal;
+		ushort mask;
+	};
 
+	const int blockdim = 8;
+	const int ldsBlockdim = 10;
+	const int ldsAccessOffset = 1;
+	const int kernelDim = 3;
+
+	__shared__ LDS sharedBuffer[ldsBlockdim * ldsBlockdim];
+
+	// calculate address
+	int x = threadIdx.x + blockIdx.x * blockdim;
+	int y = threadIdx.y + blockIdx.y * blockdim;
+
+	int id = (threadIdx.x + threadIdx.y * blockdim);
+
+	int x1 = blockIdx.x * blockdim - ldsAccessOffset + id % ldsBlockdim;
+	int y1 = blockIdx.y * blockdim - ldsAccessOffset + id / ldsBlockdim;
+
+	int x2 = blockIdx.x * blockdim - ldsAccessOffset + (id + blockdim * blockdim) % ldsBlockdim;
+	int y2 = blockIdx.y * blockdim - ldsAccessOffset + (id + blockdim * blockdim) / ldsBlockdim;
+
+	// global load 1
+	Float3Ushort1 colorAndMask1 = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
+	Float2 normalAndDepth1      = Load2DFloat2(normalDepthBuffer, Int2(x1, y1));
+
+	Float3 colorValue1          = colorAndMask1.xyz;
+	float depthValue1           = normalAndDepth1.y;
+	Float3 normalValue1         = DecodeNormal_R11_G10_B11(normalAndDepth1.x);
+	ushort maskValue1           = colorAndMask1.w;
+
+	// store to lds 1
+	sharedBuffer[id      ] = { colorValue1, depthValue1, normalValue1, maskValue1 };
+
+	if (id + blockdim * blockdim < ldsBlockdim * ldsBlockdim)
+	{
+		// global load 2
+		Float3Ushort1 colorAndMask2 = Load2DHalf3Ushort1(colorBuffer, Int2(x2, y2));
+		Float2 normalAndDepth2 = Load2DFloat2(normalDepthBuffer, Int2(x2, y2));
+
+		Float3 colorValue2 = colorAndMask2.xyz;
+		float depthValue2 = normalAndDepth2.y;
+		Float3 normalValue2 = DecodeNormal_R11_G10_B11(normalAndDepth2.x);
+		ushort maskValue2 = colorAndMask2.w;
+
+		// store to lds 2
+		sharedBuffer[id + blockdim * blockdim] = { colorValue2, depthValue2, normalValue2, maskValue2 };
+	}
+
+	__syncthreads();
+
+	if (x >= size.x || y >= size.y) return;
+
+	// load center
+	LDS center   = sharedBuffer[threadIdx.x + ldsAccessOffset + (threadIdx.y + ldsAccessOffset) * ldsBlockdim];
+	Float3 colorValue  = center.color;
+	float depthValue   = center.depth;
+	Float3 normalValue = center.normal;
+	ushort maskValue   = center.mask;
+
+	if (depthValue >= RayMax) { return; }
+
+	// --------------------------------  filter --------------------------------
+	LumaIdxPair neighbourLumaIdx[9];
+	#pragma unroll
+	for (int i = 0; i < kernelDim; ++i)
+	{
+		#pragma unroll
+		for (int j = 0; j < kernelDim; ++j)
+		{
+			LDS bufferReadTmp = sharedBuffer[threadIdx.x + j + (threadIdx.y + i) * ldsBlockdim];
+			Float3 color  = bufferReadTmp.color;
+			float depth   = bufferReadTmp.depth;
+			Float3 normal = bufferReadTmp.normal;
+			ushort mask   = bufferReadTmp.mask;
+
+			neighbourLumaIdx[j + i * kernelDim].luma = GetLuma(color);
+			neighbourLumaIdx[j + i * kernelDim].idx = j + i * kernelDim;
+		}
+	}
+
+	// sort neighbour
+	sort9(neighbourLumaIdx);
+
+	// get idx
+	int medianColorIdx = neighbourLumaIdx[4].idx;
+
+	// get values
+	Float3 medianColor  = sharedBuffer[medianColorIdx].color;
+	float  medianDepth  = sharedBuffer[medianColorIdx].depth;
+	Float3 medianNormal = sharedBuffer[medianColorIdx].normal;
+	ushort medianMask   = sharedBuffer[medianColorIdx].mask;
+
+	// calculate blend factor
+	Float3 t;
+	float dist2;
+	float weight = 1.0f;
+
+	// normal diff factor
+	t            = normalValue - medianNormal;
+	dist2        = dot(t,t);
+	weight       *= min1f(expf(-(dist2) / 0.1f), 1.0f);
+
+	// depth diff fatcor
+	dist2        = depthValue - medianDepth;
+	dist2        = dist2 * dist2;
+	weight      *= min1f(expf(-(dist2) / 0.1f), 1.0f);
+
+	// material mask diff factor
+	dist2        = (maskValue != medianMask) ? 1.0f : 0.0f;
+	weight      *= min1f(expf(-(dist2) / 0.1f), 1.0f);
+
+	// final blend
+	Float3 finalColor = lerp3f(medianColor, lerp3f(colorValue, medianColor, weight), 0.5f);
+
+	// handles nan
+	if (isnan(finalColor.x) || isnan(finalColor.y) || isnan(finalColor.z))
+    {
+        printf("MedianFilter: nan found at (%d, %d)\n", x, y);
+        finalColor = 0;
+    }
+
+	// store to current
+	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, Int2(x, y));
 }
+
+
+
 //----------------------------------------------------------------------------------------------
 //------------------------------------- Bloom ---------------------------------------
 //----------------------------------------------------------------------------------------------
@@ -455,6 +598,9 @@ __global__ void ToneMapping(
 //----------------------------------------------------------------------------------------------
 //------------------------------------- Scale Filter to Output ---------------------------------------
 //----------------------------------------------------------------------------------------------
+
+__device__ __inline__ Float3 min3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return min3f(min3f(v1, v2), v3); }
+__device__ __inline__ Float3 max3f3(const Float3& v1, const Float3& v2, const Float3& v3) { return max3f(max3f(v1, v2), v3); }
 
 __device__ __forceinline__ Float3 SoftMin(Float3 **a, int x, int y)
 {

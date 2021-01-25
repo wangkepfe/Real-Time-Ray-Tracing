@@ -2,6 +2,7 @@
 
 #include "kernel.cuh"
 #include "sampler.cuh"
+#include "common.cuh"
 
 //----------------------------------------------------------------------------------------------
 //------------------------------------- Temporal Filter ---------------------------------------
@@ -13,12 +14,26 @@ __constant__ float Gaussian3x3[9] = {
 	1.0f / 16.0f, 1.0f / 8.0f, 1.0f / 16.0f,
 };
 
+__device__ __forceinline__ Float3 RgbToYcocg(const Float3& rgb)
+{
+	float tmp1 = rgb.x + rgb.z;
+	float tmp2 = rgb.y * 2.0f;
+	return Float3(tmp1 + tmp2, (rgb.x - rgb.z) * 2.0f, tmp2 - tmp1);
+}
+
+__device__ __forceinline__ Float3 YcocgToRgb(const Float3& ycocg)
+{
+	float tmp = ycocg.x - ycocg.z;
+	return Float3(tmp + ycocg.y, ycocg.x + ycocg.z, tmp - ycocg.y) * 0.25f;
+}
+
 __global__ void TemporalFilter(
 	SurfObj   colorBuffer,
 	SurfObj   accumulateBuffer,
 	SurfObj   normalDepthBuffer,
 	SurfObj   normalDepthHistoryBuffer,
     SurfObj   motionVectorBuffer,
+	SurfObj   noiseLevelBuffer,
 	Int2      size,
 	Int2      historySize)
 {
@@ -66,8 +81,8 @@ __global__ void TemporalFilter(
 	}
 
 	// Load neighbour color, get max min and guassian
-	Float3 neighbourMax = color;
-	Float3 neighbourMin = color;
+	Float3 neighbourMax = Float3(FLT_MIN);
+	Float3 neighbourMin = Float3(FLT_MAX);
 	Float3 gaussianColor = 0;
 	#pragma unroll
 	for (int i = 0; i < 3; ++i)
@@ -80,13 +95,10 @@ __global__ void TemporalFilter(
 			// gaussian color
 			gaussianColor += Gaussian3x3[i * 3 + j] * neighbourColor;
 
-			// neighbour only
-			if (i != 1 && j != 1)
-			{
-				// max min
-				neighbourMax = max3f(neighbourMax, neighbourColor);
-				neighbourMin = min3f(neighbourMin, neighbourColor);
-			}
+			// max min
+			neighbourColor = RgbToYcocg(neighbourColor);
+			neighbourMax = max3f(neighbourMax, neighbourColor);
+			neighbourMin = min3f(neighbourMin, neighbourColor);
 		}
 	}
 
@@ -94,7 +106,6 @@ __global__ void TemporalFilter(
 	Float2 motionVec = Load2DHalf2(motionVectorBuffer, Int2(x, y)) - Float2(0.5f);
 	Float2 uv = (Float2(x, y) + 0.5f) * (1.0f / Float2(size.x, size.y));
 	Float2 historyUv = uv + motionVec;
-    Float3 colorHistory;
 
 	// history uv out of screen
 	if (historyUv.x < 0 || historyUv.y < 0 || historyUv.x > 1.0 || historyUv.y > 1.0)
@@ -104,10 +115,18 @@ __global__ void TemporalFilter(
 	}
 
 	// sample history
-	colorHistory = SampleBicubicSmoothStep(accumulateBuffer, Load2DHalf3Ushort1Float3, historyUv, historySize);
+	Float3 colorHistory = SampleBicubicSmoothStep(accumulateBuffer, Load2DHalf3Ushort1Float3, historyUv, historySize);
 
 	// clamp history
-	colorHistory = clamp3f(colorHistory, neighbourMin, neighbourMax);
+	Float3 colorHistoryYcocg = RgbToYcocg(colorHistory);
+	colorHistoryYcocg = clamp3f(colorHistoryYcocg, neighbourMin, neighbourMax);
+	colorHistory = YcocgToRgb(colorHistoryYcocg);
+	//colorHistory = clamp3f(colorHistory, neighbourMin, neighbourMax);
+
+	float lumaHistory = colorHistoryYcocg.x;
+	float lumaMin = neighbourMin.x;
+	float lumaMax = neighbourMax.x;
+	float lumaCurrent = GetLuma(color);
 
 	// load history normal and depth
 	Int2 nearestHistoryIdx = Int2(historyUv.x * historySize.x, historyUv.y * historySize.y);
@@ -127,23 +146,35 @@ __global__ void TemporalFilter(
 		(depthRatio < depthRatioLowerLimit) ||
 		(mask != maskHistory);
 
-	// blending factor
-	const float blendFactor = 1.0f / 16.0f;
-
 	Float3 outColor;
 	if (discardHistory)
 	{
+		// use gaussian color if history is rejected
 		outColor = gaussianColor;
 	}
 	else
 	{
-		// blending
+		// blend factor base
+		float blendFactor = 1.0f / 32.0f;
+
+		// anti flickering
+		//blendFactor *= 0.2f + 0.8f * clampf(0.5f * min( abs(lumaHistory - lumaMin), abs(lumaHistory - lumaMax) ) / max3( lumaHistory, lumaCurrent, 1e-4f ));
+
+		// weight with luma hdr factor
+		// float weightA = blendFactor * max(0.0001f, 1.0f / (GetLuma(color) + 4.0f));
+		// float weightB = (1.0f - blendFactor) * max(0.0001f, 1.0f / (GetLuma(colorHistory) + 4.0f));
+		// float weightSum = SafeDivide(1.0f, weightA + weightB);
+		// weightA *= weightSum;
+		// weightB *= weightSum;
+
+		// blend
+		//outColor = color * weightA + colorHistory * weightB
 		outColor = color * blendFactor + colorHistory * (1.0f - blendFactor);
 	}
 
 	if (isnan(outColor.x) || isnan(outColor.y) || isnan(outColor.z))
     {
-        printf("nan found at (%d, %d)\n", x, y);
+        printf("TemporalFilter: nan found at (%d, %d)\n", x, y);
         outColor = 0;
     }
 
@@ -163,6 +194,7 @@ __global__ void AtousFilter2(
 	SurfObj   normalDepthBuffer,
 	SurfObj   normalDepthHistoryBuffer,
 	SurfObj   sampleCountBuffer,
+	SurfObj   noiseLevelBuffer,
 	Int2      size)
 {
 	struct AtrousLDS
@@ -288,16 +320,33 @@ __global__ void AtousFilter2(
 	variancePair /= 25.0f;
 	float variance = max(0.0f, variancePair.y - variancePair.x * variancePair.x);
 
-	//
-	if (((variance > 0.0001f) || (variancePair.x < 0.1f)) && ((x & 0x7) == 3) && ((y & 0x7) == 3))
+	// if noise / signal is > 0.001
+    uint isNoisyPixel = variance / (variancePair.x * variancePair.x) > 0.1f;
+	uint noisyPixelMask = __ballot_sync(0xffffffff, isNoisyPixel);
+	uint noisyPixelCount = __popc(noisyPixelMask);
+
+	// write sample count buffer
+	if (noisyPixelCount > 24 && (x & 0x7) == 0 && (y & 0x7) == 0)
 	{
 		Int2 gridLocation = Int2(x >> 3, y >> 3);
-		Store2D_uchar1(2, sampleCountBuffer, gridLocation);
+
+		int sampleVal = 2;
+		Store2D_uchar1(sampleVal, sampleCountBuffer, gridLocation);
 	}
 
+	// write noise level buffer
+	if ((x & 0x7) == 0 && (y & 0x7) == 0)
+	{
+		Int2 gridLocation = Int2(x >> 3, y >> 3);
+
+		float noiseLevel = noisyPixelCount / 32.0f;
+		Store2DHalf1(noiseLevel, noiseLevelBuffer, gridLocation);
+	}
+
+	// handles nan
 	if (isnan(finalColor.x) || isnan(finalColor.y) || isnan(finalColor.z))
     {
-        printf("nan found at (%d, %d)\n", x, y);
+        printf("AtousFilter2: nan found at (%d, %d)\n", x, y);
         finalColor = 0;
     }
 

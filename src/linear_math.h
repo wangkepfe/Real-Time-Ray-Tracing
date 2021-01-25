@@ -350,6 +350,9 @@ inline __host__ __device__ Float3 reflect3f(Float3 i, Float3 n)                 
 inline __host__ __device__ float  pow2(float a)                                       { return a * a; }
 inline __host__ __device__ float  pow3(float a)                                       { return a * a * a; }
 
+__device__ __inline__ float min3(float v1, float v2, float v3) { return min(min(v1, v2), v3); }
+__device__ __inline__ float max3(float v1, float v2, float v3) { return max(max(v1, v2), v3); }
+
 inline __host__ __device__ unsigned int divRoundUp(unsigned int dividend, unsigned int divisor) { return (dividend + divisor - 1) / divisor; }
 
 struct Mat3

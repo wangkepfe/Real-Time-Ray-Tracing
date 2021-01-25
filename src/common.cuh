@@ -64,3 +64,8 @@ __global__ void PrefixScan(float *data)
 	//printf("data[%d] = %f\n", 2 * i, data[2 * i]);
 	//("data[%d] = %f\n", 2 * i + 1, data[2 * i + 1]);
 }
+
+__device__ __forceinline__ float GetLuma(const Float3& rgb)
+{
+	return rgb.y * 2.0f + rgb.x + rgb.z;
+}

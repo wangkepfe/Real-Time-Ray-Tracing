@@ -296,13 +296,24 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           TexObj                 skyTex,
                           float*                 skyCdf,
                           SurfObj                motionVectorBuffer,
-                          SurfObj                sampleCountBuffer)
+                          SurfObj                sampleCountBuffer,
+                          SurfObj                noiseLevelBuffer)
 {
     // index
     Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
     int i = gridDim.x * blockDim.x * idx.y + idx.x;
 
     int sampleNum = Load2D_uchar1(sampleCountBuffer, Int2(blockIdx.x, blockIdx.y));
+    float historyNoiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
+    if (historyNoiseLevel > 0.75f)
+    {
+        sampleNum = 2;
+    }
+    else
+    {
+        sampleNum = 1;
+    }
+    //int sampleNum = 2;
     ushort materialMask;
     Float3 outColor = 0;
 
@@ -372,20 +383,20 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     if (isnan(outColor.x) || isnan(outColor.y) || isnan(outColor.z))
     {
-        printf("nan found at (%d, %d)\n", idx.x, idx.y);
+        printf("PathTrace: nan found at (%d, %d)\n", idx.x, idx.y);
         outColor = 0;
     }
 
     // adaptive sampling debug
-    // if (sampleNum == 1)
-    // {
-    //     outColor += Float3(0, 0.3f, 0);
-    // }
+    if (sampleNum == 2)
+    {
+        outColor += Float3(0, 0.3f, 0);
+    }
 
     // write to buffer
     Store2DHalf3Ushort1( { outColor , materialMask } , colorBuffer, idx);
 
-    // init sample count to 2
+    // init sample count to 1
 	if (threadIdx.x == 0 && threadIdx.y == 0)
 	{
 		Store2D_uchar1(1, sampleCountBuffer, Int2(blockIdx.x, blockIdx.y));
@@ -399,29 +410,34 @@ void RayTracer::UpdateFrame()
     deltaTime = timer.getDeltaTime();
     clockTime = timer.getTime();
     cbo.clockTime     = clockTime;
+    cbo.camera.resolution = Float2(renderWidth, renderHeight);
+    cbo.camera.update();
 
     // dynamic resolution
-    const int minRenderWidth = 640;
-    const int minRenderHeight = 480;
-
-    historyRenderWidth = renderWidth;
-    historyRenderHeight = renderHeight;
-
-    if (deltaTime > 1000.0f / (TargetFPS - 1.0f) && renderWidth > minRenderWidth && renderHeight > minRenderHeight)
+    if (UseDynamicResolution)
     {
-        renderWidth -= 16;
-        renderHeight -= 9;
-        cbo.camera.resolution = Float2(renderWidth, renderHeight);
-        cbo.camera.update();
+        const int minRenderWidth = 640;
+        const int minRenderHeight = 480;
+
+        historyRenderWidth = renderWidth;
+        historyRenderHeight = renderHeight;
+
+        if (deltaTime > 1000.0f / (TargetFPS - 1.0f) && renderWidth > minRenderWidth && renderHeight > minRenderHeight)
+        {
+            renderWidth -= 16;
+            renderHeight -= 9;
+            cbo.camera.resolution = Float2(renderWidth, renderHeight);
+            cbo.camera.update();
+        }
+        else if (deltaTime < 1000.0f / (TargetFPS + 1.0f) && renderWidth < maxRenderWidth && renderHeight < maxRenderHeight)
+        {
+            renderWidth += 16;
+            renderHeight += 9;
+            cbo.camera.resolution = Float2(renderWidth, renderHeight);
+            cbo.camera.update();
+        }
+        //std::cout << "current FPS = " << 1000.0f / deltaTime << ", resolution = (" << renderWidth << ", " << renderHeight << ")\n";
     }
-    else if (deltaTime < 1000.0f / (TargetFPS + 1.0f) && renderWidth < maxRenderWidth && renderHeight < maxRenderHeight)
-    {
-        renderWidth += 16;
-        renderHeight += 9;
-        cbo.camera.resolution = Float2(renderWidth, renderHeight);
-		cbo.camera.update();
-    }
-    //std::cout << "current FPS = " << 1000.0f / deltaTime << ", resolution = (" << renderWidth << ", " << renderHeight << ")\n";
 
     // update camera
     InputControlUpdate();
@@ -486,7 +502,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     BuildLBVH <<< 1 , triCount >>> (bvhNodes, aabbs, morton, reorderIdx, isAabbDone, triCount);
 
     // ------------------------------- Path Tracing -------------------------------
-    PathTrace<<<gridDim, blockDim>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randGen, colorBufferA, normalDepthBufferA, sceneTextures, skyTex, skyCdf, motionVectorBuffer, sampleCountBuffer);
+    PathTrace<<<gridDim, blockDim>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randGen, colorBufferA, normalDepthBufferA, sceneTextures, skyTex, skyCdf, motionVectorBuffer, sampleCountBuffer, noiseLevelBuffer);
 
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
@@ -498,11 +514,11 @@ void RayTracer::draw(SurfObj* renderTarget)
     // temporal pass
     if (cbo.frameNum != 1)
     {
-        TemporalFilter <<<gridDim, blockDim>>>(colorBufferA, colorBufferB, normalDepthBufferA, normalDepthBufferB, motionVectorBuffer, bufferDim, historyDim);
+        TemporalFilter <<<gridDim, blockDim>>>(colorBufferA, colorBufferB, normalDepthBufferA, normalDepthBufferB, motionVectorBuffer, noiseLevelBuffer, bufferDim, historyDim);
     }
 
     // spatial pass
-    AtousFilter2<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(colorBufferA, colorBufferB, normalDepthBufferA, normalDepthBufferB, sampleCountBuffer, bufferDim);
+    AtousFilter2<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(colorBufferA, colorBufferB, normalDepthBufferA, normalDepthBufferB, sampleCountBuffer, noiseLevelBuffer, bufferDim);
 
     // ------------------------------- post processing -------------------------------
     // Histogram

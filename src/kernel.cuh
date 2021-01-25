@@ -24,6 +24,8 @@
 
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
+const bool UseDynamicResolution = 1;
+
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
 #define RandInitVec curandDirectionVectors32_t
@@ -364,6 +366,9 @@ private:
 
 	SurfObj                     sampleCountBuffer;
 	cudaArray*                  sampleCountBufferArray;
+
+	SurfObj                     noiseLevelBuffer;
+	cudaArray*                  noiseLevelBufferArray;
 
 	// sky
 	const unsigned int          skyWidth = 64;
