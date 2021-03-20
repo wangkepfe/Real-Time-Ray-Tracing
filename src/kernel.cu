@@ -477,7 +477,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // ------------------------------- Update Geometry -----------------------------------
     // out: triangles, aabbs, morton codes
-    UpdateSceneGeometry <512, 2> <<< 1, 512 >>> (constTriangles, triangles, aabbs, sceneBoundingBox, morton, triCount, clockTime);
+    UpdateSceneGeometry <1024, 1> <<< 1, 1024 >>> (constTriangles, triangles, aabbs, sceneBoundingBox, morton, triCount, clockTime);
 
 	GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
