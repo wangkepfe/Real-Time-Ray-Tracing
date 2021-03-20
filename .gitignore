@@ -5,3 +5,5 @@ settings.json
 ref
 bin
 resources/unused
+log
+profile
