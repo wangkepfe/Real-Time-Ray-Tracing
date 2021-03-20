@@ -3,6 +3,10 @@
 #include <device_launch_parameters.h>
 #include <cuda_runtime.h>
 
+#include <iostream>
+#include <fstream>
+#include <cassert>
+
 #define LETS_DEBUG 1
 #if LETS_DEBUG
 #define IS_DEBUG_PIXEL() blockIdx.x * blockDim.x + threadIdx.x == gridDim.x * blockDim.x * 0.5 && blockIdx.y * blockDim.y + threadIdx.y == gridDim.y * blockDim.y * 0.5
@@ -13,6 +17,8 @@
 #define DEBUG_PRINT_BAR if(IS_DEBUG_PIXEL()) { Print("------------------------------"); }
 
 #define DEBUG_CUDA() GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
+
+static const std::string logDir = "C:/Ultimate-Realism-Renderer/log/";
 
 __device__ bool IsPixelAt(float u, float v)
 {
@@ -39,6 +45,88 @@ __device__ bool IsFirstBlock()
 	return (blockIdx.x == x) && (blockIdx.y == y);
 }
 
+struct Triangle;
+struct AABB;
+struct BVHNode;
+
+namespace std
+{
+	ostream& operator<<(ostream& os, const Float3& vec)
+	{
+		return os << vec.x << "," << vec.y << "," << vec.z << ",";
+	}
+
+	ostream& operator<<(ostream& os, const Triangle& triangle)
+	{
+		return os << triangle.v1 << triangle.v2 << triangle.v3;
+	}
+
+	ostream& operator<<(ostream& os, const AABB& aabb)
+	{
+		return os << aabb.max << aabb.min;
+	}
+
+	ostream& operator<<(ostream& os, const BVHNode& bvhNode)
+	{
+		return os << bvhNode.aabb.GetLeftAABB() << bvhNode.aabb.GetRightAABB()
+		          << bvhNode.idxLeft << ","
+				  << bvhNode.idxRight << ","
+				  << bvhNode.isLeftLeaf << ","
+				  << bvhNode.isRightLeaf << ",";
+	}
+};
+
+void writeToPPM(const std::string& filename, int width, int height, uchar4* devicePtr)
+{
+	uchar4* hostPtr = new uchar4[width * height];
+	assert(hostPtr != nullptr);
+
+	GpuErrorCheck(cudaMemcpy(hostPtr, devicePtr, width * height * sizeof(uchar4), cudaMemcpyDeviceToHost));
+
+	std::string fullFilename = logDir + filename;
+
+    FILE *f = fopen(fullFilename.c_str(), "w");
+	assert(f != nullptr);
+
+    fprintf(f, "P3\n%d %d\n%d\n", width, height, 255);
+
+    for (int i = 0; i < width * height; i++)
+	{
+        fprintf(f, "%d %d %d ", hostPtr[i].x, hostPtr[i].y, hostPtr[i].z);
+	}
+
+    fclose(f);
+    printf("Successfully wrote result image to %s\n", filename.c_str());
+
+	delete hostPtr;
+}
+
+template<typename T>
+__host__ void DebugPrintFile(const std::string& filename, T* devicePtr, uint arraySize)
+{
+	T* hostPtr = new T[arraySize];
+	assert(hostPtr != nullptr);
+
+	GpuErrorCheck(cudaMemcpy(hostPtr, devicePtr, arraySize * sizeof(T), cudaMemcpyDeviceToHost));
+
+	std::string fullFilename = logDir + filename;
+
+	std::ofstream myfile;
+	myfile.open (fullFilename);
+
+	if (myfile.is_open())
+	{
+		for (int i = 0; i < arraySize; ++i)
+		{
+			myfile << hostPtr[i] << "\n";
+		}
+
+		myfile.close();
+	}
+
+	delete hostPtr;
+}
+
 __device__ void Print(const char* name) { printf("%s\n", name); }
 __device__ void Print(const char* name, const int& n) { printf("%s = %d\n", name, n); }
 __device__ void Print(const char* name, const bool& n) { printf("%s = %s\n", name, n ? "true" : "false"); }
@@ -49,3 +137,19 @@ __device__ void Print(const char* name, const float& n) { printf("%s = %f\n", na
 __device__ void Print(const char* name, const Float2& f3) { printf("%s = (%f, %f)\n", name, f3[0], f3[1]); }
 __device__ void Print(const char* name, const Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }
 __device__ void Print(const char* name, const Float4& f4) { printf("%s = (%f, %f, %f, %f)\n", name, f4[0], f4[1], f4[2], f4[3]); }
+
+__global__ void CopyFrameBuffer(
+	uchar4*  dumpFrameBuffer,
+	SurfObj* renderTarget,
+	Int2     outSize)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= outSize.x || idx.y >= outSize.y) return;
+
+	uchar4 val = surf2Dread<uchar4>(renderTarget[0], idx.x * 4 * sizeof(uchar1), idx.y, cudaBoundaryModeClamp);
+
+	dumpFrameBuffer[idx.x + idx.y * outSize.x] = val;
+}

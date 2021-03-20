@@ -64,6 +64,24 @@ struct __align__(16) AABBCompact
 		            Float3(min(box1minX, box2minX), min(box1minY, box2minY), min(box1minZ, box2minZ)));
 	}
 
+	__host__ __device__ void SetLeftAABB(const AABB& aabb) {
+		box1maxX = aabb.max.x;
+		box1maxY = aabb.max.y;
+		box1maxZ = aabb.max.z;
+		box1minX = aabb.min.x;
+		box1minY = aabb.min.y;
+		box1minZ = aabb.min.z;
+	}
+
+	__host__ __device__ void SetRightAABB(const AABB& aabb) {
+		box2maxX = aabb.max.x;
+		box2maxY = aabb.max.y;
+		box2maxZ = aabb.max.z;
+		box2minX = aabb.min.x;
+		box2minY = aabb.min.y;
+		box2minZ = aabb.min.z;
+	}
+
 	__host__ __device__ AABB GetLeftAABB() const {
 		return AABB(Float3(box1maxX, box1maxY, box1maxZ), Float3(box1minX, box1minY, box1minZ));
 	}

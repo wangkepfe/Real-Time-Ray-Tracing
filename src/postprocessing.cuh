@@ -690,10 +690,10 @@ __global__ void BicubicFilterScale(
 
 	sampledColor = clamp3f(sampledColor, Float3(0), Float3(1));
 
-	surf2Dwrite(make_uchar4(sampledColor.x * 255,
-							sampledColor.y * 255,
-							sampledColor.z * 255,
-							1.0),
+	surf2Dwrite(make_uchar4(sampledColor.x * 255 + 0.5f,
+							sampledColor.y * 255 + 0.5f,
+							sampledColor.z * 255 + 0.5f,
+							1.0f),
 		        renderTarget[0],
 				idx.x * 4,
 				idx.y);

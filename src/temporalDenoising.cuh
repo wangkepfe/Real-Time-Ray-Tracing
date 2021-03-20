@@ -73,6 +73,9 @@ __global__ void TemporalFilter(
 	Float3 color = center.xyz;
 	ushort mask = center.w;
 
+	// load noise level
+	float historyNoiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
+
 	// Early return for background pixel
 	if (depth >= RayMax)
 	{
@@ -155,7 +158,10 @@ __global__ void TemporalFilter(
 	else
 	{
 		// blend factor base
-		float blendFactor = 1.0f / 32.0f;
+		float blendFactor = 1.0f / 16.0f;
+
+		// history noies level
+		blendFactor = lerpf(1.0f / 16.0f, 1.0f / 64.f, historyNoiseLevel);
 
 		// anti flickering
 		//blendFactor *= 0.2f + 0.8f * clampf(0.5f * min( abs(lumaHistory - lumaMin), abs(lumaHistory - lumaMax) ) / max3( lumaHistory, lumaCurrent, 1e-4f ));
@@ -320,19 +326,11 @@ __global__ void AtousFilter2(
 	variancePair /= 25.0f;
 	float variance = max(0.0f, variancePair.y - variancePair.x * variancePair.x);
 
-	// if noise / signal is > 0.001
-    uint isNoisyPixel = variance / (variancePair.x * variancePair.x) > 0.1f;
+	// if variance / color^2 is > threshold
+	const float noiseThreshold = 0.1f;
+    uint isNoisyPixel = variance / (variancePair.x * variancePair.x) > noiseThreshold;
 	uint noisyPixelMask = __ballot_sync(0xffffffff, isNoisyPixel);
 	uint noisyPixelCount = __popc(noisyPixelMask);
-
-	// write sample count buffer
-	if (noisyPixelCount > 24 && (x & 0x7) == 0 && (y & 0x7) == 0)
-	{
-		Int2 gridLocation = Int2(x >> 3, y >> 3);
-
-		int sampleVal = 2;
-		Store2D_uchar1(sampleVal, sampleCountBuffer, gridLocation);
-	}
 
 	// write noise level buffer
 	if ((x & 0x7) == 0 && (y & 0x7) == 0)

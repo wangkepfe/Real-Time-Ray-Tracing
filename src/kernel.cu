@@ -303,17 +303,9 @@ __global__ void PathTrace(ConstBuffer            cbo,
     Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
     int i = gridDim.x * blockDim.x * idx.y + idx.x;
 
-    int sampleNum = Load2D_uchar1(sampleCountBuffer, Int2(blockIdx.x, blockIdx.y));
     float historyNoiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
-    if (historyNoiseLevel > 0.75f)
-    {
-        sampleNum = 2;
-    }
-    else
-    {
-        sampleNum = 1;
-    }
-    //int sampleNum = 2;
+    int sampleNum = 1;
+
     ushort materialMask;
     Float3 outColor = 0;
 
@@ -388,19 +380,13 @@ __global__ void PathTrace(ConstBuffer            cbo,
     }
 
     // adaptive sampling debug
-    if (sampleNum == 2)
-    {
-        outColor += Float3(0, 0.3f, 0);
-    }
+    // if (sampleNum == 2)
+    // {
+    //     outColor += Float3(0, 0.3f, 0);
+    // }
 
     // write to buffer
     Store2DHalf3Ushort1( { outColor , materialMask } , colorBuffer, idx);
-
-    // init sample count to 1
-	if (threadIdx.x == 0 && threadIdx.y == 0)
-	{
-		Store2D_uchar1(1, sampleCountBuffer, Int2(blockIdx.x, blockIdx.y));
-	}
 }
 
 void RayTracer::UpdateFrame()
@@ -491,15 +477,44 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // ------------------------------- Update Geometry -----------------------------------
     // out: triangles, aabbs, morton codes
-    UpdateSceneGeometry <BVHcapacity> <<< 1, triCount >>> (constTriangles, triangles, aabbs, sceneBoundingBox, morton, triCount, clockTime);
+    UpdateSceneGeometry <512, 2> <<< 1, 512 >>> (constTriangles, triangles, aabbs, sceneBoundingBox, morton, triCount, clockTime);
+
+	GpuErrorCheck(cudaDeviceSynchronize());
+	GpuErrorCheck(cudaPeekAtLastError());
+
+    if (cbo.frameNum == 10)
+    {
+        DebugPrintFile("constTriangles.csv", constTriangles, triCount);
+        DebugPrintFile("triangles.csv", triangles, triCount);
+        DebugPrintFile("aabbs.csv", aabbs, triCount);
+        DebugPrintFile("sceneBoundingBox.csv", sceneBoundingBox, 1);
+        DebugPrintFile("morton.csv", morton, BVHcapacity);
+    }
 
     // ------------------------------- Radix Sort -----------------------------------
     // in: morton code; out: reorder idx
-    RadixSort <BVHcapacity> <<< 1, BVHcapacity >>> (morton, reorderIdx);
+    RadixSort <1024> <<< 1, 1024 >>> (morton, reorderIdx);
+
+	GpuErrorCheck(cudaDeviceSynchronize());
+	GpuErrorCheck(cudaPeekAtLastError());
+
+    if (cbo.frameNum == 10)
+    {
+        DebugPrintFile("morton2.csv", morton, BVHcapacity);
+        DebugPrintFile("reorderIdx.csv", reorderIdx, BVHcapacity);
+    }
 
     // ------------------------------- Build LBVH -----------------------------------
     // in: aabbs, morton code, reorder idx; out: lbvh
-    BuildLBVH <<< 1 , triCount >>> (bvhNodes, aabbs, morton, reorderIdx, isAabbDone, triCount);
+    BuildLBVH <1024, 1> <<< 1 , triCount - 1>>> (bvhNodes, aabbs, morton, reorderIdx, triCount);
+
+	GpuErrorCheck(cudaDeviceSynchronize());
+	GpuErrorCheck(cudaPeekAtLastError());
+
+    if (cbo.frameNum == 10)
+    {
+        DebugPrintFile("bvhNodes.csv", bvhNodes, triCount - 1);
+    }
 
     // ------------------------------- Path Tracing -------------------------------
     PathTrace<<<gridDim, blockDim>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randGen, colorBufferA, normalDepthBufferA, sceneTextures, skyTex, skyCdf, motionVectorBuffer, sampleCountBuffer, noiseLevelBuffer);
@@ -552,4 +567,12 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // Scale to final output
     BicubicFilterScale<<<scaleGridDim, scaleBlockDim>>>(/*out*/renderTarget, /*in*/colorBufferA, outputDim, bufferDim);
+
+    if (cbo.frameNum == 10)
+    {
+        // debug
+	    CopyFrameBuffer <<<scaleGridDim, scaleBlockDim>>>(dumpFrameBuffer, renderTarget, outputDim);
+
+        writeToPPM("image.ppm", outputDim.x, outputDim.y, dumpFrameBuffer);
+    }
 }

@@ -409,9 +409,6 @@ private:
 	float                       deltaTime;
 	float                       clockTime;
 
-	// save to file
-	Float4*                     saveToFileBuffer;
-
 	// bvh and triangles
 	uint       triCount;
 	static const uint BVHcapacity = 1024;
@@ -422,6 +419,10 @@ private:
 	uint*      morton;
 	uint*      reorderIdx;
 	BVHNode*   bvhNodes;
+	uint*      bvhNodeParents;
 	uint*      isAabbDone;
+
+	//
+	uchar4* dumpFrameBuffer;
 };
 

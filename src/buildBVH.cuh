@@ -12,9 +12,16 @@ __device__ __inline__ int LCP(uint* morton, uint triCount, int m0, int j)
 	return res;
 }
 
-__global__ void BuildLBVH (BVHNode* bvhNodes, AABB* aabbs, uint* morton, uint* reorderIdx,/* uint* bvhNodeParent,*/ uint* isAabbDone, uint triCount)
+template<uint kernelSize,          // thread number per kernel, same as LDS size, LDS-thread 1-to-1 mapping
+         uint perThreadBatch>      // batch process count per thread
+__global__ void BuildLBVH (
+	BVHNode* bvhNodes, // [out]
+	AABB* aabbs,       // [in]
+	uint* morton,      // [in]
+	uint* reorderIdx,  // [in]
+	uint triCount)
 {
-	uint i = blockIdx.x * blockDim.x + threadIdx.x;
+	uint i = threadIdx.x;
 	if (i >= triCount - 1) { return; }
 
 	//-------------------------------------------------------------------------------------------------------------------------
@@ -60,6 +67,10 @@ __global__ void BuildLBVH (BVHNode* bvhNodes, AABB* aabbs, uint* morton, uint* r
 	}
 	int gamma = i + s * d + min(d, 0);
 
+	__shared__ ushort parentIdx[kernelSize * perThreadBatch];
+	__shared__ uint tempIdx[kernelSize * perThreadBatch];
+	tempIdx[i] = 0;
+
 	// Output child pointers. the children of Ii cover the ranges [min(i, j), γ] and [γ + 1,max(i, j)]
 	if (min(i, j) == gamma)
 	{
@@ -70,7 +81,7 @@ __global__ void BuildLBVH (BVHNode* bvhNodes, AABB* aabbs, uint* morton, uint* r
 	{
 		bvhNodes[i].isLeftLeaf = 0;
 		bvhNodes[i].idxLeft = gamma;
-		//bvhNodeParent[gamma] = i;
+		parentIdx[gamma] = i;
 	}
 
 	if (max(i, j) == gamma + 1)
@@ -82,21 +93,54 @@ __global__ void BuildLBVH (BVHNode* bvhNodes, AABB* aabbs, uint* morton, uint* r
 	{
 		bvhNodes[i].isRightLeaf = 0;
 		bvhNodes[i].idxRight = gamma + 1;
-		//bvhNodeParent[gamma + 1] = i;
+		parentIdx[gamma + 1] = i;
 	}
-	//-------------------------------------------------------------------------------------------------------------------------
 
-	while(atomicCAS(&isAabbDone[0], 0, 0) == 0)
+	__syncthreads();
+
+	//------------------------------------------------- bvh build ----------------------------------------------------------
+	// The node with two leaves
+	if (bvhNodes[i].isLeftLeaf && bvhNodes[i].isRightLeaf)
 	{
-		if (((bvhNodes[i].isLeftLeaf == 1)  || (bvhNodes[i].isLeftLeaf == 0  && atomicCAS(&isAabbDone[bvhNodes[i].idxLeft], 0, 0) == 1)) &&
-		    ((bvhNodes[i].isRightLeaf == 1) || (bvhNodes[i].isRightLeaf == 0 && atomicCAS(&isAabbDone[bvhNodes[i].idxRight], 0, 0) == 1)))
+		bvhNodes[i].aabb = AABBCompact(aabbs[bvhNodes[i].idxLeft], aabbs[bvhNodes[i].idxRight]);
+	}
+	else
+	{
+		return;
+	}
+
+	// keep merging, until top has a bvh
+	while(1)
+	{
+		// save current node idx
+		uint thisIndex = i;
+
+		// go to parent node
+		i = parentIdx[i];
+
+		// If the node has a leaf
+		if (bvhNodes[i].isLeftLeaf)
 		{
-			AABB leftAabb  = (bvhNodes[i].isLeftLeaf  == 1) ? aabbs[bvhNodes[i].idxLeft]  : bvhNodes[bvhNodes[i].idxLeft ].aabb.GetMerged();
-			AABB rightAabb = (bvhNodes[i].isRightLeaf == 1) ? aabbs[bvhNodes[i].idxRight] : bvhNodes[bvhNodes[i].idxRight].aabb.GetMerged();
-
-			bvhNodes[i].aabb = AABBCompact(leftAabb, rightAabb);
-
-			atomicExch(&isAabbDone[i], 1);
+			bvhNodes[i].aabb = AABBCompact(aabbs[bvhNodes[i].idxLeft], bvhNodes[thisIndex].aabb.GetMerged());
 		}
+		else if (bvhNodes[i].isRightLeaf)
+		{
+			bvhNodes[i].aabb = AABBCompact(bvhNodes[thisIndex].aabb.GetMerged(), aabbs[bvhNodes[i].idxRight]);
+		}
+		// If the node has two children nodes
+		else
+		{
+			// Two nodes will be here, the first one should record index and return, the second node can process
+			uint theOtherIndex = atomicCAS(&tempIdx[i], 0, thisIndex);
+
+			if (theOtherIndex == 0)
+			{
+				return;
+			}
+
+			bvhNodes[i].aabb = AABBCompact(bvhNodes[thisIndex].aabb.GetMerged(), bvhNodes[theOtherIndex].aabb.GetMerged());
+		}
+
+		if (i == 0) break;
 	}
 }

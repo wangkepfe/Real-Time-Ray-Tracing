@@ -47,26 +47,58 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		//const chat* filename = "resources/models/testCube.obj";
 		const char* filename = "resources/models/monkey.obj";
 		LoadScene(filename, h_triangles);
-		triCount = static_cast<uint>(h_triangles.size());
+
+		uint triCountRaw = static_cast<uint>(h_triangles.size());
+
+		uint batchSize = 1;
+
+		// pad the tri count to a multiply of batchSize
+		triCount = triCountRaw;
+		if (triCount % batchSize != 0)
+		{
+			triCount += (batchSize - triCount % batchSize);
+
+			h_triangles.resize(triCount);
+
+			// repeat the last triangle for a few times
+			for (int i = triCountRaw; i < triCount; ++i)
+			{
+				h_triangles[i] = h_triangles[triCountRaw - 1];
+			}
+		}
 
 		GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCount * sizeof(Triangle)));
 		GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCount * sizeof(Triangle), cudaMemcpyHostToDevice));
 	}
 
-	// bvh
+	// -------------------------------- bvh ---------------------------------------
+	// triangle
 	GpuErrorCheck(cudaMalloc((void**)& triangles, triCount * sizeof(Triangle)));
+
+	// aabb
 	GpuErrorCheck(cudaMalloc((void**)& aabbs, triCount * sizeof(AABB)));
 
+	// scene aabb
 	GpuErrorCheck(cudaMalloc((void**) &sceneBoundingBox, sizeof(AABB)));
 
+	// morton code
 	GpuErrorCheck(cudaMalloc((void**)& morton, BVHcapacity * sizeof(uint)));
-	GpuErrorCheck(cudaMemset(morton, UINT_MAX, BVHcapacity * sizeof(uint)));
+	GpuErrorCheck(cudaMemset(morton, UINT_MAX, BVHcapacity * sizeof(uint))); // init morton code to UINT_MAX
 
+	// reorder idx
 	GpuErrorCheck(cudaMalloc((void**)& reorderIdx, BVHcapacity * sizeof(uint)));
 
+	// bvh nodes
 	GpuErrorCheck(cudaMalloc((void**)& bvhNodes, (triCount - 1) * sizeof(BVHNode)));
+
+	// bvh node parents
+	GpuErrorCheck(cudaMalloc((void**)& bvhNodeParents, (triCount - 1) * sizeof(uint)));
+
+	// is aabb done (helper)
 	GpuErrorCheck(cudaMalloc((void**)& isAabbDone, (triCount - 1) * sizeof(uint)));
-	GpuErrorCheck(cudaMemset(isAabbDone, 0, (triCount - 1) * sizeof(uint)));
+	GpuErrorCheck(cudaMemset(isAabbDone, 0, (triCount - 1) * sizeof(uint))); // init aabb done to false
+
+	//-------------------------------------------------------------------------------
 
 	// AABB
 	int numAabbs = 2;
@@ -119,7 +151,6 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	++i;
 	materials[i].type          = LAMBERTIAN_DIFFUSE;
 	materials[i].albedo        = Float3(0.1f, 0.2f, 0.9f);
-
 
 	// number of objects
 	const int numObjects = triCount + numSpheres;
@@ -258,6 +289,10 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	// histogram
 	GpuErrorCheck(cudaMalloc((void**)& d_histogram, 64 * sizeof(uint)));
 
+	//
+	GpuErrorCheck(cudaMalloc((void**)& dumpFrameBuffer, screenWidth * screenHeight * sizeof(uchar4)));
+	GpuErrorCheck(cudaMemset(dumpFrameBuffer, 0, screenWidth * screenHeight * sizeof(uchar4)));
+
 	// scene
 	GpuErrorCheck(cudaMalloc((void**)& d_spheres          , numSpheres *       sizeof(Sphere)));
 	GpuErrorCheck(cudaMalloc((void**)& d_sceneAabbs       , numAabbs *         sizeof(AABB)));
@@ -322,7 +357,7 @@ void RayTracer::CameraSetup(Camera& camera)
 	//Float3 camToObj = cameraLookAtPoint - camera.pos;
 
 	//camera.dir = normalize(camToObj);
-	camera.yaw = 0;
+	camera.yaw = -M_PI / 4.0f;
 	camera.pitch = 0;
 	camera.up  = { 0.0f, 1.0f, 0.0f };
 
@@ -388,12 +423,13 @@ void RayTracer::cleanup()
 	cudaFreeArray(noiseLevelBufferArray);
 
 	// ---------------------- destroy texture objects --------------------------
-	cudaDestroyTextureObject(sceneTextures.sandAlbedo);
 	cudaDestroyTextureObject(sceneTextures.uv);
-	cudaDestroyTextureObject(sceneTextures.sandNormal);
-	if (texArraySandAlbedo != nullptr) cudaFreeArray(texArraySandAlbedo);
-	if (texArrayUv         != nullptr) cudaFreeArray(texArrayUv);
-	if (texArraySandNormal != nullptr) cudaFreeArray(texArraySandNormal);
+	cudaFreeArray(texArrayUv);
+
+	//cudaDestroyTextureObject(sceneTextures.sandAlbedo);
+	//cudaDestroyTextureObject(sceneTextures.sandNormal);
+	//if (texArraySandAlbedo != nullptr) cudaFreeArray(texArraySandAlbedo);
+	//if (texArraySandNormal != nullptr) cudaFreeArray(texArraySandNormal);
 
 	// sky
 	cudaDestroyTextureObject(skyTex);
@@ -412,6 +448,8 @@ void RayTracer::cleanup()
 	cudaFree(d_sceneAabbs);
 	cudaFree(d_materialsIdx);
 	cudaFree(d_sphereLights);
+
+	cudaFree(dumpFrameBuffer);
 
 	// random
 	h_randGen.clear();
