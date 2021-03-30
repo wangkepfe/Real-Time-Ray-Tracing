@@ -24,6 +24,8 @@
 
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
+#define DEBUG_FRAME 1
+
 const bool UseDynamicResolution = 1;
 
 // ---------------------- type define ----------------------
@@ -419,8 +421,6 @@ private:
 	uint*      morton;
 	uint*      reorderIdx;
 	BVHNode*   bvhNodes;
-	uint*      bvhNodeParents;
-	uint*      isAabbDone;
 
 	//
 	uchar4* dumpFrameBuffer;

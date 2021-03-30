@@ -50,7 +50,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 		uint triCountRaw = static_cast<uint>(h_triangles.size());
 
-		uint batchSize = 1;
+		uint batchSize = 4;
 
 		// pad the tri count to a multiply of batchSize
 		triCount = triCountRaw;
@@ -89,15 +89,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)& reorderIdx, BVHcapacity * sizeof(uint)));
 
 	// bvh nodes
-	GpuErrorCheck(cudaMalloc((void**)& bvhNodes, (triCount - 1) * sizeof(BVHNode)));
-
-	// bvh node parents
-	GpuErrorCheck(cudaMalloc((void**)& bvhNodeParents, (triCount - 1) * sizeof(uint)));
-
-	// is aabb done (helper)
-	GpuErrorCheck(cudaMalloc((void**)& isAabbDone, (triCount - 1) * sizeof(uint)));
-	GpuErrorCheck(cudaMemset(isAabbDone, 0, (triCount - 1) * sizeof(uint))); // init aabb done to false
-
+	GpuErrorCheck(cudaMalloc((void**)& bvhNodes, triCount * sizeof(BVHNode)));
 	//-------------------------------------------------------------------------------
 
 	// AABB
@@ -159,7 +151,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	int* materialsIdx = new int[numObjects];
 	for (i = 0; i < triCount; ++i)
 	{
-		materialsIdx[i] = 1;
+		materialsIdx[i] = 4;
 	}
 	materialsIdx[i++] = 0;
 	materialsIdx[i++] = 2;
@@ -351,7 +343,7 @@ void RayTracer::CameraSetup(Camera& camera)
 {
 	//cameraFocusPos = Float3(0, 1.0f, 0);
 	//camera.pos = cameraFocusPos + Float3(7.3f, 2.0f, -6.9f);
-	camera.pos = Float3(7.3f, 2.0f, -6.9f);
+	camera.pos = Float3(4.3f, 1.4f, -3.9f);
 
 	//Float3 cameraLookAtPoint = cameraFocusPos;
 	//Float3 camToObj = cameraLookAtPoint - camera.pos;
@@ -382,7 +374,6 @@ void RayTracer::cleanup()
 	cudaFree(morton);
 	cudaFree(reorderIdx);
 	cudaFree(bvhNodes);
-	cudaFree(isAabbDone);
 
 	// color buffer
     cudaDestroySurfaceObject(colorBufferA);

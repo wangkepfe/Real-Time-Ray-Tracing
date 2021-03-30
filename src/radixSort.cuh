@@ -3,181 +3,236 @@
 #include "cuda_runtime.h"
 #include "linear_math.h"
 
-template<typename T>
-__device__ __forceinline__ void ReduceAddToRightVec(volatile T* buffer, uint i, uint n, uint vecIdx, uint vecLen, uint& step, uint& stepBit, bool canReadWrite)
-{
-	stepBit = 1;
-	step = 1;
-	#pragma unroll
-	while (step < n)
-	{
-		if (canReadWrite && i < (n >> stepBit))
-		{
-			uint idxR = n - 1 - 2 * i * step;
-			uint idxL = idxR - step;
-
-			idxR = idxR * vecLen + vecIdx;
-			idxL = idxL * vecLen + vecIdx;
-
-			buffer[idxR] += buffer[idxL];
-		}
-		__syncthreads();
-
-		step <<= 1;
-		++stepBit;
-	}
-	step >>= 1;
-	--stepBit;
-}
-
-template<typename T>
-__device__ __forceinline__ void ClearAndRecordSumVec(volatile T* buffer, volatile T* recordBuffer, uint i, uint n, uint vecIdx, uint vecLen, bool canReadWrite)
-{
-	if (canReadWrite && i == (n >> 1) - 1)
-	{
-		uint lastIdx = (n - 1) * vecLen + vecIdx;
-		T sum = buffer[lastIdx];
-		buffer[lastIdx] = 0;
-		recordBuffer[vecIdx] = sum;
-	}
-	__syncthreads();
-}
-
-template<typename T>
-__device__ __forceinline__ void ScanOnReducedVec(volatile T* buffer, uint i, uint n, uint vecIdx, uint vecLen, uint& step, uint& stepBit, bool canReadWrite)
-{
-	#pragma unroll
-	while (step >= 1)
-	{
-		if (canReadWrite && i < (n >> stepBit))
-		{
-			uint idxR = n - 1 - 2 * i * step;
-			uint idxL = idxR - step;
-
-			idxR = idxR * vecLen + vecIdx;
-			idxL = idxL * vecLen + vecIdx;
-
-			T left = buffer[idxL];
-			T right = buffer[idxR];
-
-			buffer[idxL] = right;
-			buffer[idxR] = left + right;
-		}
-		__syncthreads();
-		step >>= 1;
-		--stepBit;
-	}
-}
-
-template<typename T>
-__device__ __forceinline__ void InclusiveScan16(T& v, uint laneId)
+template<typename T, uint size>
+__device__ __forceinline__ void SimdInclusiveScan(T& v, uint laneId)
 {
 	T v1 = __shfl_sync(0xffffffff, v, laneId - 1); v = v1;
 	if (laneId == 0) { v = 0; }
 
-	v1 = __shfl_sync(0xffffffff, v, laneId - 1); if (laneId > 0) { v += v1; }
-	v1 = __shfl_sync(0xffffffff, v, laneId - 2); if (laneId > 1) { v += v1; }
-	v1 = __shfl_sync(0xffffffff, v, laneId - 4); if (laneId > 3) { v += v1; }
-	v1 = __shfl_sync(0xffffffff, v, laneId - 8); if (laneId > 7) { v += v1; }
+	if (size > 1) { v1 = __shfl_sync(0xffffffff, v, laneId - 1); if (laneId > 0) { v += v1; } }
+	if (size > 2) { v1 = __shfl_sync(0xffffffff, v, laneId - 2); if (laneId > 1) { v += v1; } }
+	if (size > 4) { v1 = __shfl_sync(0xffffffff, v, laneId - 4); if (laneId > 3) { v += v1; } }
+	if (size > 8) { v1 = __shfl_sync(0xffffffff, v, laneId - 8); if (laneId > 7) { v += v1; } }
+	if (size > 16) { v1 = __shfl_sync(0xffffffff, v, laneId - 16); if (laneId > 15) { v += v1; } }
 }
 
-template<uint lds_size>
-__global__ void RadixSort(uint* inout, uint* reorderIdx)
+template<uint kernelSize,          // thread number per kernel, same as LDS size, LDS-thread 1-to-1 mapping
+	uint perThreadBatch>      // batch process count per thread
+	__global__ void RadixSort(uint* inout, uint* reorderIdx)
 {
-	struct LDS
-	{
-		uint tempIdx[lds_size];
-		uint temp[lds_size];
-		ushort histo[16 * (lds_size / 32)]; // 16 values per warp
-		ushort histoScan[16]; // 16 in total
-	};
+	// warp count
+	const uint warpCount = kernelSize >> 5;
 
-	volatile __shared__ LDS lds;
-	lds.tempIdx[threadIdx.x] = threadIdx.x;
-
-	//------------------------------------ Read data in ----------------------------------------
-    lds.temp[threadIdx.x] = inout[threadIdx.x];
-	__syncthreads();
+	// thread id
+	uint tid = threadIdx.x;
 
 	// lane id and warp id
-	uint laneId = threadIdx.x & 0x1f;
-	uint warpId = (threadIdx.x & 0xffffffe0) >> 5u;
-	uint warpCount = lds_size >> 5u;
+	uint laneId = tid & 0x1f;
+	uint warpId = tid >> 5;
 
-	// loop for each 4 bits
-	#pragma unroll
+	// lds
+	struct LDS
+	{
+		// temporary value holder
+		uint   temp[perThreadBatch * kernelSize];
+
+		// temporary reorderIdx holder
+		ushort tempIdx[perThreadBatch * kernelSize];
+
+		// 4-bit 16 values per warp
+		ushort histogramScan[perThreadBatch * warpCount + 1][32];
+	};
+	volatile __shared__ LDS lds;
+
+	//------------------------------------ Read data in ----------------------------------------
+
+#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		uint id = warpId * 32 * perThreadBatch + i * 32 + laneId;
+
+		lds.tempIdx[id] = id;
+		lds.temp[id] = inout[id];
+	}
+
+	__syncthreads();
+
+	//------------------------------------ loop for each 4 bits ----------------------------------------
+#pragma unroll
 	for (uint bitOffset = 0; bitOffset < 4 * 8; bitOffset += 4)
 	{
-		// load number
-		uint num = lds.temp[threadIdx.x];
-
-		// extract 4 bits
-		uint num4bit = (num & (0xf << bitOffset)) >> bitOffset;
-
 		//------------------------------------ Init LDS ----------------------------------------
-		if (laneId < 16) { lds.histo[warpId * 16 + laneId] = 0; }
-		if (warpId == 0 && laneId < 16) { lds.histoScan[laneId] = 0; }
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
+		{
+			uint wid = warpId * perThreadBatch + i;
+
+			lds.histogramScan[wid + 1][laneId] = 0;
+		}
+
+		if (warpId == 0)
+		{
+			lds.histogramScan[0][laneId] = 0;
+		}
+
+		//------------------------------------ load number ----------------------------------------
+		uint num[perThreadBatch];
+		uint num4bit[perThreadBatch];
+
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
+		{
+			uint id = warpId * 32 * perThreadBatch + i * 32 + laneId;
+
+			// copy global to lds
+			num[i] = lds.temp[id];
+
+			// extract 4 bits
+			num4bit[i] = (num[i] & (0xf << bitOffset)) >> bitOffset;
+		}
 		__syncthreads();
 
 		//------------------------------------ Warp count and offset, by polling for same number to the current thread ----------------------------------------
+		uint pos[perThreadBatch];
+		uint count[perThreadBatch];
 
-		// mask indicates threads having equal value number with current thread
-		uint mask = 0xffffffff;
-		#pragma unroll
-		for (int i = 0; i < 4; ++i)
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
 		{
-			uint bitPred = num4bit & (0x1 << i);
-			uint maskOne = __ballot_sync(0xffffffff, bitPred);
-			mask = mask & (bitPred ? maskOne : ~maskOne);
+			// mask indicates threads having equal value number with current thread
+			uint mask = 0xffffffff;
+#pragma unroll
+			for (uint bit = 0; bit < 4; ++bit)
+			{
+				uint bitPred = num4bit[i] & (0x1 << bit);
+				uint maskOne = __ballot_sync(0xffffffff, bitPred);
+				mask = mask & (bitPred ? maskOne : ~maskOne);
+			}
+
+			// index in an array formed by the same value in the group
+			// value 0 1 2 3 2 2 1 2
+			// pos   1 1 1 1 2 3 2 4
+			pos[i] = __popc(mask & (0xffffffff >> (31u - laneId)));
+
+			// total count of the same value number in the group
+			// value 0 1 2 3 2 2 1 2
+			// count 1 2 4 1 4 4 2 4
+			count[i] = __popc(mask);
 		}
 
-		// offset of current value number
-		uint pos = __popc(mask & (0xffffffff >> (31u - laneId)));
+		//------------------------------------ Write simd local result to lds ------------------------------------
 
-		// count of current value number
-		uint count = __popc(mask);
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
+		{
+			uint wid = warpId * perThreadBatch + i;
 
-		//------------------------------------ Scan across the warps, each has 16 values for number count within a warp ----------------------------------------
-
-		if (pos == 1) { lds.histo[warpId * 16 + num4bit] = count; }
+			// Each warp has 32 numbers, the numbers are ranged in 16 values, each value has a count of numbers
+			if (pos[i] == 1)
+			{
+				lds.histogramScan[wid + 1][num4bit[i]] = count[i];
+			}
+		}
 		__syncthreads();
 
-		bool canReadWrite = (laneId < 16 && warpId < (warpCount / 2));
+		//------------------------------------ Scan across the warps, each has 16 values for number count within a warp ----------------------------------------
+		uint tempBlockSum[perThreadBatch];
 
-		uint stepBit, step;
-		ReduceAddToRightVec(lds.histo, warpId, warpCount, laneId, 16, step, stepBit, canReadWrite);
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
+		{
+			uint wid = warpId * perThreadBatch + i;
 
-		ClearAndRecordSumVec(lds.histo, lds.histoScan, warpId, warpCount, laneId, 16, canReadWrite);
+			tempBlockSum[i] = lds.histogramScan[wid + 1][laneId];
+		}
 
-		ScanOnReducedVec(lds.histo, warpId, warpCount, laneId, 16, step, stepBit, canReadWrite);
+#pragma unroll
+		for (uint offset = 1; offset < warpCount * perThreadBatch; offset *= 2)
+		{
+			__syncthreads();
+
+#pragma unroll
+			for (uint i = 0; i < perThreadBatch; ++i)
+			{
+				uint wid = warpId * perThreadBatch + i;
+
+				if (wid >= offset)
+				{
+					tempBlockSum[i] += lds.histogramScan[wid - offset + 1][laneId];
+				}
+			}
+
+			__syncthreads();
+
+#pragma unroll
+			for (uint i = 0; i < perThreadBatch; ++i)
+			{
+				uint wid = warpId * perThreadBatch + i;
+
+				lds.histogramScan[wid + 1][laneId] = tempBlockSum[i];
+			}
+		}
+
+		__syncthreads();
 
 		//------------------------------------ Scan 16 values for total count of 16 numbers ----------------------------------------
-		if (warpId == (warpCount >> 1) - 1)
+		if (warpId == warpCount - 1)
 		{
-			uint v = (laneId < 16) ? lds.histoScan[laneId] : 0;
-			InclusiveScan16(v, laneId);
-			if (laneId < 16) { lds.histoScan[laneId] = v; }
+			uint v = lds.histogramScan[warpCount * perThreadBatch][laneId];
+
+			SimdInclusiveScan<uint, 16>(v, laneId);
+
+			lds.histogramScan[warpCount * perThreadBatch][laneId] = v;
 		}
 		__syncthreads();
 
 		//------------------------------------ Reorder ----------------------------------------
-		uint idxAllNum          = lds.histoScan[num4bit];
-		uint idxCurrentNumBlock = lds.histo[warpId * 16 + num4bit];
-		uint idxCurrentNumWarp  = pos - 1;
+		uint finalIdx[perThreadBatch];
 
-		uint finalIdx = idxAllNum + idxCurrentNumBlock + idxCurrentNumWarp;
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
+		{
+			uint wid = warpId * perThreadBatch + i;
 
-		// write num
-		lds.temp[finalIdx] = num;
+			uint idxAllNum = lds.histogramScan[warpCount * perThreadBatch][num4bit[i]];
+			uint idxCurrentNumBlock = lds.histogramScan[wid][num4bit[i]];
+			uint idxCurrentNumWarp = pos[i] - 1;
 
-		// read & write reorderIdx
-		uint currentReorderIdx = lds.tempIdx[threadIdx.x];
+			finalIdx[i] = idxAllNum + idxCurrentNumBlock + idxCurrentNumWarp;
+
+			// write num
+			lds.temp[finalIdx[i]] = num[i];
+		}
+
+		// read reorderIdx
+		uint currentReorderIdx[perThreadBatch];
+
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
+		{
+			uint id = warpId * 32 * perThreadBatch + i * 32 + laneId;
+			currentReorderIdx[i] = lds.tempIdx[id];
+		}
+
 		__syncthreads();
-		lds.tempIdx[finalIdx] = currentReorderIdx;
+
+		// write reorderIdx
+#pragma unroll
+		for (uint i = 0; i < perThreadBatch; ++i)
+		{
+			lds.tempIdx[finalIdx[i]] = currentReorderIdx[i];
+		}
+
 		__syncthreads();
 	}
 
 	//------------------------------------ Write out ----------------------------------------
-	inout[threadIdx.x] = lds.temp[threadIdx.x];
-	reorderIdx[threadIdx.x] = lds.tempIdx[threadIdx.x];
+#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		uint id = warpId * 32 * perThreadBatch + i * 32 + laneId;
+
+		inout[id] = lds.temp[id];
+		reorderIdx[id] = lds.tempIdx[id];
+	}
 }

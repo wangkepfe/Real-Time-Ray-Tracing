@@ -469,7 +469,6 @@ void RayTracer::draw(SurfObj* renderTarget)
     // ------------------------------- Init -------------------------------
     GpuErrorCheck(cudaMemset(d_histogram, 0, 64 * sizeof(uint)));
     GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCount * sizeof(uint)));
-    GpuErrorCheck(cudaMemset(isAabbDone, 0, (triCount - 1) * sizeof(uint)));
 
     // ------------------------------- Sky -------------------------------
     Sky<<<dim3(8, 2, 1), dim3(8, 8, 1)>>>(skyBuffer, skyCdf, Int2(64, 16), sunDir);
@@ -477,12 +476,12 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // ------------------------------- Update Geometry -----------------------------------
     // out: triangles, aabbs, morton codes
-    UpdateSceneGeometry <1024, 1> <<< 1, 1024 >>> (constTriangles, triangles, aabbs, sceneBoundingBox, morton, triCount, clockTime);
+    UpdateSceneGeometry <256, 4> <<< 1, 256 >>> (constTriangles, triangles, aabbs, sceneBoundingBox, morton, triCount, clockTime);
 
 	GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
 
-    if (cbo.frameNum == 10)
+    if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("constTriangles.csv", constTriangles, triCount);
         DebugPrintFile("triangles.csv", triangles, triCount);
@@ -493,12 +492,13 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // ------------------------------- Radix Sort -----------------------------------
     // in: morton code; out: reorder idx
-    RadixSort <1024> <<< 1, 1024 >>> (morton, reorderIdx);
+    RadixSort <256, 4> <<< 1, 256 >>> (morton, reorderIdx);
+    //RadixSort <1024, 1> <<< 1, 1024 >>> (morton, reorderIdx);
 
 	GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
 
-    if (cbo.frameNum == 10)
+    if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("morton2.csv", morton, BVHcapacity);
         DebugPrintFile("reorderIdx.csv", reorderIdx, BVHcapacity);
@@ -506,14 +506,14 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // ------------------------------- Build LBVH -----------------------------------
     // in: aabbs, morton code, reorder idx; out: lbvh
-    BuildLBVH <1024, 1> <<< 1 , triCount - 1>>> (bvhNodes, aabbs, morton, reorderIdx, triCount);
+    BuildLBVH <256, 4> <<< 1 , 256>>> (bvhNodes, aabbs, morton, reorderIdx, triCount);
 
 	GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
 
-    if (cbo.frameNum == 10)
+    if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("bvhNodes.csv", bvhNodes, triCount - 1);
+        DebugPrintFile("bvhNodes.csv", bvhNodes, triCount);
     }
 
     // ------------------------------- Path Tracing -------------------------------
@@ -568,7 +568,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     // Scale to final output
     BicubicFilterScale<<<scaleGridDim, scaleBlockDim>>>(/*out*/renderTarget, /*in*/colorBufferA, outputDim, bufferDim);
 
-    if (cbo.frameNum == 10)
+    if (cbo.frameNum == DEBUG_FRAME)
     {
         // debug
 	    CopyFrameBuffer <<<scaleGridDim, scaleBlockDim>>>(dumpFrameBuffer, renderTarget, outputDim);

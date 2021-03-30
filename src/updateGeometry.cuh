@@ -47,9 +47,15 @@ __global__ void UpdateSceneGeometry(
 	AABB*        aabbs,            // [out] per triangle aabb
 	AABB*        sceneBoundingBox, // [out] size = 1
 	uint*        morton,           // [out] per triangle motron code
-	uint         triCount,         // triangle count
+//	uint*        triStarts,
+//	uint*        triCounts,         // triangle count
+    uint        triCount,         // triangle count
 	float        clockTime)        // for animation
 {
+	// uint objectId = blockIdx.x;
+	// uint triStart = triStarts[objectId];
+	// uint triCount = triCounts[objectId];
+
 	if (threadIdx.x * perThreadBatch > triCount - 1)
 		return;
 
@@ -76,9 +82,9 @@ __global__ void UpdateSceneGeometry(
 		Float3 n2 = mytriangle[i].n2;
 		Float3 n3 = mytriangle[i].n3;
 
-		// v1.y += 1.2f;
-		// v2.y += 1.2f;
-		// v3.y += 1.2f;
+		v1.y += 1.2f;
+		v2.y += 1.2f;
+		v3.y += 1.2f;
 
 		// Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
 
