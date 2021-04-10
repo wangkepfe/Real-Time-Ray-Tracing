@@ -4,6 +4,8 @@
 #include "geometry.cuh"
 #include "bvhNode.cuh"
 
+#define DEBUG_BVH_TRAVERSE 0
+
 // update material info after intersect
 __device__ inline void UpdateMaterial(
 	const ConstBuffer&   cbo,
@@ -95,185 +97,245 @@ __device__ inline void RaySceneIntersect(
 #if RAY_TRAVERSE_BVH
 	Triangle* triangles = sceneGeometry.triangles;
 	BVHNode* bvhNodes = sceneGeometry.bvhNodes;
+	BVHNode* tlasBvhNodes = sceneGeometry.tlasBvhNodes;
 
 	// BVH traversal
-	const int maxBvhTraverseLoop = 128;
-	const int stackSize = 16;
+	static const int maxBvhTraverseLoop = 1024;
+	static const int stackSize = 16;
+
 	bool intersect1, intersect2, isClosestIntersect1;
-	// init stack
+
+	// stack
+	union BvhNodeStackNode
+	{
+		struct
+		{
+			uint idx : 15;
+			uint blasOffset : 15;
+			uint isBlas : 1;
+			uint isLeaf : 1;
+		};
+		uint uint32All;
+	};
+
 	struct BvhNodeStack
 	{
-		__forceinline__ __device__ BvhNodeStack() : i32{0} {}
+		#if DEBUG_BVH_TRAVERSE
+		__device__ BvhNodeStack()
+		{
+			stackTop = -1;
+			for (int i = 0; i < stackSize; ++i)
+			{
+				data[i].uint32All = 0;
+			}
+		}
+		#endif
 
-		__forceinline__ __device__ int   GetIdx()           { return i32 & 0x0000ffff; }
-		__forceinline__ __device__ void  SetIdx(int i)      { i32 = (i32 & 0xffff0000) | (i & 0x0000ffff); }
+		__device__ BvhNodeStackNode& operator[](int idx) { return data[idx]; }
 
-		__forceinline__ __device__ int   GetIsLeaf()        { return (i32 >> 16); }
-		__forceinline__ __device__ void  SetIsLeaf(int i)   { i32 = (i32 & 0x0000ffff) | (i << 16); }
+		__device__ void push(BvhNodeStackNode node)
+		{
+			++stackTop;
+			data[stackTop] = node;
+		}
 
-		int i32;
+		__device__ BvhNodeStackNode pop()
+		{
+			BvhNodeStackNode node = data[stackTop];
+			--stackTop;
+			return node;
+		}
+
+		__device__ void push(int _idx, int _blasOffset, int _isBlas, int _isLeaf)
+		{
+			++stackTop;
+			data[stackTop].idx = _idx;
+			data[stackTop].blasOffset = _blasOffset;
+			data[stackTop].isBlas = _isBlas;
+			data[stackTop].isLeaf = _isLeaf;
+		}
+
+		__device__ void pop(int& _idx, int& _blasOffset, int& _isBlas, int& _isLeaf)
+		{
+			_idx = data[stackTop].idx;
+			_blasOffset = data[stackTop].blasOffset;
+			_isBlas = data[stackTop].isBlas;
+			_isLeaf = data[stackTop].isLeaf;
+			--stackTop;
+		}
+
+		__device__ bool isEmpty() { return stackTop < 0; }
+
+		int stackTop = -1;
+		BvhNodeStackNode data[stackSize];
 	};
-	BvhNodeStack bvhNodeStack[stackSize];
-	// for (int i = 0; i < stackSize; ++i)
-	// {
-	// 	bvhNodeStack[i] = -1;
-	// 	isLeaf[i] = -1;
-	// }
-	int stackTop = -1;
-	int currIdx = 0;
-	int isCurrLeaf = 0;
+
+	BvhNodeStack bvhNodeStack;
+
+	BvhNodeStackNode curr;
+	curr.idx = 0;
+	curr.blasOffset = 0;
+	curr.isBlas = 0;
+	curr.isLeaf = 0;
+
 	for (int i = 0; i < maxBvhTraverseLoop; ++i)
 	{
-
-		// DEBUG_PRINT(i);
-		// DEBUG_PRINT(stackTop);
-		// DEBUG_PRINT(currIdx);
-		// DEBUG_PRINT(isCurrLeaf);
-
-
-		// if (IS_DEBUG_PIXEL())
-		// {
-		// 	printf("bvhNodeStack.idx[] =    {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].GetIdx(), bvhNodeStack[1].GetIdx(), bvhNodeStack[2].GetIdx(), bvhNodeStack[3].GetIdx());
-		// 	printf("bvhNodeStack.isLeaf[] = {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].GetIsLeaf(), bvhNodeStack[1].GetIsLeaf(), bvhNodeStack[2].GetIsLeaf(), bvhNodeStack[3].GetIsLeaf());
-		// 	bvhNodeStack[0].SetIsLeaf(1);
-		// 	printf("bvhNodeStack.isLeaf[0] = %d\n", bvhNodeStack[0].GetIsLeaf());
-		// }
-
-
-
-		if (isCurrLeaf)
+		#if DEBUG_BVH_TRAVERSE
+		DEBUG_PRINT(i);
+		DEBUG_PRINT(bvhNodeStack.stackTop);
+		DEBUG_PRINT(curr.idx);
+		DEBUG_PRINT(curr.blasOffset);
+		DEBUG_PRINT(curr.isLeaf);
+		DEBUG_PRINT(curr.isBlas);
+		if (IS_DEBUG_PIXEL())
 		{
-			// Triangle tri;
-			// if (currIdx < sceneGeometry.numTriangles && currIdx >= 0)
-			// {
-			// 	tri = triangles[currIdx];
-			// }
-			// else
-			// {
-			// 	Print("idx_error_tri", Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y));
-			// 	break;
-			// }
-			Triangle tri = triangles[currIdx];
+			printf("bvhNodeStack.idx[] =    {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].idx, bvhNodeStack[1].idx, bvhNodeStack[2].idx, bvhNodeStack[3].idx);
+			printf("bvhNodeStack.isBlas[] = {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].isBlas, bvhNodeStack[1].isBlas, bvhNodeStack[2].isBlas, bvhNodeStack[3].isBlas);
+			printf("bvhNodeStack.isLeaf[] = {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].isLeaf, bvhNodeStack[1].isLeaf, bvhNodeStack[2].isLeaf, bvhNodeStack[3].isLeaf);
+		}
+		#endif
 
-			// triangle test
-			float t_temp = RayTriangleIntersect(ray, tri, t, uv.x, uv.y, errorT);
-
-			// hit
-			if (t_temp < t)
+		if (curr.isLeaf)
+		{
+			if (curr.isBlas)
 			{
-				t               = t_temp;
-				objectIdx       = currIdx;
+				int loadIdx = curr.blasOffset * cbo.bvhBatchSize + curr.idx;
+				Triangle tri = triangles[loadIdx];
 
-				#if RAY_TRIANGLE_MOLLER_TRUMBORE
-				intersectNormal = cross(tri.v2 - tri.v1, tri.v3 - tri.v1).normalize();
-				intersectPoint = GetRayPlaneIntersectPoint(Float4(intersectNormal, -dot(intersectNormal, tri.v1)), ray, t, errorP);
-				#endif
+				// triangle test
+				float t_temp = RayTriangleIntersect(ray, tri, t, uv.x, uv.y, errorT);
 
-				#if RAY_TRIANGLE_COORDINATE_TRANSFORM
-				intersectNormal = normalize(cross(tri.v2, tri.v3));
-				intersectPoint  = GetRayPlaneIntersectPoint(Float4(intersectNormal, -dot(intersectNormal, tri.v4)), ray, t, errorP);
-				#endif
+				// hit
+				if (t_temp < t)
+				{
+					t               = t_temp;
+					objectIdx       = loadIdx;
 
-				#if USE_INTERPOLATED_FAKE_NORMAL
-				fakeNormal = normalize(tri.n1 * (1.0f - uv.x - uv.y) + tri.n2 * uv.x + tri.n3 * uv.y);
-				fakeNormal = dot(intersectNormal, fakeNormal) < 0 ? intersectNormal : fakeNormal;
-				#endif
+					#if RAY_TRIANGLE_MOLLER_TRUMBORE
+					intersectNormal = cross(tri.v2 - tri.v1, tri.v3 - tri.v1).normalize();
+					intersectPoint = GetRayPlaneIntersectPoint(Float4(intersectNormal, -dot(intersectNormal, tri.v1)), ray, t, errorP);
+					#endif
 
-				rayOffset       = errorT + errorP;
+					#if RAY_TRIANGLE_COORDINATE_TRANSFORM
+					intersectNormal = normalize(cross(tri.v2, tri.v3));
+					intersectPoint  = GetRayPlaneIntersectPoint(Float4(intersectNormal, -dot(intersectNormal, tri.v4)), ray, t, errorP);
+					#endif
 
-				//DEBUG_PRINT(objectIdx);
+					#if USE_INTERPOLATED_FAKE_NORMAL
+					fakeNormal = normalize(tri.n1 * (1.0f - uv.x - uv.y) + tri.n2 * uv.x + tri.n3 * uv.y);
+					fakeNormal = dot(intersectNormal, fakeNormal) < 0 ? intersectNormal : fakeNormal;
+					#endif
 
-				// DEBUG_PRINT(tri.v1);
-				// DEBUG_PRINT(tri.v2);
-				// DEBUG_PRINT(tri.v3);
+					rayOffset       = errorT + errorP;
 
-				// DEBUG_PRINT(ray.orig);
-				// DEBUG_PRINT(ray.dir);
+					#if DEBUG_BVH_TRAVERSE
+					DEBUG_PRINT(objectIdx);
+					DEBUG_PRINT(tri.v1);
+					DEBUG_PRINT(tri.v2);
+					DEBUG_PRINT(tri.v3);
+					DEBUG_PRINT(ray.orig);
+					DEBUG_PRINT(ray.dir);
+					DEBUG_PRINT(intersectNormal);
+					DEBUG_PRINT(intersectPoint);
+					DEBUG_PRINT(t);
+					DEBUG_PRINT(rayOffset);
+					DEBUG_PRINT_BAR
+					#endif
+				}
+				else
+				{
+					#if DEBUG_BVH_TRAVERSE
+					DEBUG_PRINT_STRING("Tested a triangle but no intersection!");
+					DEBUG_PRINT(loadIdx)
+					DEBUG_PRINT(t_temp)
+					DEBUG_PRINT(t)
+					DEBUG_PRINT_BAR
+					#endif
+				}
 
-				// DEBUG_PRINT(intersectNormal);
-				// DEBUG_PRINT(intersectPoint);
-				// DEBUG_PRINT(t);
-				// DEBUG_PRINT(rayOffset);
+				// if stack is empty, finished
+				if (bvhNodeStack.isEmpty())
+				{
+					#if DEBUG_BVH_TRAVERSE
+					DEBUG_PRINT_STRING("Stack empty, quit");
+					DEBUG_PRINT(objectIdx);
+					DEBUG_PRINT_BAR
+					#endif
 
+					break;
+				}
 
-				//DEBUG_PRINT_BAR
-
-			    //break;
+				// if not, go fetch one in stack
+				curr = bvhNodeStack.pop();
 			}
-
-			// pop
-			if (stackTop < 0)
+			else
 			{
-				// if (IS_DEBUG_PIXEL())
-				// {
-				// DEBUG_PRINT(objectIdx);
-				// }
-				break;
+				curr.isLeaf = 0;
+				curr.isBlas = 1;
+				curr.blasOffset = curr.idx;
+				curr.idx = 0;
+
+				#if DEBUG_BVH_TRAVERSE
+				DEBUG_PRINT_STRING("Go into BLAS");
+				DEBUG_PRINT_BAR
+				#endif
 			}
-
-			currIdx = bvhNodeStack[stackTop].GetIdx();
-			isCurrLeaf = bvhNodeStack[stackTop].GetIsLeaf();
-			--stackTop;
-
-			//currIdx = (stackTop >= 0 && stackTop < stackSize) ? bvhNodeStack[stackTop] : -1;
-			//isCurrLeaf = (stackTop >= 0 && stackTop < stackSize) ? isLeaf[stackTop] : 0;
-			// if (!(stackTop >= 0 && stackTop < stackSize))
-			// {
-			// 	Print("idx_error_stack1", Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y));
-			// 	break;
-			// }
-
-
 		}
 		else
 		{
-			// BVHNode currNode;
-			// if (currIdx < sceneGeometry.numTriangles - 1 && currIdx >= 0)
-			// {
-			// 	currNode = bvhNodes[currIdx];
-			// }
-			// else
-			// {
-			// 	Print("idx_error_bvh", Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y));
-			// 	break;
-			// }
-			BVHNode currNode = bvhNodes[currIdx];
+			BVHNode currNode;
+			if (curr.isBlas)
+			{
+				int loadIdx = curr.blasOffset * cbo.bvhBatchSize + curr.idx;
+				currNode = bvhNodes[loadIdx];
+
+				#if DEBUG_BVH_TRAVERSE
+				DEBUG_PRINT_STRING("Load BVH node from BLAS");
+				DEBUG_PRINT(loadIdx);
+				#endif
+			}
+			else
+			{
+				currNode = tlasBvhNodes[curr.idx];
+
+				#if DEBUG_BVH_TRAVERSE
+				DEBUG_PRINT_STRING("Load BVH node from TLAS");
+				DEBUG_PRINT(curr.idx);
+				#endif
+			}
 
 			// test two aabb
 			RayAabbPairIntersect(invRayDir, ray.orig, currNode.aabb, intersect1, intersect2, isClosestIntersect1);
 
+			#if DEBUG_BVH_TRAVERSE
+			DEBUG_PRINT(currNode.idxLeft);
+			DEBUG_PRINT(currNode.idxRight);
+			DEBUG_PRINT(currNode.isLeftLeaf);
+			DEBUG_PRINT(currNode.isRightLeaf);
+			#endif
 
-				// DEBUG_PRINT(currNode.idxLeft);
-				// DEBUG_PRINT(currNode.idxRight);
-				// DEBUG_PRINT(currNode.isLeftLeaf);
-				// DEBUG_PRINT(currNode.isRightLeaf);
-
-
-			if (!intersect1 && !intersect2)
+			if (!intersect1 && !intersect2) // no hit for both sides
 			{
-				// no hit, pop
-				if (stackTop < 0) { break; }
+				// if stack empty, quit
+				if (bvhNodeStack.isEmpty())
+				{
+					#if DEBUG_BVH_TRAVERSE
+					DEBUG_PRINT_STRING("Stack empty, quit");
+					DEBUG_PRINT_BAR
+					#endif
 
-				currIdx = bvhNodeStack[stackTop].GetIdx();
-				isCurrLeaf = bvhNodeStack[stackTop].GetIsLeaf();
-				--stackTop;
+					break;
+				}
 
-				//currIdx = (stackTop >= 0 && stackTop < stackSize) ? bvhNodeStack[stackTop] : -1;
-				//isCurrLeaf = (stackTop >= 0 && stackTop < stackSize) ? isLeaf[stackTop] : 0;
-				// if (!(stackTop >= 0 && stackTop < stackSize))
-				// {
-				// 	Print("idx_error_stack2", Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y));
-				// 	break;
-				// }
-
-
+				// if not, get one from stack
+				curr = bvhNodeStack.pop();
 			}
-			else if (intersect1 && !intersect2)
+			else if (intersect1 && !intersect2) // left hit
 			{
-				// left hit
-				currIdx = currNode.idxLeft;
-				isCurrLeaf = currNode.isLeftLeaf;
+				curr.idx = currNode.idxLeft;
+				curr.isLeaf = currNode.isLeftLeaf;
 
+				#if DEBUG_BVH_TRAVERSE
 				if (i == cbo.bvhDebugLevel)
 				{
 					AABB testAabb = currNode.aabb.GetLeftAABB();
@@ -281,20 +343,21 @@ __device__ inline void RaySceneIntersect(
 					if (t_temp < t)
 					{
 						t               = t_temp;
-						objectIdx       = currIdx;
+						objectIdx       = curr.idx;
 						GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
 						rayOffset       = errorT + errorP;
-						//DEBUG_PRINT(t);
+						DEBUG_PRINT(t);
 					}
 					break;
 				}
+				#endif
 			}
-			else if (!intersect1 && intersect2)
+			else if (!intersect1 && intersect2) // right hit
 			{
-				// right hit
-				currIdx = currNode.idxRight;
-				isCurrLeaf = currNode.isRightLeaf;
+				curr.idx = currNode.idxRight;
+				curr.isLeaf = currNode.isRightLeaf;
 
+				#if DEBUG_BVH_TRAVERSE
 				if (i == cbo.bvhDebugLevel)
 				{
 					AABB testAabb = currNode.aabb.GetRightAABB();
@@ -302,89 +365,82 @@ __device__ inline void RaySceneIntersect(
 					if (t_temp < t)
 					{
 						t               = t_temp;
-						objectIdx       = currIdx;
+						objectIdx       = curr.idx;
 						GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
 						rayOffset       = errorT + errorP;
-						//DEBUG_PRINT(t);
+						DEBUG_PRINT(t);
 					}
 					break;
 				}
+				#endif
 			}
-			else
+			else // both hit
 			{
-				// both hit
 				int idx1, idx2;
 				bool isLeaf1, isLeaf2;
 
 				if (isClosestIntersect1)
 				{
-					// left closer. push right
+					// left is closer. go left next, push right to stack
 					idx2    = currNode.idxRight;
 					isLeaf2 = currNode.isRightLeaf;
 					idx1    = currNode.idxLeft;
 					isLeaf1 = currNode.isLeftLeaf;
 
-					// if (i == cbo.bvhDebugLevel)
-					// {
-					// 	AABB testAabb = currNode.aabb.GetLeftAABB();
-					// 	float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
-					// 	if (t_temp < t)
-					// 	{
-					// 		t               = t_temp;
-					// 		objectIdx       = currIdx;
-					// 		GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
-					// 		rayOffset       = errorT + errorP;
-					// 		DEBUG_PRINT(t);
-					// 	}
-					// 	break;
-					// }
+					#if DEBUG_BVH_TRAVERSE
+					if (i == cbo.bvhDebugLevel)
+					{
+						AABB testAabb = currNode.aabb.GetLeftAABB();
+						float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
+						if (t_temp < t)
+						{
+							t               = t_temp;
+							objectIdx       = curr.idx;
+							GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
+							rayOffset       = errorT + errorP;
+							DEBUG_PRINT(t);
+						}
+						break;
+					}
+					#endif
 				}
 				else
 				{
-					// right closer. push left
+					// right is closer. go right next, push left to stack
 					idx2    = currNode.idxLeft;
 					isLeaf2 = currNode.isLeftLeaf;
 					idx1    = currNode.idxRight;
 					isLeaf1 = currNode.isRightLeaf;
 
-					// if (i == cbo.bvhDebugLevel)
-					// {
-					// 	AABB testAabb = currNode.aabb.GetRightAABB();
-					// 	float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
-					// 	if (t_temp < t)
-					// 	{
-					// 		t               = t_temp;
-					// 		objectIdx       = currIdx;
-					// 		GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
-					// 		rayOffset       = errorT + errorP;
-					// 		DEBUG_PRINT(t);
-					// 	}
-					// 	break;
-					// }
+					#if DEBUG_BVH_TRAVERSE
+					if (i == cbo.bvhDebugLevel)
+					{
+						AABB testAabb = currNode.aabb.GetRightAABB();
+						float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
+						if (t_temp < t)
+						{
+							t               = t_temp;
+							objectIdx       = curr.idx;
+							GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
+							rayOffset       = errorT + errorP;
+							DEBUG_PRINT(t);
+						}
+						break;
+					}
+					#endif
 				}
 
 				// push
-				++stackTop;
-				bvhNodeStack[stackTop].SetIdx(idx2);
-				bvhNodeStack[stackTop].SetIsLeaf(isLeaf2);
+				bvhNodeStack.push(idx2, curr.blasOffset, curr.isBlas, isLeaf2);
 
-				// if (stackTop < stackSize)
-				// {
-				// 	bvhNodeStack[stackTop] = idx2;
-				// 	isLeaf[stackTop]       = isLeaf2;
-				// }
-				// else
-				// {
-				// 	Print("idx_error_stack3", Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y));
-				// 	break;
-				// }
+				curr.idx = idx1;
+				curr.isLeaf = isLeaf1;
 
-				currIdx                = idx1;
-				isCurrLeaf             = isLeaf1;
-
-				//DEBUG_PRINT(stackTop);
-				//DEBUG_PRINT(idx2);
-				//DEBUG_PRINT(idx1);
+				#if DEBUG_BVH_TRAVERSE
+				DEBUG_PRINT(bvhNodeStack.stackTop);
+				DEBUG_PRINT(idx2);
+				DEBUG_PRINT(idx1);
+				#endif
 			}
 		}
 	}

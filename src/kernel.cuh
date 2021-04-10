@@ -24,7 +24,7 @@
 
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
-#define DEBUG_FRAME 1
+#define DEBUG_FRAME -1
 
 const bool UseDynamicResolution = 1;
 
@@ -132,6 +132,7 @@ struct __align__(16) SceneGeometry
 	AABB*   aabbs;
 	Triangle* triangles;
 	BVHNode* bvhNodes;
+	BVHNode* tlasBvhNodes;
 	int numAabbs;
 	int numSpheres;
 	int numTriangles;
@@ -194,13 +195,15 @@ struct __align__(16) ConstBuffer
 {
 	Camera camera;
 
+	HistoryCamera historyCamera;
+
 	Float3 sunDir;
 	float  clockTime;
 
 	int frameNum;
 	int bvhDebugLevel;
 
-	HistoryCamera historyCamera;
+	int bvhBatchSize;
 };
 
 struct __align__(16) RayState
@@ -411,18 +414,36 @@ private:
 	float                       deltaTime;
 	float                       clockTime;
 
-	// bvh and triangles
-	uint       triCount;
-	static const uint BVHcapacity = 1024;
-	Triangle*  constTriangles;
-	Triangle*  triangles;
-	AABB*      aabbs;
-	AABB*      sceneBoundingBox;
-	uint*      morton;
-	uint*      reorderIdx;
-	BVHNode*   bvhNodes;
+	// sizes
+	static const uint           BatchSize = 1024;
+	static const uint           KernalBatchSize = 4;
+	static constexpr uint       KernelSize = BatchSize / KernalBatchSize;
 
-	//
-	uchar4* dumpFrameBuffer;
+	// sizes
+	uint                        triCount;
+	uint                        triCountPadded;
+	uint                        batchCount;
+	uint                        batchCountPadded;
+
+	// triangles
+	uint*                       triCountArray;
+	uint*                       batchCountArray;
+	Triangle*                   constTriangles;
+	Triangle*                   triangles;
+
+	// bvh
+	AABB*                       aabbs;
+	uint*                       morton;
+	uint*                       reorderIdx;
+	BVHNode*                    bvhNodes;
+
+	// TLAS top level acceleration structure
+	AABB*                       tlasAabbs;
+	uint*                       tlasMorton;
+	uint*                       tlasReorderIdx;
+	BVHNode*                    tlasBvhNodes;
+
+	// debug
+	uchar4*                     dumpFrameBuffer;
 };
 

@@ -432,29 +432,23 @@ private:
     }
 
     // main loop
-    void mainLoop() {
+    void mainLoop()
+    {
 
-        //updateUniformBuffer();
-
-        // glfw handles the loop
-
-        // while (!glfwWindowShouldClose(m_window))
-        // {
-        //    glfwPollEvents();
-
-        //    // call drawFrame()
-        //    drawFrame();
-        // }
-
-		for (int i = 1; i <= DEBUG_FRAME; ++i)
+    #if DEBUG_FRAME >= 1
+        for (int i = 1; i <= DEBUG_FRAME; ++i)
 		{
 			glfwPollEvents();
-
-			// call drawFrame()
 			drawFrame();
 		}
+    #else
+        while (!glfwWindowShouldClose(m_window))
+        {
+           glfwPollEvents();
+           drawFrame();
+        }
+    #endif
 
-        // on loop finish: vkDeviceWaitIdle()
         vkDeviceWaitIdle(m_device);
     }
 

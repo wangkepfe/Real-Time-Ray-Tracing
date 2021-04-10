@@ -14,6 +14,7 @@
 #define IS_DEBUG_PIXEL() 0
 #endif
 #define DEBUG_PRINT(__THING__) if(IS_DEBUG_PIXEL()) { Print(#__THING__, __THING__); }
+#define DEBUG_PRINT_STRING(__STRING__) if(IS_DEBUG_PIXEL()) { Print(__STRING__); }
 #define DEBUG_PRINT_BAR if(IS_DEBUG_PIXEL()) { Print("------------------------------"); }
 
 #define DEBUG_CUDA() GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());

@@ -45,16 +45,17 @@ __global__ void UpdateSceneGeometry(
 	Triangle*    constTriangles,   // [const] reference mesh
 	Triangle*    triangles,        // [out] animated mesh
 	AABB*        aabbs,            // [out] per triangle aabb
-	AABB*        sceneBoundingBox, // [out] size = 1
 	uint*        morton,           // [out] per triangle motron code
 //	uint*        triStarts,
 //	uint*        triCounts,         // triangle count
-    uint        triCount,         // triangle count
+    uint         triCount,         // triangle count
 	float        clockTime)        // for animation
 {
 	// uint objectId = blockIdx.x;
 	// uint triStart = triStarts[objectId];
 	// uint triCount = triCounts[objectId];
+
+	__shared__ AABB sceneBoundingBox[1];
 
 	if (threadIdx.x * perThreadBatch > triCount - 1)
 		return;
@@ -78,9 +79,9 @@ __global__ void UpdateSceneGeometry(
 		Float3 v2 = mytriangle[i].v2;
 		Float3 v3 = mytriangle[i].v3;
 
-		Float3 n1 = mytriangle[i].n1;
-		Float3 n2 = mytriangle[i].n2;
-		Float3 n3 = mytriangle[i].n3;
+		// Float3 n1 = mytriangle[i].n1;
+		// Float3 n2 = mytriangle[i].n2;
+		// Float3 n3 = mytriangle[i].n3;
 
 		v1.y += 1.2f;
 		v2.y += 1.2f;
@@ -102,9 +103,9 @@ __global__ void UpdateSceneGeometry(
 		PreCalcTriangleCoordTrans(mytriangle[i]);
 	#endif
 
-		mytriangle[i].n1 = n1;
-		mytriangle[i].n2 = n2;
-		mytriangle[i].n3 = n3;
+		// mytriangle[i].n1 = n1;
+		// mytriangle[i].n2 = n2;
+		// mytriangle[i].n3 = n3;
 
 		// write out
 		triangles[idx[i]] = mytriangle[i];
@@ -206,5 +207,278 @@ __global__ void UpdateSceneGeometry(
 								       (uint)(unitBox.z * 1023.0f));
 
 		morton[idx[i]] = mortonCode;
+	}
+}
+
+template<uint kernelSize,          // thread number per kernel, same as LDS size, LDS-thread 1-to-1 mapping
+         uint perThreadBatch>      // batch process count per thread
+__global__ void UpdateSceneGeometry2(
+	Triangle*    constTriangles,   // [const] reference mesh
+	Triangle*    triangles,        // [out] animated mesh
+	AABB*        aabbs,            // [out] per triangle aabb
+	uint*        morton,           // [out] per triangle motron code
+	uint*        triCountArray,
+	float        clockTime)        // for animation
+{
+	const uint blocksize = kernelSize * perThreadBatch;
+
+	uint objectId = blockIdx.x;
+	uint triStart = objectId * blocksize;
+	uint triCount = triCountArray[objectId];
+
+	constTriangles   += triStart;
+	triangles        += triStart;
+	aabbs            += triStart;
+	morton           += triStart;
+
+	__shared__ AABB sceneBoundingBox[1];
+
+	if (threadIdx.x * perThreadBatch > triCount - 1)
+		return;
+
+	// index mapping, 1-to-many
+	uint idx[perThreadBatch];
+	#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		idx[i] = threadIdx.x * perThreadBatch + i;
+	}
+
+	// ------------------------------------ update triangle position ------------------------------------
+	Triangle mytriangle[perThreadBatch];
+	#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		mytriangle[i] = constTriangles[idx[i]];
+
+		Float3 v1 = mytriangle[i].v1;
+		Float3 v2 = mytriangle[i].v2;
+		Float3 v3 = mytriangle[i].v3;
+
+		// Float3 n1 = mytriangle[i].n1;
+		// Float3 n2 = mytriangle[i].n2;
+		// Float3 n3 = mytriangle[i].n3;
+
+		v1.y += 1.2f;
+		v2.y += 1.2f;
+		v3.y += 1.2f;
+
+		// Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
+
+		// v1 = rotMat * v1;
+		// v2 = rotMat * v2;
+		// v3 = rotMat * v3;
+
+		// n1 = rotMat * n1;
+		// n2 = rotMat * n2;
+		// n3 = rotMat * n3;
+
+		mytriangle[i] = Triangle(v1, v2, v3);
+
+	#if RAY_TRIANGLE_COORDINATE_TRANSFORM
+		PreCalcTriangleCoordTrans(mytriangle[i]);
+	#endif
+
+		// mytriangle[i].n1 = n1;
+		// mytriangle[i].n2 = n2;
+		// mytriangle[i].n3 = n3;
+
+		// write out
+		triangles[idx[i]] = mytriangle[i];
+	}
+
+	// ------------------------------------ update aabb ------------------------------------
+	AABB currentAABB[perThreadBatch];
+	Float3 aabbcenter[perThreadBatch];
+	#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		Float3 v1 = mytriangle[i].v1;
+		Float3 v2 = mytriangle[i].v2;
+		Float3 v3 = mytriangle[i].v3;
+
+		Float3 aabbmin = min3f(v1, min3f(v2, v3));
+		Float3 aabbmax = max3f(v1, max3f(v2, v3));
+
+		// padding for precision issue
+		Float3 diff = aabbmax - aabbmin;
+		diff = max3f(Float3(0.001f), diff);
+		aabbmax = aabbmin + diff;
+
+		currentAABB[i] = AABB(aabbmax, aabbmin);
+		aabbcenter[i] = (aabbmax + aabbmin) / 2.0f;
+
+		// write out
+		aabbs[idx[i]] = currentAABB[i];
+	}
+
+	// ------------------------------------ per thread batch bounding box ------------------------------------
+	AABB currentBatchAABB = currentAABB[0];
+	#pragma unroll
+	for (uint i = 1; i < perThreadBatch; ++i)
+	{
+		currentBatchAABB.min = min3f(currentBatchAABB.min, currentAABB[i].min);
+		currentBatchAABB.max = max3f(currentBatchAABB.max, currentAABB[i].max);
+	}
+
+	// ------------------------------------ reduce across threads for scene bounding box ------------------------------------
+	__shared__ AABB lds[kernelSize];
+
+	// thread id: tid
+	uint tid = threadIdx.x;
+
+	// init lds with AABB of per thread batch
+	lds[tid] = currentBatchAABB;
+
+	__syncthreads();
+
+	// Reduce across warps
+	#pragma unroll
+	for (uint stride = kernelSize / 2; stride >= 64; stride >>= 1)
+	{
+		if (kernelSize > stride && tid < stride && tid + stride < triCount)
+		{
+			lds[tid].min = min3f(lds[tid].min, lds[tid + stride].min);
+			lds[tid].max = max3f(lds[tid].max, lds[tid + stride].max);
+		}
+		__syncthreads();
+	}
+
+	if (tid < 32)
+	{
+		lds[tid].min = min3f(lds[tid].min, lds[tid + 32].min);
+		lds[tid].max = max3f(lds[tid].max, lds[tid + 32].max);
+	}
+
+	// Reduce inside warps
+	AABB sceneAabb;
+
+	if (tid < 32)
+	{
+		sceneAabb = lds[tid];
+		WarpReduceMaxMin3f(sceneAabb.max, sceneAabb.min);
+	}
+	__syncthreads();
+
+	// write out
+	if (tid == 0)
+	{
+		sceneBoundingBox[0] = sceneAabb;
+	}
+	__syncthreads();
+
+	// broadcast to all threads
+	sceneAabb = sceneBoundingBox[0];
+
+	__syncthreads();
+
+	// ------------------------------------ assign morton code to aabb ------------------------------------
+	#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		Float3 unitBox = (aabbcenter[i] - sceneAabb.min) / (sceneAabb.max - sceneAabb.min);
+
+		uint mortonCode = MortonCode3D((uint)(unitBox.x * 1023.0f),
+								       (uint)(unitBox.y * 1023.0f),
+								       (uint)(unitBox.z * 1023.0f));
+
+		morton[idx[i]] = mortonCode;
+	}
+}
+
+template<uint kernelSize,
+         uint perThreadBatch,
+		 uint batchSize>
+__global__ void UpdateTLAS(
+	BVHNode* bvhNodes,    // [in]
+	AABB*    aabbs,       // [out]
+	uint*    morton,      // [out]
+	uint*    batchCount,  // [in]
+	uint     tricountpadded)  // [in]
+{
+	uint tid = threadIdx.x;
+	uint triCount = *batchCount;
+	__shared__ AABB sceneBoundingBox[1];
+
+	if (tid * perThreadBatch > triCount - 1)
+		return;
+
+	// get aabb of blas
+	AABB currentAABB[perThreadBatch];
+	Float3 aabbcenter[perThreadBatch];
+	#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		uint idx = batchSize * (tid * perThreadBatch + i);
+
+		BVHNode topBvhNodeInBlas;
+		if (idx < tricountpadded)
+		{
+			topBvhNodeInBlas = bvhNodes[idx];
+		}
+		else
+		{
+			topBvhNodeInBlas = bvhNodes[tricountpadded - 1];
+		}
+
+		currentAABB[i] = topBvhNodeInBlas.aabb.GetMerged();
+		aabbcenter[i] = (currentAABB[i].max + currentAABB[i].min) / 2.0f;
+
+		// write out
+		aabbs[tid * perThreadBatch + i] = currentAABB[i];
+	}
+
+	// get scene aabb
+	__shared__ AABB lds[kernelSize];
+	AABB currentBatchAABB = currentAABB[0];
+	#pragma unroll
+	for (uint i = 1; i < perThreadBatch; ++i)
+	{
+		currentBatchAABB.min = min3f(currentBatchAABB.min, currentAABB[i].min);
+		currentBatchAABB.max = max3f(currentBatchAABB.max, currentAABB[i].max);
+	}
+	lds[tid] = currentBatchAABB;
+
+	// Reduce across warps
+	__syncthreads();
+	#pragma unroll
+	for (uint stride = kernelSize / 2; stride >= 64; stride >>= 1)
+	{
+		if (kernelSize > stride && tid < stride && tid + stride < triCount)
+		{
+			lds[tid].min = min3f(lds[tid].min, lds[tid + stride].min);
+			lds[tid].max = max3f(lds[tid].max, lds[tid + stride].max);
+		}
+		__syncthreads();
+	}
+
+	// Reduce inside warps
+	AABB sceneAabb;
+	if (tid < 32)
+	{
+		sceneAabb = lds[tid];
+		WarpReduceMaxMin3f(sceneAabb.max, sceneAabb.min);
+	}
+	__syncthreads();
+
+	// broadcast to all threads
+	if (tid == 0)
+	{
+		sceneBoundingBox[0] = sceneAabb;
+	}
+	__syncthreads();
+	sceneAabb = sceneBoundingBox[0];
+
+	// ------------------------------------ assign morton code to aabb ------------------------------------
+	#pragma unroll
+	for (uint i = 0; i < perThreadBatch; ++i)
+	{
+		Float3 unitBox = (aabbcenter[i] - sceneAabb.min) / (sceneAabb.max - sceneAabb.min);
+
+		uint mortonCode = MortonCode3D((uint)(unitBox.x * 1023.0f),
+								       (uint)(unitBox.y * 1023.0f),
+								       (uint)(unitBox.z * 1023.0f));
+
+		morton[tid * perThreadBatch + i] = mortonCode;
 	}
 }

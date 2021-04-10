@@ -468,7 +468,9 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // ------------------------------- Init -------------------------------
     GpuErrorCheck(cudaMemset(d_histogram, 0, 64 * sizeof(uint)));
-    GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCount * sizeof(uint)));
+
+    GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCountPadded * sizeof(uint)));
+    GpuErrorCheck(cudaMemset(tlasMorton, UINT_MAX, BatchSize * sizeof(uint)));
 
     // ------------------------------- Sky -------------------------------
     Sky<<<dim3(8, 2, 1), dim3(8, 8, 1)>>>(skyBuffer, skyCdf, Int2(64, 16), sunDir);
@@ -476,23 +478,25 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     // ------------------------------- Update Geometry -----------------------------------
     // out: triangles, aabbs, morton codes
-    UpdateSceneGeometry <256, 4> <<< 1, 256 >>> (constTriangles, triangles, aabbs, sceneBoundingBox, morton, triCount, clockTime);
+    //UpdateSceneGeometry <256, 4> <<< 1, 256 >>> (constTriangles, triangles, aabbs, morton, triCount, clockTime);
+    UpdateSceneGeometry2 <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
+        (constTriangles, triangles, aabbs, morton, triCountArray, clockTime);
 
 	GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
 
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("constTriangles.csv", constTriangles, triCount);
-        DebugPrintFile("triangles.csv", triangles, triCount);
-        DebugPrintFile("aabbs.csv", aabbs, triCount);
-        DebugPrintFile("sceneBoundingBox.csv", sceneBoundingBox, 1);
-        DebugPrintFile("morton.csv", morton, BVHcapacity);
+        DebugPrintFile("constTriangles.csv"  , constTriangles  , triCountPadded);
+        DebugPrintFile("triangles.csv"       , triangles       , triCountPadded);
+        DebugPrintFile("aabbs.csv"           , aabbs           , triCountPadded);
+        DebugPrintFile("morton.csv"          , morton          , triCountPadded);
     }
 
     // ------------------------------- Radix Sort -----------------------------------
     // in: morton code; out: reorder idx
-    RadixSort <256, 4> <<< 1, 256 >>> (morton, reorderIdx);
+    RadixSort2 <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
+        (morton, reorderIdx);
     //RadixSort <1024, 1> <<< 1, 1024 >>> (morton, reorderIdx);
 
 	GpuErrorCheck(cudaDeviceSynchronize());
@@ -500,21 +504,57 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("morton2.csv", morton, BVHcapacity);
-        DebugPrintFile("reorderIdx.csv", reorderIdx, BVHcapacity);
+        DebugPrintFile("morton2.csv", morton, triCountPadded);
+        DebugPrintFile("reorderIdx.csv", reorderIdx, triCountPadded);
     }
 
     // ------------------------------- Build LBVH -----------------------------------
     // in: aabbs, morton code, reorder idx; out: lbvh
-    BuildLBVH <256, 4> <<< 1 , 256>>> (bvhNodes, aabbs, morton, reorderIdx, triCount);
+    BuildLBVH2 <KernelSize, KernalBatchSize> <<< batchCount , KernelSize>>>
+        (bvhNodes, aabbs, morton, reorderIdx, triCountArray);
 
 	GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
 
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("bvhNodes.csv", bvhNodes, triCount);
+        DebugPrintFile("bvhNodes.csv", bvhNodes, triCountPadded);
     }
+
+    UpdateTLAS <KernelSize, KernalBatchSize, BatchSize> <<< 1 , KernelSize>>>
+        (bvhNodes, tlasAabbs, tlasMorton, batchCountArray, triCountPadded);
+
+    GpuErrorCheck(cudaDeviceSynchronize());
+	GpuErrorCheck(cudaPeekAtLastError());
+
+    if (cbo.frameNum == DEBUG_FRAME)
+    {
+        DebugPrintFile("TLAS_aabbs.csv"           , tlasAabbs           , KernelSize);
+        DebugPrintFile("TLAS_morton.csv"          , tlasMorton          , KernelSize);
+    }
+
+    RadixSort2 <KernelSize, KernalBatchSize> <<< 1, KernelSize >>>
+        (tlasMorton, tlasReorderIdx);
+
+    if (cbo.frameNum == DEBUG_FRAME)
+    {
+        DebugPrintFile("TLAS_reorderIdx.csv"       , tlasReorderIdx      , KernelSize);
+        DebugPrintFile("TLAS_morton2.csv"          , tlasMorton          , KernelSize);
+    }
+
+    GpuErrorCheck(cudaDeviceSynchronize());
+	GpuErrorCheck(cudaPeekAtLastError());
+
+    BuildLBVH2 <KernelSize, KernalBatchSize> <<< 1 , KernelSize>>>
+        (tlasBvhNodes, tlasAabbs, tlasMorton, tlasReorderIdx, batchCountArray);
+
+    if (cbo.frameNum == DEBUG_FRAME)
+    {
+        DebugPrintFile("TLAS_bvhNodes.csv"       , tlasBvhNodes      , KernelSize);
+    }
+
+    GpuErrorCheck(cudaDeviceSynchronize());
+	GpuErrorCheck(cudaPeekAtLastError());
 
     // ------------------------------- Path Tracing -------------------------------
     PathTrace<<<gridDim, blockDim>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randGen, colorBufferA, normalDepthBufferA, sceneTextures, skyTex, skyCdf, motionVectorBuffer, sampleCountBuffer, noiseLevelBuffer);

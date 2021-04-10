@@ -40,56 +40,87 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	// init cuda
 	gpuDeviceInit(0);
 
-	// scope for shorter cpu buffer lifetime
 	{
 		// load triangles
 		std::vector<Triangle> h_triangles;
-		//const chat* filename = "resources/models/testCube.obj";
-		const char* filename = "resources/models/monkey.obj";
+
+		const char* filename = "resources/models/high-res-monkey.dae";
+
 		LoadScene(filename, h_triangles);
 
-		uint triCountRaw = static_cast<uint>(h_triangles.size());
+		triCount = static_cast<uint>(h_triangles.size());
 
-		uint batchSize = 4;
-
-		// pad the tri count to a multiply of batchSize
-		triCount = triCountRaw;
-		if (triCount % batchSize != 0)
+		// pad the tricount to a multiply of BatchSize
+		triCountPadded = triCount;
+		if (triCountPadded % BatchSize != 0)
 		{
-			triCount += (batchSize - triCount % batchSize);
+			triCountPadded += (BatchSize - triCountPadded % BatchSize);
 
-			h_triangles.resize(triCount);
+			h_triangles.resize(triCountPadded);
 
 			// repeat the last triangle for a few times
-			for (int i = triCountRaw; i < triCount; ++i)
+			for (int i = triCount; i < triCountPadded; ++i)
 			{
-				h_triangles[i] = h_triangles[triCountRaw - 1];
+				h_triangles[i] = h_triangles[triCount - 1];
 			}
 		}
 
-		GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCount * sizeof(Triangle)));
-		GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCount * sizeof(Triangle), cudaMemcpyHostToDevice));
+		GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCountPadded * sizeof(Triangle)));
+		GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCountPadded * sizeof(Triangle), cudaMemcpyHostToDevice));
+
+		// batch count
+		batchCount = triCountPadded / BatchSize;
+
+		GpuErrorCheck(cudaMalloc((void**)& batchCountArray, 1 * sizeof(uint)));
+		GpuErrorCheck(cudaMemcpy(batchCountArray, &batchCount, 1 * sizeof(uint), cudaMemcpyHostToDevice));
+
+		// triangle batch count array
+		std::vector<uint> h_triCountArray(batchCount, BatchSize);
+		h_triCountArray[batchCount - 1] = triCount - (triCountPadded - BatchSize);
+
+		GpuErrorCheck(cudaMalloc((void**)& triCountArray, batchCount * sizeof(uint)));
+		GpuErrorCheck(cudaMemcpy(triCountArray, h_triCountArray.data(), batchCount * sizeof(uint), cudaMemcpyHostToDevice));
+
+		// pad the batch count to a multiply of KernalBatchSize
+		batchCountPadded = batchCount;
+		if (batchCountPadded % KernalBatchSize != 0)
+		{
+			batchCountPadded += (KernalBatchSize - batchCountPadded % KernalBatchSize);
+		}
 	}
 
 	// -------------------------------- bvh ---------------------------------------
 	// triangle
-	GpuErrorCheck(cudaMalloc((void**)& triangles, triCount * sizeof(Triangle)));
+	GpuErrorCheck(cudaMalloc((void**)& triangles, triCountPadded * sizeof(Triangle)));
 
 	// aabb
-	GpuErrorCheck(cudaMalloc((void**)& aabbs, triCount * sizeof(AABB)));
-
-	// scene aabb
-	GpuErrorCheck(cudaMalloc((void**) &sceneBoundingBox, sizeof(AABB)));
+	GpuErrorCheck(cudaMalloc((void**)& aabbs, triCountPadded * sizeof(AABB)));
 
 	// morton code
-	GpuErrorCheck(cudaMalloc((void**)& morton, BVHcapacity * sizeof(uint)));
-	GpuErrorCheck(cudaMemset(morton, UINT_MAX, BVHcapacity * sizeof(uint))); // init morton code to UINT_MAX
+	GpuErrorCheck(cudaMalloc((void**)& morton, triCountPadded * sizeof(uint)));
+	GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCountPadded * sizeof(uint))); // init morton code to UINT_MAX
 
 	// reorder idx
-	GpuErrorCheck(cudaMalloc((void**)& reorderIdx, BVHcapacity * sizeof(uint)));
+	GpuErrorCheck(cudaMalloc((void**)& reorderIdx, triCountPadded * sizeof(uint)));
 
 	// bvh nodes
-	GpuErrorCheck(cudaMalloc((void**)& bvhNodes, triCount * sizeof(BVHNode)));
+	GpuErrorCheck(cudaMalloc((void**)& bvhNodes, triCountPadded * sizeof(BVHNode)));
+
+	//------------------------------------ tlas -------------------------------------------
+
+	// aabb
+	GpuErrorCheck(cudaMalloc((void**)& tlasAabbs, BatchSize * sizeof(AABB)));
+
+	// morton code
+	GpuErrorCheck(cudaMalloc((void**)& tlasMorton, BatchSize * sizeof(uint)));
+	GpuErrorCheck(cudaMemset(tlasMorton, UINT_MAX, BatchSize * sizeof(uint))); // init morton code to UINT_MAX
+
+	// reorder idx
+	GpuErrorCheck(cudaMalloc((void**)& tlasReorderIdx, BatchSize * sizeof(uint)));
+
+	// bvh nodes
+	GpuErrorCheck(cudaMalloc((void**)& tlasBvhNodes, BatchSize * sizeof(BVHNode)));
+
 	//-------------------------------------------------------------------------------
 
 	// AABB
@@ -167,6 +198,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	// constant buffer
 	cbo.frameNum = 0;
 	cbo.bvhDebugLevel = -1;
+	cbo.bvhBatchSize = BatchSize;
 
 	// launch param
 	blockDim = dim3(8, 8, 1);
@@ -281,7 +313,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	// histogram
 	GpuErrorCheck(cudaMalloc((void**)& d_histogram, 64 * sizeof(uint)));
 
-	//
+	// for debug
 	GpuErrorCheck(cudaMalloc((void**)& dumpFrameBuffer, screenWidth * screenHeight * sizeof(uchar4)));
 	GpuErrorCheck(cudaMemset(dumpFrameBuffer, 0, screenWidth * screenHeight * sizeof(uchar4)));
 
@@ -314,6 +346,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	d_sceneGeometry.triangles       = triangles;
 	d_sceneGeometry.bvhNodes        = bvhNodes;
+	d_sceneGeometry.tlasBvhNodes    = tlasBvhNodes;
 	d_sceneGeometry.numTriangles    = triCount;
 
 	delete[] materials;
@@ -360,20 +393,32 @@ void RayTracer::CameraSetup(Camera& camera)
 	camera.resolution = { (float)renderWidth, (float)renderHeight };
 	camera.fov.x = 90.0f * Pi_over_180;
 
+	//LoadCameraFromFile("camera.bin");
+
 	camera.update();
 }
 
 void RayTracer::cleanup()
 {
 	// ---------------- Destroy surface objects ----------------------
-	// bvh
+	// triangle
+	cudaFree(triCountArray);
+	cudaFree(batchCountArray);
+
 	cudaFree(constTriangles);
 	cudaFree(triangles);
-	cudaFree(sceneAabbs);
-	cudaFree(sceneBoundingBox);
+
+	// tlas
+	cudaFree(tlasAabbs);
+	cudaFree(tlasMorton);
+	cudaFree(tlasReorderIdx);
+	cudaFree(tlasBvhNodes);
+
+	// bvh
 	cudaFree(morton);
 	cudaFree(reorderIdx);
 	cudaFree(bvhNodes);
+	cudaFree(aabbs);
 
 	// color buffer
     cudaDestroySurfaceObject(colorBufferA);
