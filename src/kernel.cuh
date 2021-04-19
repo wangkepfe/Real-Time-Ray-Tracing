@@ -25,6 +25,9 @@
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
 #define DEBUG_FRAME -1
+#define LOAD_CAMERA_AT_START 1
+#define DEBUG_BVH_TRAVERSE 0
+#define DEBUG_RAY_AABB_INTERSECT 0
 
 const bool UseDynamicResolution = 1;
 

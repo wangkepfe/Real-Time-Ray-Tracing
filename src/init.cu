@@ -44,12 +44,31 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		// load triangles
 		std::vector<Triangle> h_triangles;
 
-		const char* filename = "resources/models/high-res-monkey.dae";
+		//const char* filename = "resources/models/test.dae";
+		//LoadScene(filename, h_triangles);
 
-		LoadScene(filename, h_triangles);
+		std::string fileName = "resources/models/high-res-monkey.bin";
+		std::ifstream infile (fileName, std::ifstream::binary);
+		if (infile.good())
+		{
+			size_t currentSize = sizeof(uint);
+			char* pTriCount = new char[currentSize];
+			infile.read(pTriCount, currentSize);
+			triCount = *reinterpret_cast<uint*>(pTriCount);
 
-		triCount = static_cast<uint>(h_triangles.size());
+			currentSize = sizeof(Triangle) * triCount;
+			char* pTrianglesRaw = new char[currentSize];
+			infile.read(pTrianglesRaw, currentSize);
+			Triangle* pTriangles = reinterpret_cast<Triangle*>(pTrianglesRaw);
+			h_triangles.assign(pTriangles, pTriangles + triCount);
 
+			infile.close();
+			std::cout << "Successfully write scene data to \"" << fileName << "\"!\n";
+		} else {
+			std::cout << "Error: Failed to write scene data to \"" << fileName << "\".\n";
+		}
+
+		//triCount = static_cast<uint>(h_triangles.size());
 		// pad the tricount to a multiply of BatchSize
 		triCountPadded = triCount;
 		if (triCountPadded % BatchSize != 0)
@@ -127,8 +146,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	int numAabbs = 2;
 	sceneAabbs = new AABB[numAabbs];
 	i = 0;
-	sceneAabbs[i++] = AABB({0.0f, 0.0f, 0.0f}, 0.01f);
-	sceneAabbs[i++] = AABB({0.0f, 0.0f, 0.0f}, 0.01f);
+	sceneAabbs[i++] = AABB({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f});
+	sceneAabbs[i++] = AABB({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f});
 
 	// sphere
 	numSpheres = 2;
@@ -393,7 +412,9 @@ void RayTracer::CameraSetup(Camera& camera)
 	camera.resolution = { (float)renderWidth, (float)renderHeight };
 	camera.fov.x = 90.0f * Pi_over_180;
 
-	//LoadCameraFromFile("camera.bin");
+#if LOAD_CAMERA_AT_START
+	LoadCameraFromFile("camera.bin");
+#endif
 
 	camera.update();
 }

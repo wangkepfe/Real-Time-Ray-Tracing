@@ -529,8 +529,8 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("TLAS_aabbs.csv"           , tlasAabbs           , KernelSize);
-        DebugPrintFile("TLAS_morton.csv"          , tlasMorton          , KernelSize);
+        DebugPrintFile("TLAS_aabbs.csv"           , tlasAabbs           , BatchSize);
+        DebugPrintFile("TLAS_morton.csv"          , tlasMorton          , BatchSize);
     }
 
     RadixSort2 <KernelSize, KernalBatchSize> <<< 1, KernelSize >>>
@@ -538,8 +538,8 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("TLAS_reorderIdx.csv"       , tlasReorderIdx      , KernelSize);
-        DebugPrintFile("TLAS_morton2.csv"          , tlasMorton          , KernelSize);
+        DebugPrintFile("TLAS_reorderIdx.csv"       , tlasReorderIdx      , BatchSize);
+        DebugPrintFile("TLAS_morton2.csv"          , tlasMorton          , BatchSize);
     }
 
     GpuErrorCheck(cudaDeviceSynchronize());
@@ -550,7 +550,7 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("TLAS_bvhNodes.csv"       , tlasBvhNodes      , KernelSize);
+        DebugPrintFile("TLAS_bvhNodes.csv"       , tlasBvhNodes      , BatchSize);
     }
 
     GpuErrorCheck(cudaDeviceSynchronize());

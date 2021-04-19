@@ -21,7 +21,8 @@ struct  __align__(16) AABB
 
 	__host__ __device__ AABB() : max(), min() {}
 	__host__ __device__ AABB(const Float3& max, const Float3& min) : max{ max }, min{ min } {}
-	__host__ __device__ AABB(const Float3& center, float edgeLength) : max{ center + Float3(edgeLength / 2.0f) }, min{ center - Float3(edgeLength / 2.0f) } {}
+
+	__host__ __device__ static AABB CreateCenterEdge(const Float3& center, float edgeLength) { return AABB(center + Float3(edgeLength / 2.0f), center - Float3(edgeLength / 2.0f)); }
 };
 
 struct  __align__(16) Ray

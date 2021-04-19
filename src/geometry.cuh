@@ -4,6 +4,7 @@
 #include "linear_math.h"
 #include "geometry.h"
 #include "debug_util.cuh"
+#include "precision.cuh"
 
 #define RayMax 10e10f
 
@@ -12,30 +13,6 @@
 
 #define RAY_TRIANGLE_CULLING 0
 #define PRE_CALU_TRIANGLE_COORD_TRANS_OPT 0
-
-// ------------------------------ Machine Epsilon -----------------------------------------------
-// The smallest number that is larger than one minus one. ULP (unit in the last place) of 1
-// ----------------------------------------------------------------------------------------------
-__device__ __inline__ constexpr float MachineEpsilon()
-{
-	typedef union {
-		float f32;
-		int i32;
-	} flt_32;
-
-	flt_32 s{ 1.0f };
-
-	s.i32++;
-	return (s.f32 - 1.0f);
-}
-
-// ------------------------------ Error Gamma -------------------------------------------------------
-// return 32bit floating point arithmatic calculation error upper bound, n is number of calculation
-// --------------------------------------------------------------------------------------------------
-__device__ __inline__ constexpr float ErrGamma(int n)
-{
-	return (n * MachineEpsilon()) / (1.0f - n * MachineEpsilon());
-}
 
 // ------------------------------ Sphere Ray Intersect ------------------------------------
 // ray/sphere intersection. returns distance, RayMax if no intersection.
@@ -468,10 +445,15 @@ __device__ __forceinline__ void RayAabbPairIntersect(const Float3& invRayDir, co
 
 	Int2 idx = Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
 
-	//if (IS_DEBUG_PIXEL())
-	//{
-	//	printf("RayAabbPairIntersect: aabbLeft.min=(%f, %f, %f), aabbLeft.max=(%f, %f, %f)\n", aabbLeft.min.x, aabbLeft.min.y, aabbLeft.min.z, aabbLeft.max.x, aabbLeft.max.y, aabbLeft.max.z);
-	//	printf("RayAabbPairIntersect: aabbRight.min=(%f, %f, %f), aabbRight.max=(%f, %f, %f)\n", aabbRight.min.x, aabbRight.min.y, aabbRight.min.z, aabbRight.max.x, aabbRight.max.y, aabbRight.max.z);
-	//	printf("RayAabbPairIntersect: intersect1=%d, intersect2=%d, isClosestIntersect1=%d\n", intersect1, intersect2, isClosestIntersect1);
-	//}
+	#if DEBUG_RAY_AABB_INTERSECT
+	if (IS_DEBUG_PIXEL())
+	{
+		Float3 rayDir = SafeDivide3f(Float3(1.0f), invRayDir);
+		DEBUG_PRINT(rayOrig)
+		DEBUG_PRINT(rayDir)
+		printf("RayAabbPairIntersect: aabbLeft.min=(%f, %f, %f), aabbLeft.max=(%f, %f, %f)\n", aabbLeft.min.x, aabbLeft.min.y, aabbLeft.min.z, aabbLeft.max.x, aabbLeft.max.y, aabbLeft.max.z);
+		printf("RayAabbPairIntersect: aabbRight.min=(%f, %f, %f), aabbRight.max=(%f, %f, %f)\n", aabbRight.min.x, aabbRight.min.y, aabbRight.min.z, aabbRight.max.x, aabbRight.max.y, aabbRight.max.z);
+		printf("RayAabbPairIntersect: intersect1=%d, intersect2=%d, isClosestIntersect1=%d\n", intersect1, intersect2, isClosestIntersect1);
+	}
+	#endif
 }

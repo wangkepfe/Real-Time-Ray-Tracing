@@ -4,8 +4,6 @@
 #include "geometry.cuh"
 #include "bvhNode.cuh"
 
-#define DEBUG_BVH_TRAVERSE 0
-
 // update material info after intersect
 __device__ inline void UpdateMaterial(
 	const ConstBuffer&   cbo,
