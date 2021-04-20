@@ -21,18 +21,27 @@
 ## Acceleration
 ### Variance reducing
 - Low-discrepancy blue noise sampler
-- Multiple importance sampling. Importance sampling BSDF and lights. Keep one sample per intersection.
+- Multiple importance sampling. Importance sampling BSDF and lights. Keep one sample per intersection. (need re-archtecture)
 
-### Traversal
+### Scene traversal
 - LBVH
+    - Two level BVH, each level with limited element count for better kernel efficiency
+    - Triangle list -> AABB, morton codes, scene AABB
+    - Radix sort -> Sorted morton codes, leaf reorder indices
+    - LBVH build
+    - BVH traversal using stack
 - (todo) PLOC
+    - Need local clustering
 
 ### Denoising
-- Edge-aware `Atrous
-- Temporal spatial filter
+- Edge-aware `Atrous spatial + temporal filter
+- (todo) A-SVGF
+    - Multi-pass, large range spatial filters
 
-### Other
+### Optimizations
 - Adaptive sampling
+    - Noise level estimation
+    - Currenly not in use. Curretnly using one sample per frame per pixel.
 - Dynamic resolution
 
 ## Post-processing
@@ -41,6 +50,23 @@
 - Lens flare
 - Tone mapping
 - Sharpening
+
+## How to prepare and build
+- Windows 10 OS
+- cmake 3.10
+- CUDA
+- Vulkan
+- Git submodules
+    - git clone --recurse-submodules
+    - git submodule update --init --recursive
+- Note that it may have conflict with assimp NOMINMAX define
+
+## How to run and customize
+- I use Visual Studio 2019 to build and run
+- copy_resources will copy the resources/ folder to the program folder
+- The mesh file needs to be preprocessed by meshProcessor
+- There's a config file in resources/config.toml
+- Kernel configs are hardcoded at the top of files
 
 ## References
 - Low-Discrepancy Sampler https://perso.liris.cnrs.fr/david.coeurjolly/publications/heitz19.html
