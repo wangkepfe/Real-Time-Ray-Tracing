@@ -53,6 +53,7 @@ target_link_libraries(meshProcesor assimp)
 # header only
 target_include_directories(myproject PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/stb")
 target_include_directories(myproject PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/TinyTIFF")
+target_include_directories(myproject PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/toml")
 
 # copy resource
 add_custom_target(copy_resources)

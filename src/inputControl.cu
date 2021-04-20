@@ -3,6 +3,8 @@
 #include <GLFW/glfw3.h>
 #include <fstream>
 
+extern GlobalSettings* g_settings;
+
 struct InputControl
 {
     float moveSpeed = 0.01f;
@@ -29,8 +31,8 @@ void RayTracer::keyboardUpdate(int key, int scancode, int action, int mods)
     if (mods == GLFW_MOD_CONTROL)
     {
         // camera save & load
-        if (key == GLFW_KEY_C && action == GLFW_PRESS) { SaveCameraToFile("camera.bin"); }
-        if (key == GLFW_KEY_V && action == GLFW_PRESS) { LoadCameraFromFile("camera.bin"); }
+        if (key == GLFW_KEY_C && action == GLFW_PRESS) { SaveCameraToFile(g_settings->cameraSaveFileName); }
+        if (key == GLFW_KEY_V && action == GLFW_PRESS) { LoadCameraFromFile(g_settings->cameraSaveFileName); }
     }
     else
     {

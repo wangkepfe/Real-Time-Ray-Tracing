@@ -14,7 +14,7 @@ __device__ __inline__ int LCP(uint* morton, uint triCount, int m0, int j)
 
 template<uint kernelSize,          // thread number per kernel, same as LDS size, LDS-thread 1-to-1 mapping
          uint perThreadBatch>      // batch process count per thread
-__global__ void BuildLBVH2 (
+__global__ void BuildLBVH (
 	BVHNode* bvhNodes, // [out]
 	AABB*    aabbs,       // [in]
 	uint*    morton,      // [in]

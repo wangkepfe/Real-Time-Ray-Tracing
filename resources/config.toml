@@ -1,0 +1,20 @@
+# Config file for the render engine
+
+[resolution]
+width  = 1920
+height = 1080
+
+[file]
+inputMeshFileName     = "resources/models/high-res-monkey.bin"
+inputTextureFileNames = ["resources/textures/colorChecker.png"]
+loadCameraAtInit      = true
+inputCameraFileName   = "camera.bin"
+cameraSaveFileName    = "camera.bin"
+
+[optimziation]
+useDynamicResolution = true
+targetFps            = 60.0
+maxWidth             = 3840
+maxHeight            = 2160
+minWidth             = 640
+minHeight            = 480

@@ -31,16 +31,10 @@
 //#include "linmath.h"
 
 #include "kernel.cuh"
+#include "configLoader.h"
 
-// ----------------------------------------------------------------------- global constants
-
-// resolution
-const int WIDTH = 1920;
-const int HEIGHT = 1080;
-// const int WIDTH = 2560;
-// const int HEIGHT = 1440;
-// const int WIDTH = 3840;
-// const int HEIGHT = 2160;
+// global
+GlobalSettings* g_settings;
 
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
@@ -213,16 +207,20 @@ class HelloTriangleApplication {
 public:
     void run()
     {
+        g_settings = new GlobalSettings;
+        LoadConfig(g_settings);
+
         initWindow();
         initVulkan();
         initCuda();
 
-        g_rayTracer = new RayTracer(WIDTH, HEIGHT);
+        g_rayTracer = new RayTracer(g_settings->width, g_settings->height);
         g_rayTracer->init(m_streams);
 
         mainLoop();
 
         delete g_rayTracer;
+        delete g_settings;
 
         cleanup();
     }
@@ -349,7 +347,7 @@ private:
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
         // window width, height, title
-        m_window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        m_window = glfwCreateWindow(g_settings->width, g_settings->height, "Vulkan", nullptr, nullptr);
 
         // keyboard
         glfwSetKeyCallback(m_window, key_callback);
@@ -1296,7 +1294,7 @@ private:
         if (capabilities.currentExtent.width != UINT32_MAX) {
             return capabilities.currentExtent;
         } else {
-            VkExtent2D actualExtent = {WIDTH, HEIGHT};
+            VkExtent2D actualExtent = {g_settings->width, g_settings->height};
             actualExtent.width = std::max(capabilities.minImageExtent.width, std::min(capabilities.maxImageExtent.width, actualExtent.width));
             actualExtent.height = std::max(capabilities.minImageExtent.height, std::min(capabilities.maxImageExtent.height, actualExtent.height));
             return actualExtent;
@@ -1486,8 +1484,8 @@ private:
     // create texture image
     void createTextureImage()
     {
-        m_imageWidth = WIDTH;
-        m_imageHeight = HEIGHT;
+        m_imageWidth = g_settings->width;
+        m_imageHeight = g_settings->height;
 
         // size
         VkDeviceSize imageSize = m_imageWidth * m_imageHeight * 4;

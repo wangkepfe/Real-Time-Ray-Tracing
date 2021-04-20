@@ -16,6 +16,7 @@
 #include "timer.h"
 #include "blueNoiseRandGen.h"
 #include "bvhNode.cuh"
+#include "globalSettings.h"
 
 #define PLANE_OBJECT_IDX 666666
 #define ENV_LIGHT_ID 9999
@@ -25,11 +26,8 @@
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
 #define DEBUG_FRAME -1
-#define LOAD_CAMERA_AT_START 1
 #define DEBUG_BVH_TRAVERSE 0
 #define DEBUG_RAY_AABB_INTERSECT 0
-
-const bool UseDynamicResolution = 1;
 
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
@@ -131,14 +129,14 @@ struct __align__(16) HistoryCamera
 
 struct __align__(16) SceneGeometry
 {
-	Sphere* spheres;
-	AABB*   aabbs;
+	Sphere*   spheres;
+	AABB*     aabbs;
 	Triangle* triangles;
-	BVHNode* bvhNodes;
-	BVHNode* tlasBvhNodes;
-	int numAabbs;
-	int numSpheres;
-	int numTriangles;
+	BVHNode*  bvhNodes;
+	BVHNode*  tlasBvhNodes;
+	int       numAabbs;
+	int       numSpheres;
+	int       numTriangles;
 };
 
 enum SurfaceMaterialType : uint
@@ -154,59 +152,59 @@ enum SurfaceMaterialType : uint
 struct __align__(16) SurfaceMaterial
 {
 	__device__ __host__ SurfaceMaterial() :
-		albedo {Float3(0.8f)},
-		type {PERFECT_REFLECTION},
+		albedo  {Float3(0.8f)},
+		type    {PERFECT_REFLECTION},
 		useTex0 {false},
 		useTex1 {false},
 		useTex2 {false},
 		useTex3 {false},
-		texId0 {0},
-		texId1 {0},
-		texId2 {0},
-		texId3 {0},
-		F0 {Float3(0.56f, 0.57f, 0.58f)},
-		alpha {0.05f}
+		texId0  {0},
+		texId1  {0},
+		texId2  {0},
+		texId3  {0},
+		F0      {Float3(0.56f, 0.57f, 0.58f)},
+		alpha   {0.05f}
 	{}
 
 	Float3 albedo;
-	uint  type;
+	uint   type;
 
-	bool useTex0;
-	bool useTex1;
-	bool useTex2;
-	bool useTex3;
+	bool   useTex0;
+	bool   useTex1;
+	bool   useTex2;
+	bool   useTex3;
 
-	uint texId0;
-	uint texId1;
-	uint texId2;
-	uint texId3;
+	uint   texId0;
+	uint   texId1;
+	uint   texId2;
+	uint   texId3;
 
 	Float3 F0;
-	float alpha;
+	float  alpha;
 };
 
 struct __align__(16) SceneMaterial
 {
 	SurfaceMaterial* materials;
-	int* materialsIdx;
-	Sphere* sphereLights;
-	int numMaterials;
-	int numSphereLights;
+	int*             materialsIdx;
+	Sphere*          sphereLights;
+	int              numMaterials;
+	int              numSphereLights;
 };
 
 struct __align__(16) ConstBuffer
 {
-	Camera camera;
+	Camera        camera;
 
 	HistoryCamera historyCamera;
 
-	Float3 sunDir;
-	float  clockTime;
+	Float3        sunDir;
+	float         clockTime;
 
-	int frameNum;
-	int bvhDebugLevel;
+	int           frameNum;
+	int           bvhDebugLevel;
 
-	int bvhBatchSize;
+	int           bvhBatchSize;
 };
 
 struct __align__(16) RayState
@@ -247,9 +245,6 @@ struct __align__(16) RayState
 	bool       isDiffuse;
 	int        objectIdx;
 };
-
-//__device__ __inline__ float rd(RandState* rdState) { return curand_uniform(rdState); }
-//__device__ __inline__ Float2 rd2(RandState* rdState1, RandState* rdState2) { return Float2(curand_uniform(rdState1), curand_uniform(rdState2)); }
 
 union SceneTextures
 {
@@ -379,9 +374,9 @@ private:
 	cudaArray*                  noiseLevelBufferArray;
 
 	// sky
-	const unsigned int          skyWidth = 64;
-	const unsigned int          skyHeight = 16;
-	const unsigned int          skySize = 1024;
+	static const uint           skyWidth = 64;
+	static const uint           skyHeight = 16;
+	static const uint           skySize = 1024;
 
 	SurfObj                     skyBuffer;
 	TexObj                      skyTex;

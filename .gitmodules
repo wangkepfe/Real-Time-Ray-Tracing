@@ -13,3 +13,6 @@
 [submodule "ext/assimp"]
 	path = ext/assimp
 	url = https://github.com/assimp/assimp
+[submodule "ext/toml"]
+	path = ext/toml
+	url = https://github.com/ToruNiina/toml11

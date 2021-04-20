@@ -18,7 +18,7 @@
 #define USE_TEXTURE_0 1
 #define USE_TEXTURE_1 0
 
-const float TargetFPS = 60.0f;
+extern GlobalSettings* g_settings;
 
 __device__ inline void LightShader(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, TexObj skyTex)
 {
@@ -400,22 +400,22 @@ void RayTracer::UpdateFrame()
     cbo.camera.update();
 
     // dynamic resolution
-    if (UseDynamicResolution)
+    if (g_settings->useDynamicResolution)
     {
-        const int minRenderWidth = 640;
-        const int minRenderHeight = 480;
+        const int minRenderWidth = g_settings->minWidth;
+        const int minRenderHeight = g_settings->minHeight;
 
         historyRenderWidth = renderWidth;
         historyRenderHeight = renderHeight;
 
-        if (deltaTime > 1000.0f / (TargetFPS - 1.0f) && renderWidth > minRenderWidth && renderHeight > minRenderHeight)
+        if (deltaTime > 1000.0f / (g_settings->targetFps - 1.0f) && renderWidth > minRenderWidth && renderHeight > minRenderHeight)
         {
             renderWidth -= 16;
             renderHeight -= 9;
             cbo.camera.resolution = Float2(renderWidth, renderHeight);
             cbo.camera.update();
         }
-        else if (deltaTime < 1000.0f / (TargetFPS + 1.0f) && renderWidth < maxRenderWidth && renderHeight < maxRenderHeight)
+        else if (deltaTime < 1000.0f / (g_settings->targetFps + 1.0f) && renderWidth < maxRenderWidth && renderHeight < maxRenderHeight)
         {
             renderWidth += 16;
             renderHeight += 9;
@@ -458,17 +458,16 @@ void RayTracer::draw(SurfObj* renderTarget)
     Int2 bufferDim(renderWidth, renderHeight);
     Int2 historyDim(historyRenderWidth, historyRenderHeight);
     Int2 outputDim(screenWidth, screenHeight);
-    gridDim = dim3(divRoundUp(renderWidth, blockDim.x), divRoundUp(renderHeight, blockDim.y), 1);
-    bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
-	gridDim4 = dim3(divRoundUp(bufferSize4.x, blockDim.x), divRoundUp(bufferSize4.y, blockDim.y), 1);
+    gridDim      = dim3(divRoundUp(renderWidth, blockDim.x), divRoundUp(renderHeight, blockDim.y), 1);
+    bufferSize4  = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
+	gridDim4     = dim3(divRoundUp(bufferSize4.x, blockDim.x), divRoundUp(bufferSize4.y, blockDim.y), 1);
     bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
-	gridDim16 = dim3(divRoundUp(bufferSize16.x, blockDim.x), divRoundUp(bufferSize16.y, blockDim.y), 1);
+	gridDim16    = dim3(divRoundUp(bufferSize16.x, blockDim.x), divRoundUp(bufferSize16.y, blockDim.y), 1);
     bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
-	gridDim64 = dim3(divRoundUp(bufferSize64.x, blockDim.x), divRoundUp(bufferSize64.y, blockDim.y), 1);
+	gridDim64    = dim3(divRoundUp(bufferSize64.x, blockDim.x), divRoundUp(bufferSize64.y, blockDim.y), 1);
 
     // ------------------------------- Init -------------------------------
     GpuErrorCheck(cudaMemset(d_histogram, 0, 64 * sizeof(uint)));
-
     GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCountPadded * sizeof(uint)));
     GpuErrorCheck(cudaMemset(tlasMorton, UINT_MAX, BatchSize * sizeof(uint)));
 
@@ -476,15 +475,15 @@ void RayTracer::draw(SurfObj* renderTarget)
     Sky<<<dim3(8, 2, 1), dim3(8, 8, 1)>>>(skyBuffer, skyCdf, Int2(64, 16), sunDir);
     PrefixScan <1024> <<<1, dim3(512, 1, 1), 1024 * sizeof(float)>>> (skyCdf);
 
+    // ----------------------------------------------- Build bottom level BVH -------------------------------------------------
     // ------------------------------- Update Geometry -----------------------------------
     // out: triangles, aabbs, morton codes
-    //UpdateSceneGeometry <256, 4> <<< 1, 256 >>> (constTriangles, triangles, aabbs, morton, triCount, clockTime);
-    UpdateSceneGeometry2 <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
+    UpdateSceneGeometry <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
         (constTriangles, triangles, aabbs, morton, triCountArray, clockTime);
 
-	GpuErrorCheck(cudaDeviceSynchronize());
+    #if DEBUG_FRAME > 0
+    GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
-
     if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("constTriangles.csv"  , constTriangles  , triCountPadded);
@@ -492,75 +491,84 @@ void RayTracer::draw(SurfObj* renderTarget)
         DebugPrintFile("aabbs.csv"           , aabbs           , triCountPadded);
         DebugPrintFile("morton.csv"          , morton          , triCountPadded);
     }
+    #endif
 
     // ------------------------------- Radix Sort -----------------------------------
     // in: morton code; out: reorder idx
-    RadixSort2 <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
+    RadixSort <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
         (morton, reorderIdx);
-    //RadixSort <1024, 1> <<< 1, 1024 >>> (morton, reorderIdx);
 
-	GpuErrorCheck(cudaDeviceSynchronize());
+    #if DEBUG_FRAME > 0
+    GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
-
     if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("morton2.csv", morton, triCountPadded);
         DebugPrintFile("reorderIdx.csv", reorderIdx, triCountPadded);
     }
+    #endif
 
     // ------------------------------- Build LBVH -----------------------------------
     // in: aabbs, morton code, reorder idx; out: lbvh
-    BuildLBVH2 <KernelSize, KernalBatchSize> <<< batchCount , KernelSize>>>
+    BuildLBVH <KernelSize, KernalBatchSize> <<< batchCount , KernelSize>>>
         (bvhNodes, aabbs, morton, reorderIdx, triCountArray);
 
-	GpuErrorCheck(cudaDeviceSynchronize());
+    #if DEBUG_FRAME > 0
+    GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
-
     if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("bvhNodes.csv", bvhNodes, triCountPadded);
     }
+    #endif
 
+    // ----------------------------------------------- Build top level BVH -------------------------------------------------------------
     UpdateTLAS <KernelSize, KernalBatchSize, BatchSize> <<< 1 , KernelSize>>>
         (bvhNodes, tlasAabbs, tlasMorton, batchCountArray, triCountPadded);
 
+    #if DEBUG_FRAME > 0
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
-
     if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("TLAS_aabbs.csv"           , tlasAabbs           , BatchSize);
         DebugPrintFile("TLAS_morton.csv"          , tlasMorton          , BatchSize);
     }
+    #endif
 
-    RadixSort2 <KernelSize, KernalBatchSize> <<< 1, KernelSize >>>
+    RadixSort <KernelSize, KernalBatchSize> <<< 1, KernelSize >>>
         (tlasMorton, tlasReorderIdx);
 
+    #if DEBUG_FRAME > 0
     if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("TLAS_reorderIdx.csv"       , tlasReorderIdx      , BatchSize);
         DebugPrintFile("TLAS_morton2.csv"          , tlasMorton          , BatchSize);
     }
-
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
+    #endif
 
-    BuildLBVH2 <KernelSize, KernalBatchSize> <<< 1 , KernelSize>>>
+    BuildLBVH <KernelSize, KernalBatchSize> <<< 1 , KernelSize>>>
         (tlasBvhNodes, tlasAabbs, tlasMorton, tlasReorderIdx, batchCountArray);
 
+    #if DEBUG_FRAME > 0
     if (cbo.frameNum == DEBUG_FRAME)
     {
         DebugPrintFile("TLAS_bvhNodes.csv"       , tlasBvhNodes      , BatchSize);
     }
-
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
+    #endif
 
     // ------------------------------- Path Tracing -------------------------------
-    PathTrace<<<gridDim, blockDim>>>(cbo, d_sceneGeometry, d_sceneMaterial, d_randGen, colorBufferA, normalDepthBufferA, sceneTextures, skyTex, skyCdf, motionVectorBuffer, sampleCountBuffer, noiseLevelBuffer);
+    PathTrace<<<gridDim, blockDim>>>
+        (cbo, d_sceneGeometry, d_sceneMaterial, d_randGen, colorBufferA, normalDepthBufferA, sceneTextures, skyTex, skyCdf, motionVectorBuffer, sampleCountBuffer, noiseLevelBuffer);
 
+    #if DEBUG_FRAME > 0
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
+    #endif
 
     // ------------------------------- Denoising -------------------------------
     // update history camera
@@ -608,6 +616,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     // Scale to final output
     BicubicFilterScale<<<scaleGridDim, scaleBlockDim>>>(/*out*/renderTarget, /*in*/colorBufferA, outputDim, bufferDim);
 
+    #if DEBUG_FRAME > 0
     if (cbo.frameNum == DEBUG_FRAME)
     {
         // debug
@@ -615,4 +624,5 @@ void RayTracer::draw(SurfObj* renderTarget)
 
         writeToPPM("image.ppm", outputDim.x, outputDim.y, dumpFrameBuffer);
     }
+    #endif
 }

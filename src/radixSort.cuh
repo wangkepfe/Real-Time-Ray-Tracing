@@ -18,7 +18,7 @@ __device__ __forceinline__ void SimdInclusiveScan(T& v, uint laneId)
 
 template<uint kernelSize,          // thread number per kernel, same as LDS size, LDS-thread 1-to-1 mapping
 	uint perThreadBatch>      // batch process count per thread
-	__global__ void RadixSort2(
+	__global__ void RadixSort(
 		uint* inout,
 		uint* reorderIdx)
 {

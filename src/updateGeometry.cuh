@@ -42,7 +42,7 @@ __inline__ __device__ void WarpReduceMaxMin3f(Float3& vmax, Float3& vmin) {
 
 template<uint kernelSize,          // thread number per kernel, same as LDS size, LDS-thread 1-to-1 mapping
          uint perThreadBatch>      // batch process count per thread
-__global__ void UpdateSceneGeometry2(
+__global__ void UpdateSceneGeometry(
 	Triangle*    constTriangles,   // [const] reference mesh
 	Triangle*    triangles,        // [out] animated mesh
 	AABB*        aabbs,            // [out] per triangle aabb
@@ -85,33 +85,21 @@ __global__ void UpdateSceneGeometry2(
 		Float3 v2 = mytriangle[i].v2;
 		Float3 v3 = mytriangle[i].v3;
 
-		// Float3 n1 = mytriangle[i].n1;
-		// Float3 n2 = mytriangle[i].n2;
-		// Float3 n3 = mytriangle[i].n3;
-
 		v1.y += 1.2f;
 		v2.y += 1.2f;
 		v3.y += 1.2f;
 
-		// Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
+		Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
 
-		// v1 = rotMat * v1;
-		// v2 = rotMat * v2;
-		// v3 = rotMat * v3;
-
-		// n1 = rotMat * n1;
-		// n2 = rotMat * n2;
-		// n3 = rotMat * n3;
+		v1 = rotMat * v1;
+		v2 = rotMat * v2;
+		v3 = rotMat * v3;
 
 		mytriangle[i] = Triangle(v1, v2, v3);
 
 	#if RAY_TRIANGLE_COORDINATE_TRANSFORM
 		PreCalcTriangleCoordTrans(mytriangle[i]);
 	#endif
-
-		// mytriangle[i].n1 = n1;
-		// mytriangle[i].n2 = n2;
-		// mytriangle[i].n3 = n3;
 
 		// write out
 		triangles[idx[i]] = mytriangle[i];

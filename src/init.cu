@@ -4,6 +4,8 @@
 #include "blueNoiseRandGenData.h"
 #include "cuda_fp16.h"
 
+extern GlobalSettings* g_settings;
+
 template<typename T>
 __global__ void InitBuffer(T val, SurfObj buffer, Int2 bufferSize)
 {
@@ -18,10 +20,10 @@ __global__ void InitBuffer(T val, SurfObj buffer, Int2 bufferSize)
 
 void RayTracer::init(cudaStream_t* cudaStreams)
 {
-	maxRenderWidth = 3840;
-	maxRenderHeight = 2160;
+	maxRenderWidth = g_settings->maxWidth;
+	maxRenderHeight = g_settings->maxHeight;
 
-	if (UseDynamicResolution)
+	if (g_settings->useDynamicResolution)
 	{
 		renderWidth = maxRenderWidth;
 		renderHeight = maxRenderHeight;
@@ -47,7 +49,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		//const char* filename = "resources/models/test.dae";
 		//LoadScene(filename, h_triangles);
 
-		std::string fileName = "resources/models/high-res-monkey.bin";
+		std::string fileName = g_settings->inputMeshFileName;
 		std::ifstream infile (fileName, std::ifstream::binary);
 		if (infile.good())
 		{
@@ -63,9 +65,9 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 			h_triangles.assign(pTriangles, pTriangles + triCount);
 
 			infile.close();
-			std::cout << "Successfully write scene data to \"" << fileName << "\"!\n";
+			std::cout << "Successfully read scene data from \"" << fileName << "\"!\n";
 		} else {
-			std::cout << "Error: Failed to write scene data to \"" << fileName << "\".\n";
+			std::cout << "Error: Failed to read scene data from \"" << fileName << "\".\n";
 		}
 
 		//triCount = static_cast<uint>(h_triangles.size());
@@ -379,7 +381,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	CameraSetup(cbo.camera);
 
 	// textures
-	texArrayUv = LoadTextureRgba8("resources/textures/colorChecker.png", sceneTextures.uv);
+	texArrayUv = LoadTextureRgba8(g_settings->inputTextureFileNames[0].c_str(), sceneTextures.uv);
 	//texArraySandAlbedo = LoadTextureRgb8("resources/textures/sand.png", sceneTextures.sandAlbedo);
 	//texArraySandNormal = LoadTextureRgb8("resources/textures/sand_n.png", sceneTextures.sandNormal);
 
@@ -412,9 +414,10 @@ void RayTracer::CameraSetup(Camera& camera)
 	camera.resolution = { (float)renderWidth, (float)renderHeight };
 	camera.fov.x = 90.0f * Pi_over_180;
 
-#if LOAD_CAMERA_AT_START
-	LoadCameraFromFile("camera.bin");
-#endif
+	if (g_settings->loadCameraAtInit)
+	{
+		LoadCameraFromFile(g_settings->inputCameraFileName);
+	}
 
 	camera.update();
 }
