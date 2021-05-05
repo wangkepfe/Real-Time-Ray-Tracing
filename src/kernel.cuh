@@ -244,6 +244,12 @@ struct __align__(16) RayState
 	float      depth;
 	bool       isDiffuse;
 	int        objectIdx;
+	bool       isHitProcessed;
+
+	Float4     rand;
+
+	bool       isOccluded;
+	bool       isShadowRay;
 };
 
 union SceneTextures
@@ -372,6 +378,12 @@ private:
 
 	SurfObj                     noiseLevelBuffer;
 	cudaArray*                  noiseLevelBufferArray;
+
+	SurfObj                     colorBufferC;
+	cudaArray*                  colorBufferArrayC;
+
+	SurfObj                     bsdfOverPdfBuffer;
+	cudaArray*                  bsdfOverPdfBufferArray;
 
 	// sky
 	static const uint           skyWidth = 64;

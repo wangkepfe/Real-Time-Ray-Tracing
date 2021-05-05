@@ -233,7 +233,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	cudaChannelFormatDesc format_normal_R11_G10_B11_depth_R32 = cudaCreateChannelDesc<float2>();
 	cudaChannelFormatDesc format_motionVector_UV16 = cudaCreateChannelDescHalf2();
 	cudaChannelFormatDesc format_sampleCount_R8 = cudaCreateChannelDesc<uchar1>();
-	cudaChannelFormatDesc format_noiseLevel_R16 = cudaCreateChannelDescHalf1();
+	cudaChannelFormatDesc format_R16 = cudaCreateChannelDescHalf1();
+	cudaChannelFormatDesc format_RGBA_FLOAT16 = cudaCreateChannelDescHalf4();
 
 	// resource desription
 	cudaResourceDesc resDesc = {};
@@ -279,7 +280,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	InitBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (make_uchar1(1), sampleCountBuffer, Int2(gridDim.x, gridDim.y));
 
 	// noise level uffer
-	GpuErrorCheck(cudaMallocArray(&noiseLevelBufferArray, &format_noiseLevel_R16, gridDim.x, gridDim.y, cudaArraySurfaceLoadStore));
+	GpuErrorCheck(cudaMallocArray(&noiseLevelBufferArray, &format_R16, gridDim.x, gridDim.y, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = noiseLevelBufferArray;
 	GpuErrorCheck(cudaCreateSurfaceObject(&noiseLevelBuffer, &resDesc));
 
@@ -316,11 +317,21 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	resDesc.res.array.array = colorBufferArray64;
 	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer64, &resDesc));
 
+	// output
+	GpuErrorCheck(cudaMallocArray(&colorBufferArrayC, &format_color_RGB16_mask_A16, screenWidth, screenHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = colorBufferArrayC;
+	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferC, &resDesc));
+
+	//
+	GpuErrorCheck(cudaMallocArray(&bsdfOverPdfBufferArray, &format_RGBA_FLOAT16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
+	resDesc.res.array.array = bsdfOverPdfBufferArray;
+	GpuErrorCheck(cudaCreateSurfaceObject(&bsdfOverPdfBuffer, &resDesc));
+
 	// ----------------------- sky buffer ------------------------
 	GpuErrorCheck(cudaMallocArray(&skyArray, &format_color_RGB16_mask_A16, skyWidth, skyHeight, cudaArraySurfaceLoadStore));
 	resDesc.res.array.array = skyArray;
 	GpuErrorCheck(cudaCreateSurfaceObject(&skyBuffer, &resDesc));
-	GpuErrorCheck(cudaCreateTextureObject(&skyTex, &resDesc, &texDesc, NULL));
+	//GpuErrorCheck(cudaCreateTextureObject(&skyTex, &resDesc, &texDesc, NULL));
 
 	GpuErrorCheck(cudaMalloc((void**)&skyCdf, skySize * sizeof(float)));
 	GpuErrorCheck(cudaMemset(skyCdf, 0, skySize * sizeof(float)));
@@ -409,7 +420,7 @@ void RayTracer::CameraSetup(Camera& camera)
 
 	//camera.focal = camToObj.length();
 	camera.focal = 5.0f;
-	camera.aperture = 0.000001f;
+	camera.aperture = 0.001f;
 
 	camera.resolution = { (float)renderWidth, (float)renderHeight };
 	camera.fov.x = 90.0f * Pi_over_180;
@@ -482,6 +493,12 @@ void RayTracer::cleanup()
 	cudaDestroySurfaceObject(noiseLevelBuffer);
 	cudaFreeArray(noiseLevelBufferArray);
 
+	cudaDestroySurfaceObject(colorBufferC);
+	cudaFreeArray(colorBufferArrayC);
+
+	cudaDestroySurfaceObject(bsdfOverPdfBuffer);
+	cudaFreeArray(bsdfOverPdfBufferArray);
+
 	// ---------------------- destroy texture objects --------------------------
 	cudaDestroyTextureObject(sceneTextures.uv);
 	cudaFreeArray(texArrayUv);
@@ -492,7 +509,7 @@ void RayTracer::cleanup()
 	//if (texArraySandNormal != nullptr) cudaFreeArray(texArraySandNormal);
 
 	// sky
-	cudaDestroyTextureObject(skyTex);
+	//cudaDestroyTextureObject(skyTex);
 	cudaDestroySurfaceObject(skyBuffer);
 	cudaFreeArray(skyArray);
 	cudaFree(skyCdf);

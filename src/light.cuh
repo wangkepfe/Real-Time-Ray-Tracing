@@ -14,8 +14,6 @@ __device__ __inline__ bool SampleLight(
     float&                  lightSamplePdf,
     float&                  isDeltaLight,
     float*                  skyCdf,
-    BlueNoiseRandGenerator& randGen,
-    int                     loopIdx,
     int&                    lightIdx)
 {
 	const int numSphereLight = sceneMaterial.numSphereLights;
@@ -51,13 +49,13 @@ __device__ __inline__ bool SampleLight(
     indexRemap[idx++] = i++; // env light
 
 	// choose light
-    float chooseLightRand = randGen.Rand(4 + loopIdx * 6 + 5);
+    float chooseLightRand = rayState.rand.x;
 	int sampledValue = (int)floorf(chooseLightRand * idx);
 	sampledIdx = indexRemap[sampledValue];
 	lightChoosePdf = 1.0f / (float)idx;
 
 	// sample
-	Float2 lightSampleRand2 = randGen.Rand2(4 + loopIdx * 6 + 2);
+	Float2 lightSampleRand2(rayState.rand.z, rayState.rand.w);
 
     //DEBUG_PRINT(sampledIdx);
 

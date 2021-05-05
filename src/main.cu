@@ -35,6 +35,7 @@
 
 // global
 GlobalSettings* g_settings;
+RayTracer* g_rayTracer;
 
 // Max frames in flight - controls CPU send maxium number of commands to GPU before GPU finish work
 // number too low - may not hide enough CPU-GPU bandwidth latency
@@ -176,8 +177,6 @@ WindowsSecurityAttributes::~WindowsSecurityAttributes() {
 //    alignas(16) mat4x4 view;
 //    alignas(16) mat4x4 proj;
 //};
-
-RayTracer* g_rayTracer;
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
@@ -1097,8 +1096,6 @@ private:
     void createSyncObjectsExt()
     {
         VkSemaphoreCreateInfo semaphoreInfo = {};
-        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
         memset(&semaphoreInfo, 0, sizeof(semaphoreInfo));
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 

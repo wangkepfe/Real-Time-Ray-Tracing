@@ -494,5 +494,6 @@ __forceinline__ __host__ __device__ Float3 rotate3f         (const Float3& axis,
 __forceinline__ __host__ __device__ Float3 slerp3f          (const Float3& q, const Float3& r, float t)        { return slerp(Quat(q), Quat(r), t).v; }
 __forceinline__ __host__ __device__ Float3 rotationBetween3f(const Float3& p, const Float3& q)                 { return rotationBetween(Quat(p), Quat(q)).v; }
 
-__forceinline__ __host__ __device__ float SafeDivide(float a, float b) { float eps = exp2f(-80.0f); return a / ((fabsf(b) > eps) ? b : copysignf(eps, b)); };
+__forceinline__ __host__ __device__ float SafeDivide(float a, float b) { float eps = 1e-20f; return a / ((fabsf(b) > eps) ? b : copysignf(eps, b)); };
+__forceinline__ __host__ __device__ Float3 SafeDivide3f1f(const Float3& a, float b) { return Float3(SafeDivide(a.x, b), SafeDivide(a.y, b), SafeDivide(a.z, b)); };
 __forceinline__ __host__ __device__ Float3 SafeDivide3f(const Float3& a, const Float3& b) { return Float3(SafeDivide(a.x, b.x), SafeDivide(a.y, b.y), SafeDivide(a.z, b.z)); };

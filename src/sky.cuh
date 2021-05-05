@@ -416,7 +416,7 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 	}
 }
 
-inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool isDiffuseRay, TexObj skyTex)
+inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool isDiffuseRay, SurfObj skyBuffer, Float2 blueNoise)
 {
 	Float3 rayDirOrRefl = raydir;
 	Float3 beta = Float3(1.0);
@@ -430,8 +430,9 @@ inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool i
 	float u = atan2f(-rayDirOrRefl.z, -rayDirOrRefl.x) / TWO_PI + 0.5f;
 	float v = abs(rayDirOrRefl.y);
 
-	float4 texRead = tex2D<float4>(skyTex, u, v);
-	Float3 color = Float3(texRead.x , texRead.y, texRead.z);
+	// float4 texRead = tex2D<float4>(skyTex, u, v);
+	//Float3 color = Float3(texRead.x , texRead.y, texRead.z);
+	Float3 color = SampleBicubicCatmullRom(skyBuffer, Load2DHalf4ToFloat3, Float2(u, v) + blueNoise * 0.01f, Int2(64, 16));
 
 	return color * beta;
 }

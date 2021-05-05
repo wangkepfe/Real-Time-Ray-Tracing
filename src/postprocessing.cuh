@@ -666,13 +666,15 @@ __global__ void SharpeningFilter(SurfObj colorBuffer, Int2 texSize)
 	// 0 w 0
 	Float3 outColor = (color[0][1] + color[2][1] + color[1][0] + color[1][2]) * w + color[1][1];
 	outColor /= (Float3(1.0f) + Float3(4.0f) * w);
+
+	Store2DHalf4(Float4(outColor, 1.0f), colorBuffer, idx);
 }
 
-__global__ void BicubicFilterScale(
-	SurfObj* renderTarget,
+__global__ void BicubicScale(
+	SurfObj  outputResColor,
 	SurfObj  finalColorBuffer,
-	Int2                 outSize,
-	Int2                 texSize)
+	Int2     outSize,
+	Int2     texSize)
 {
 	Int2 idx;
 	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -682,11 +684,23 @@ __global__ void BicubicFilterScale(
 
 	Float2 uv((float)idx.x / outSize.x, (float)idx.y / outSize.y);
 
-#if 1
 	Float3 sampledColor = SampleBicubicCatmullRom(finalColorBuffer, Load2DHalf4ToFloat3, uv, texSize);
-#else
-	Float3 sampledColor = Load2D(finalColorBuffer, idx).xyz;
-#endif
+
+	Store2DHalf4(Float4(sampledColor, 1.0f), outputResColor, idx);
+}
+
+__global__ void CopyToOutput(
+	SurfObj* renderTarget,
+	SurfObj  outputResColor,
+	Int2     outSize)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= outSize.x || idx.y >= outSize.y) return;
+
+	Float3 sampledColor = Load2DHalf4(outputResColor, idx).xyz;
 
 	sampledColor = clamp3f(sampledColor, Float3(0), Float3(1));
 

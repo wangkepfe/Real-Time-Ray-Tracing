@@ -97,6 +97,12 @@ struct BlueNoiseRandGenerator
 			          Rand(sampleDim + 1));
 	}
 
+	// rand for float pair
+	__device__ Float4 Rand4(int sampleDim)
+	{
+		return Float4(Rand(sampleDim), Rand(sampleDim + 1), Rand(sampleDim + 2), Rand(sampleDim + 3));
+	}
+
 	// rand implementation
 	__device__ float samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d_8spp(int pixel_i, int pixel_j, int sampleIndex, int sampleDimension)
 	{

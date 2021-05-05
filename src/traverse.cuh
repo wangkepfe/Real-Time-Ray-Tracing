@@ -11,38 +11,41 @@ __device__ inline void UpdateMaterial(
 	const SceneMaterial& sceneMaterial,
 	const SceneGeometry& sceneGeometry)
 {
-	// get mat id
+	// special case for floor, will be removed
 	if (rayState.objectIdx == PLANE_OBJECT_IDX)
 	{
 		rayState.matId = 6;
 	}
 	else
 	{
+		// get mat id
 		rayState.matId = sceneMaterial.materialsIdx[rayState.objectIdx];
 	}
 
 	// get mat
 	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
 
-	// mat type
+	// finish mat type
 	rayState.matType = (rayState.hit == false) ? MAT_SKY : mat.type;
 
 	// hit light
-	if (rayState.matType == EMISSIVE)
+	// shadow ray
+	if (rayState.isShadowRay)
 	{
-		if (rayState.lightIdx == rayState.objectIdx || rayState.lightIdx == DEFAULT_LIGHT_ID)
+		if ((rayState.matType == EMISSIVE && rayState.lightIdx == rayState.objectIdx) ||
+		    (rayState.matType == MAT_SKY && rayState.lightIdx == ENV_LIGHT_ID))
 		{
 			rayState.hitLight = true;
 		}
 		else
 		{
-			rayState.hitLight = false;
-			rayState.matType = LAMBERTIAN_DIFFUSE;
+			rayState.isOccluded = true;
 		}
 	}
-	else if (rayState.matType == MAT_SKY)
+	else
 	{
-		rayState.hitLight = true;
+		// non-shadow ray
+		rayState.hitLight = rayState.matType == EMISSIVE || rayState.matType == MAT_SKY;
 	}
 
 	// is diffuse
@@ -61,7 +64,9 @@ __device__ inline void RaySceneIntersect(
 	const SceneGeometry& sceneGeometry,
 	RayState&            rayState)
 {
-	if (rayState.hitLight == true) { return; }
+	if (rayState.hitLight == true || rayState.isHitProcessed == false || rayState.isOccluded == true) { return; }
+
+	rayState.isHitProcessed = false;
 
 	Ray ray(rayState.orig, rayState.dir);
 
