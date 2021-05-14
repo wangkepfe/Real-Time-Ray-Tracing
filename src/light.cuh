@@ -52,7 +52,7 @@ __device__ __inline__ bool SampleLight(
     float chooseLightRand = rayState.rand.x;
 	int sampledValue = (int)floorf(chooseLightRand * idx);
 	sampledIdx = indexRemap[sampledValue];
-	lightChoosePdf = 1.0f / (float)idx;
+	lightChoosePdf = 1.0f;// / (float)idx;
 
 	// sample
 	Float2 lightSampleRand2(rayState.rand.z, rayState.rand.w);

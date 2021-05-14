@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 #include "linear_math.h"
 
+#define SAFE_COSINE_EPSI 1e-5f
+
 __device__ __forceinline__ void LocalizeSample(
 	const Float3& n,
 	Float3& u,
@@ -94,7 +96,7 @@ __device__ __forceinline__ void LambertianSample(
 }
 
 __device__ __forceinline__ Float3 LambertianBsdf(const Float3& albedo) { return albedo / M_PI; }
-__device__ __forceinline__ float  LambertianPdf(const Float3& wo, const Float3& n) { return max(dot(wo, n), 0.0f) / M_PI; }
+__device__ __forceinline__ float  LambertianPdf(const Float3& wi, const Float3& n) { return max(dot(wi, n), SAFE_COSINE_EPSI) / M_PI; }
 __device__ __forceinline__ Float3 LambertianBsdfOverPdf(const Float3& albedo) { return albedo; }
 
 __device__ __forceinline__ float FresnelDialetric(float etaI, float etaT, float cosThetaI, float cosThetaT)
@@ -162,6 +164,7 @@ __device__ void PerfectReflectionRefraction(float etaI, float etaT, bool isRayIn
 
 __forceinline__ __device__ void MacrofacetReflectionSample(
 	Float2 r,
+	Float2 r2,
 
 	const Float3& raydir,
 	Float3& nextdir,
@@ -195,20 +198,46 @@ __forceinline__ __device__ void MacrofacetReflectionSample(
 
 	// reflect
 	nextdir = normalize(reflect3f(raydir, sampledNormal));
-	nextdir = dot(nextdir, surfaceNormal) < 0 ? normalize(reflect3f(nextdir, surfaceNormal)) : nextdir;
+
+	if (dot(nextdir, surfaceNormal) < 0)
+	{
+		cosTheta = 1.0f / sqrt(1.0f + alpha2 * r2[0] / (1.0f - r2[0]));
+		sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+		phi = TWO_PI * r2[1];
+		sampledNormalLocal = Float3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
+
+		// local to world space
+		Float3 t, b;
+		LocalizeSample(normal, t, b);
+		Float3 sampledNormal = sampledNormalLocal.x * t + sampledNormalLocal.z * b + sampledNormalLocal.y * normal;
+		sampledNormal.normalize();
+
+		// reflect
+		nextdir = normalize(reflect3f(raydir, sampledNormal));
+
+		if (dot(nextdir, surfaceNormal) < 0)
+		{
+			nextdir = normalize(reflect3f(raydir, normal));
+		}
+	}
+
+	Float3 wi = nextdir;
+	Float3 wo = -raydir;
+	Float3 wh = sampledNormal;
+	Float3 wn = normal;
 
 	// Fresnel
-	float cosThetaWoWh = max(0.01f, dot(sampledNormal, nextdir));
+	float cosThetaWoWh = max(SAFE_COSINE_EPSI, dot(wh, wo));
 	Float3 F = FresnelShlick(F0, cosThetaWoWh);
 
 	// Smith's Mask-shadowing function G
-	float cosThetaWo = max(0.01f, dot(nextdir, normal));
-	float cosThetaWi = max(0.01f, dot(raydir, normal));
+	float cosThetaWo = max(SAFE_COSINE_EPSI, dot(wo, wn));
+	float cosThetaWi = max(SAFE_COSINE_EPSI, dot(wi, wn));
 	float tanThetaWo = sqrt(1.0f - cosThetaWo * cosThetaWo) / cosThetaWo;
 	float G = 1.0f / (1.0f + (sqrtf(1.0f + alpha2 * tanThetaWo * tanThetaWo) - 1.0f) / 2.0f);
 
 	// Trowbridge Reitz Distribution D
-	float cosThetaWh = max(0.01f, dot(sampledNormal, normal));
+	float cosThetaWh = max(SAFE_COSINE_EPSI, dot(wh, wn));
 	float cosTheta2Wh = cosThetaWh * cosThetaWh;
 	float tanTheta2Wh = (1.0f - cosTheta2Wh) / cosTheta2Wh;
 	float e = tanTheta2Wh / alpha2 + 1.0f;
@@ -221,26 +250,28 @@ __forceinline__ __device__ void MacrofacetReflectionSample(
 	pdf = (D * cosThetaWh) / (4.0f * cosThetaWoWh);
 
 	// beta
-	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(2.0f));
+	brdfOverPdf = (albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWo); // brdf / pdf * cosThetaWi
 }
 
-__forceinline__ __device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& pdf,const Float3& wn, const Float3& wo, const Float3& wi, const Float3& F0, Float3& albedo, float alpha)
+__forceinline__ __device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3& brdf, float& pdf,const Float3& wn, Float3 wo, Float3 wi, const Float3& F0, Float3& albedo, float alpha)
 {
 	float alpha2 = alpha * alpha;
-	Float3 wh    = normalize(wi + wo);
+	if (dot(wo, wn) < 0) wo = -wo;
+	if (dot(wi, wn) < 0) wi = -wi;
+	Float3 wh = normalize(wi + wo);
 
 	// Fresnel
-	float cosThetaWoWh = max(0.01f, dot(wh, wo));
+	float cosThetaWoWh = max(SAFE_COSINE_EPSI, dot(wh, wo));
 	Float3 F           = FresnelShlick(F0, cosThetaWoWh);
 
 	// Smith's Mask-shadowing function G
-	float cosThetaWo = max(0.01f, dot(wo, wn));
-	float cosThetaWi = max(0.01f, dot(wi, wn));
+	float cosThetaWo = max(SAFE_COSINE_EPSI, dot(wo, wn));
+	float cosThetaWi = max(SAFE_COSINE_EPSI, dot(wi, wn));
 	float tanThetaWo = sqrt(1.0f - cosThetaWo * cosThetaWo) / cosThetaWo;
 	float G          = 1.0f / (1.0f + (sqrtf(1.0f + alpha2 * tanThetaWo * tanThetaWo) - 1.0f) / 2.0f);
 
 	// Trowbridge Reitz Distribution D
-	float cosThetaWh  = max(0.01f, dot(wh, wn));
+	float cosThetaWh  = max(SAFE_COSINE_EPSI, dot(wh, wn));
 	float cosTheta2Wh = cosThetaWh * cosThetaWh;
 	float tanTheta2Wh = (1.0f - cosTheta2Wh) / cosTheta2Wh;
 	float e           = tanTheta2Wh / alpha2 + 1.0f;
@@ -253,7 +284,37 @@ __forceinline__ __device__ void MacrofacetReflection(Float3& brdfOverPdf, Float3
 	pdf = (D * cosThetaWh) / (4.0f * cosThetaWoWh);
 
 	// beta
-	brdfOverPdf = clamp3f((albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWi), Float3(0.0f), Float3(2.0f));
+	brdfOverPdf = (albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWo); // brdf / pdf * cosThetaWi
+}
+
+__forceinline__ __device__ void MacrofacetReflection2(
+	Float3& brdfOverPdf, Float3& brdf, float& pdf,
+	const Float3& F0, const Float3& albedo, float alpha,
+	float cosThetaWoWh, float cosThetaWo, float cosThetaWi, float cosThetaWh)
+{
+	float alpha2 = alpha * alpha;
+
+	// Fresnel
+	Float3 F           = FresnelShlick(F0, cosThetaWoWh);
+
+	// Smith's Mask-shadowing function G
+	float tanThetaWo = sqrt(1.0f - cosThetaWo * cosThetaWo) / cosThetaWo;
+	float G          = 1.0f / (1.0f + (sqrtf(1.0f + alpha2 * tanThetaWo * tanThetaWo) - 1.0f) / 2.0f);
+
+	// Trowbridge Reitz Distribution D
+	float cosTheta2Wh = cosThetaWh * cosThetaWh;
+	float tanTheta2Wh = (1.0f - cosTheta2Wh) / cosTheta2Wh;
+	float e           = tanTheta2Wh / alpha2 + 1.0f;
+	float D           = 1.0f / (M_PI * (alpha2 * cosTheta2Wh * cosTheta2Wh) * (e * e));
+
+	// brdf
+	brdf = (albedo * F) * (D * G) / (4.0f * cosThetaWo * cosThetaWi);
+
+	// pdf
+	pdf = (D * cosThetaWh) / (4.0f * cosThetaWoWh);
+
+	// beta
+	brdfOverPdf = (albedo * F) * (G * cosThetaWoWh) / (cosThetaWh * cosThetaWo); // brdf / pdf * cosThetaWi
 }
 
 __device__ __forceinline__ Float3 UniformSampleCone(const Float2 &u, float cosThetaMax, const Float3 &x, const Float3 &y, const Float3 &z)
@@ -290,3 +351,17 @@ __device__ __forceinline__ Float3 UniformSampleHemisphere(const Float2 &u)
 __device__ __forceinline__ constexpr float UniformHemispherePdf() { return 1.0f / (2.0f * M_PI); }
 
 __device__ __forceinline__ constexpr float PowerHeuristic(float f, float g) { return (f * f) / (f * f + g * g); }
+
+__device__ __forceinline__ void CalculateCosines(
+	const Float3& raydir, const Float3& nextdir, const Float3& normal,
+	float& cosThetaWoWh, float& cosThetaWo, float& cosThetaWi, float& cosThetaWh)
+{
+	Float3 wi = nextdir;
+	Float3 wo = -raydir;
+	Float3 wn = normal;
+	Float3 wh = normalize(wi + wo);
+	cosThetaWoWh = max(SAFE_COSINE_EPSI, dot(wh, wo));
+	cosThetaWo = max(SAFE_COSINE_EPSI, dot(wo, wn));
+	cosThetaWi = max(SAFE_COSINE_EPSI, dot(wi, wn));
+	cosThetaWh  = max(SAFE_COSINE_EPSI, dot(wh, wn));
+}

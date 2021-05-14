@@ -6,11 +6,32 @@
 
 #define uchar unsigned char
 
+//------------------------------------------- 2d load store ---------------------------------------------------
+
+template<typename T>
+__forceinline__ __device__ T Load2D (
+	SurfObj tex,
+	Int2    uv,
+    cudaSurfaceBoundaryMode boundaryMode = cudaBoundaryModeClamp)
+{
+    return surf2Dread<T>(tex, uv.x * sizeof(T), uv.y, boundaryMode);
+}
+
+template<typename T>
+__forceinline__ __device__ void Store2D (
+    T       val,
+	SurfObj tex,
+	Int2    uv,
+    cudaSurfaceBoundaryMode boundaryMode = cudaBoundaryModeClamp)
+{
+    surf2Dwrite(val, tex, uv.x * sizeof(T), uv.y, boundaryMode);
+}
+
 //------------------------------------------- 2d float4 ---------------------------------------------------
 // byte    4     4     4     4
 // data  float float float float
 
-__forceinline__ __device__ Float4 Load2D(
+__forceinline__ __device__ Float4 Load2D_float4 (
 	SurfObj tex,
 	Int2    uv)
 {
@@ -18,7 +39,7 @@ __forceinline__ __device__ Float4 Load2D(
 	return Float4(ret.x, ret.y, ret.z, ret.w);
 }
 
-__forceinline__ __device__ void Store2D(
+__forceinline__ __device__ void Store2D_float4 (
     Float4  val,
 	SurfObj tex,
 	Int2    uv)

@@ -228,115 +228,30 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	scaleBlockDim = dim3(8, 8, 1);
 	scaleGridDim = dim3(divRoundUp(screenWidth, scaleBlockDim.x), divRoundUp(screenHeight, scaleBlockDim.y), 1);
 
-	// ------------------------ surface/texture object ---------------------------
-	cudaChannelFormatDesc format_color_RGB16_mask_A16 = cudaCreateChannelDescHalf4();
-	cudaChannelFormatDesc format_normal_R11_G10_B11_depth_R32 = cudaCreateChannelDesc<float2>();
-	cudaChannelFormatDesc format_motionVector_UV16 = cudaCreateChannelDescHalf2();
-	cudaChannelFormatDesc format_sampleCount_R8 = cudaCreateChannelDesc<uchar1>();
-	cudaChannelFormatDesc format_R16 = cudaCreateChannelDescHalf1();
-	cudaChannelFormatDesc format_RGBA_FLOAT16 = cudaCreateChannelDescHalf4();
-
-	// resource desription
-	cudaResourceDesc resDesc = {};
-	resDesc.resType = cudaResourceTypeArray;
-
-	// texture description
-	cudaTextureDesc texDesc  = {};
-	texDesc.addressMode[0]   = cudaAddressModeClamp;
-	texDesc.addressMode[1]   = cudaAddressModeClamp;
-	texDesc.filterMode       = cudaFilterModeLinear;
-	texDesc.readMode         = cudaReadModeElementType;
-	texDesc.normalizedCoords = 1;
-
-	// array A: main render buffer
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayA, &format_color_RGB16_mask_A16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArrayA;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferA, &resDesc));
-
-	// array B: TAA buffer
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayB, &format_color_RGB16_mask_A16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArrayB;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferB, &resDesc));
-
-	// normal depth
-	GpuErrorCheck(cudaMallocArray(&normalDepthBufferArrayA, &format_normal_R11_G10_B11_depth_R32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = normalDepthBufferArrayA;
-	GpuErrorCheck(cudaCreateSurfaceObject(&normalDepthBufferA, &resDesc));
-
-	GpuErrorCheck(cudaMallocArray(&normalDepthBufferArrayB, &format_normal_R11_G10_B11_depth_R32, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = normalDepthBufferArrayB;
-	GpuErrorCheck(cudaCreateSurfaceObject(&normalDepthBufferB, &resDesc));
-
-	// motion vector buffer
-	GpuErrorCheck(cudaMallocArray(&motionVectorBufferArray, &format_motionVector_UV16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = motionVectorBufferArray;
-	GpuErrorCheck(cudaCreateSurfaceObject(&motionVectorBuffer, &resDesc));
-
-	// sample count buffer
-	GpuErrorCheck(cudaMallocArray(&sampleCountBufferArray, &format_sampleCount_R8, gridDim.x, gridDim.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = sampleCountBufferArray;
-	GpuErrorCheck(cudaCreateSurfaceObject(&sampleCountBuffer, &resDesc));
-
-	InitBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (make_uchar1(1), sampleCountBuffer, Int2(gridDim.x, gridDim.y));
-
-	// noise level uffer
-	GpuErrorCheck(cudaMallocArray(&noiseLevelBufferArray, &format_R16, gridDim.x, gridDim.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = noiseLevelBufferArray;
-	GpuErrorCheck(cudaCreateSurfaceObject(&noiseLevelBuffer, &resDesc));
-
-	InitBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (make_ushort1(0), noiseLevelBuffer, Int2(gridDim.x, gridDim.y));
-
-	// color buffer 1/4 size
 	bufferSize4 = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
 	gridDim4 = dim3(divRoundUp(bufferSize4.x, blockDim.x), divRoundUp(bufferSize4.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray4, &format_color_RGB16_mask_A16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArray4;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer4, &resDesc));
 
-	// bloom buffer 1/4 size
-	GpuErrorCheck(cudaMallocArray(&bloomBufferArray4, &format_color_RGB16_mask_A16, bufferSize4.x, bufferSize4.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = bloomBufferArray4;
-	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer4, &resDesc));
-
-	// color buffer 1/16 size
 	bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
 	gridDim16 = dim3(divRoundUp(bufferSize16.x, blockDim.x), divRoundUp(bufferSize16.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray16, &format_color_RGB16_mask_A16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArray16;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer16, &resDesc));
 
-	// bloom buffer 1/16 size
-	GpuErrorCheck(cudaMallocArray(&bloomBufferArray16, &format_color_RGB16_mask_A16, bufferSize16.x, bufferSize16.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = bloomBufferArray16;
-	GpuErrorCheck(cudaCreateSurfaceObject(&bloomBuffer16, &resDesc));
-
-	// color buffer 1/64 size
 	bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
 	gridDim64 = dim3(divRoundUp(bufferSize64.x, blockDim.x), divRoundUp(bufferSize64.y, blockDim.y), 1);
-	GpuErrorCheck(cudaMallocArray(&colorBufferArray64, &format_color_RGB16_mask_A16, bufferSize64.x, bufferSize64.y, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArray64;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBuffer64, &resDesc));
 
-	// output
-	GpuErrorCheck(cudaMallocArray(&colorBufferArrayC, &format_color_RGB16_mask_A16, screenWidth, screenHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = colorBufferArrayC;
-	GpuErrorCheck(cudaCreateSurfaceObject(&colorBufferC, &resDesc));
+	// texture description
+	// cudaTextureDesc texDesc  = {};
+	// texDesc.addressMode[0]   = cudaAddressModeClamp;
+	// texDesc.addressMode[1]   = cudaAddressModeClamp;
+	// texDesc.filterMode       = cudaFilterModeLinear;
+	// texDesc.readMode         = cudaReadModeElementType;
+	// texDesc.normalizedCoords = 1;
 
-	//
-	GpuErrorCheck(cudaMallocArray(&bsdfOverPdfBufferArray, &format_RGBA_FLOAT16, renderWidth, renderHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = bsdfOverPdfBufferArray;
-	GpuErrorCheck(cudaCreateSurfaceObject(&bsdfOverPdfBuffer, &resDesc));
+	buffer2DManager.init(renderWidth, renderHeight, screenWidth, screenHeight);
 
-	// ----------------------- sky buffer ------------------------
-	GpuErrorCheck(cudaMallocArray(&skyArray, &format_color_RGB16_mask_A16, skyWidth, skyHeight, cudaArraySurfaceLoadStore));
-	resDesc.res.array.array = skyArray;
-	GpuErrorCheck(cudaCreateSurfaceObject(&skyBuffer, &resDesc));
-	//GpuErrorCheck(cudaCreateTextureObject(&skyTex, &resDesc, &texDesc, NULL));
+	//InitBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (make_ushort1(0), GetBuffer2D(NoiseLevelBuffer), Int2(gridDim.x, gridDim.y));
 
 	GpuErrorCheck(cudaMalloc((void**)&skyCdf, skySize * sizeof(float)));
 	GpuErrorCheck(cudaMemset(skyCdf, 0, skySize * sizeof(float)));
 
-	// ----------------------- GPU buffers -----------------------
 	// exposure
 	GpuErrorCheck(cudaMalloc((void**)& d_exposure, 4 * sizeof(float)));
 	float initExposureLum[4] = { 1.0f, 1.0f, 1.0f, 1.0f }; // (exposureValue, historyAverageLuminance, historyBrightThresholdLuminance, unused)
@@ -433,6 +348,63 @@ void RayTracer::CameraSetup(Camera& camera)
 	camera.update();
 }
 
+void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, int screenHeight)
+{
+	std::array<cudaChannelFormatDesc, Buffer2DFormatCount> format;
+	std::array<UInt2, Buffer2DDimCount>                    dim;
+
+	// ------------------------- Format --------------------------
+	format[FORMAT_FLOAT2] = cudaCreateChannelDesc<float2>();
+	format[FORMAT_HALF2]  = cudaCreateChannelDescHalf2();
+	format[FORMAT_HALF]   = cudaCreateChannelDescHalf1();
+	format[FORMAT_HALF4]  = cudaCreateChannelDescHalf4();
+
+	// ------------------------- Dimension --------------------------
+
+	UInt2 bufferSize4  = UInt2(divRoundUp(renderWidth, 4u), divRoundUp(renderHeight, 4u));
+	UInt2 bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
+	UInt2 bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
+
+	dim[BUFFER_2D_RENDER_DIM]    = UInt2(renderWidth, renderHeight);
+	dim[BUFFER_2D_SCREEN_DIM]    = UInt2(screenWidth, screenHeight);
+	dim[BUFFER_2D_RENDER_DIM_4]  = bufferSize4;
+	dim[BUFFER_2D_RENDER_DIM_16] = bufferSize16;
+	dim[BUFFER_2D_RENDER_DIM_64] = bufferSize64;
+	dim[BUFFER_2D_SKY_DIM]       = UInt2(64, 16);
+
+	// ------------------------- Mapping --------------------------
+
+	std::unordered_map<Buffer2DName, Buffer2DFeature> map =
+	{
+		{ RenderColorBuffer             , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+		{ AccumulationColorBuffer       , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+		{ ScaledColorBuffer             , { FORMAT_HALF4  , BUFFER_2D_SCREEN_DIM    } },
+		{ ScaledAccumulationColorBuffer , { FORMAT_HALF4  , BUFFER_2D_SCREEN_DIM    } },
+
+		{ ColorBuffer4                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_4  } },
+		{ ColorBuffer16                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_16 } },
+		{ ColorBuffer64                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+		{ BloomBuffer4                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_64 } },
+		{ BloomBuffer16                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_16 } },
+
+		{ RenderNormalDepthBuffer       , { FORMAT_FLOAT2 , BUFFER_2D_RENDER_DIM    } },
+		{ HistoryNormalDepthBuffer      , { FORMAT_FLOAT2 , BUFFER_2D_RENDER_DIM    } },
+
+		{ MotionVectorBuffer            , { FORMAT_HALF2  , BUFFER_2D_RENDER_DIM    } },
+		{ NoiseLevelBuffer              , { FORMAT_HALF   , BUFFER_2D_RENDER_DIM    } },
+		{ IndirectLightColorBuffer      , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+		{ IndirectLightDirectionBuffer  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+	};
+
+	// -------------------------- Init buffer -------------------------
+
+	for (int i = 0; i < Buffer2DCount; ++i)
+	{
+		Buffer2DFeature feature = map[static_cast<Buffer2DName>(i)];
+		buffers[i].init(&format[static_cast<int>(feature.format)], dim[static_cast<int>(feature.dim)]);
+	}
+}
+
 void RayTracer::cleanup()
 {
 	// ---------------- Destroy surface objects ----------------------
@@ -455,49 +427,7 @@ void RayTracer::cleanup()
 	cudaFree(bvhNodes);
 	cudaFree(aabbs);
 
-	// color buffer
-    cudaDestroySurfaceObject(colorBufferA);
-	cudaDestroySurfaceObject(colorBufferB);
-	cudaFreeArray(colorBufferArrayA);
-	cudaFreeArray(colorBufferArrayB);
-
-	// down sized color buffer
-	cudaDestroySurfaceObject(colorBuffer4);
-	cudaDestroySurfaceObject(colorBuffer16);
-	cudaDestroySurfaceObject(colorBuffer64);
-	cudaFreeArray(colorBufferArray4);
-	cudaFreeArray(colorBufferArray16);
-	cudaFreeArray(colorBufferArray64);
-
-	// bloom buffer
-	cudaDestroySurfaceObject(bloomBuffer4);
-	cudaDestroySurfaceObject(bloomBuffer16);
-	cudaFreeArray(bloomBufferArray4);
-	cudaFreeArray(bloomBufferArray16);
-
-	// normal depth buffer
-	cudaDestroySurfaceObject(normalDepthBufferA);
-	cudaDestroySurfaceObject(normalDepthBufferB);
-	cudaFreeArray(normalDepthBufferArrayA);
-	cudaFreeArray(normalDepthBufferArrayB);
-
-	// motion vector buffer
-	cudaDestroySurfaceObject(motionVectorBuffer);
-	cudaFreeArray(motionVectorBufferArray);
-
-	// sample count buffer
-	cudaDestroySurfaceObject(sampleCountBuffer);
-	cudaFreeArray(sampleCountBufferArray);
-
-	// noise level buffer
-	cudaDestroySurfaceObject(noiseLevelBuffer);
-	cudaFreeArray(noiseLevelBufferArray);
-
-	cudaDestroySurfaceObject(colorBufferC);
-	cudaFreeArray(colorBufferArrayC);
-
-	cudaDestroySurfaceObject(bsdfOverPdfBuffer);
-	cudaFreeArray(bsdfOverPdfBufferArray);
+	buffer2DManager.clear();
 
 	// ---------------------- destroy texture objects --------------------------
 	cudaDestroyTextureObject(sceneTextures.uv);
@@ -510,8 +440,6 @@ void RayTracer::cleanup()
 
 	// sky
 	//cudaDestroyTextureObject(skyTex);
-	cudaDestroySurfaceObject(skyBuffer);
-	cudaFreeArray(skyArray);
 	cudaFree(skyCdf);
 
 	// --------------------- free other gpu buffer ----------------------------

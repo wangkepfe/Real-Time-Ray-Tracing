@@ -9,6 +9,9 @@
 
 #include <stdio.h>
 #include <iostream>
+#include <array>
+#include <vector>
+#include <unordered_map>
 
 #include "helper_cuda.h"
 #include "linear_math.h"
@@ -218,7 +221,7 @@ struct __align__(16) RayState
 	Float3     L;
 	bool       isRayIntoSurface;
 
-	Float3     beta;
+	Float3     beta0;
 	float      offset;
 
 	Float3     pos;
@@ -239,7 +242,7 @@ struct __align__(16) RayState
 	bool       isDiffuseRay;
 
 	Float3     tangent;
-	int        bounceLimit;
+	int        unusued;
 
 	float      depth;
 	bool       isDiffuse;
@@ -250,6 +253,10 @@ struct __align__(16) RayState
 
 	bool       isOccluded;
 	bool       isShadowRay;
+	float      cosWi;
+	float      cosWo;
+
+	Float3     beta1;
 };
 
 union SceneTextures
@@ -261,6 +268,86 @@ union SceneTextures
 		TexObj sandNormal;
 	};
 	TexObj array[3];
+};
+
+enum Buffer2DName
+{
+	RenderColorBuffer,             // main render buffer
+	AccumulationColorBuffer,       // accumulation render buffer
+	ScaledColorBuffer,             // scaled to screen size
+	ScaledAccumulationColorBuffer, // accumulation of scaled to screen size buffer
+	ColorBuffer4,                  // 1/4 res color buffer
+	ColorBuffer16,                 // 1/6 res color buffer
+	ColorBuffer64,                 // 1/64 res color buffer
+	BloomBuffer4,                  // 1/4 res bloom buffer
+	BloomBuffer16,                 // 1/16 bloom buffer
+	RenderNormalDepthBuffer,       // normal depth buffer
+	HistoryNormalDepthBuffer,      // history normal depth buffer
+	MotionVectorBuffer,            // motion vector buffer
+	NoiseLevelBuffer,              // noise level
+	IndirectLightColorBuffer,      // indirect light color L1
+	IndirectLightDirectionBuffer,  // indirect light direction Wi_1
+	SkyBuffer,                     // sky
+	Buffer2DCount,
+};
+
+struct Buffer2D
+{
+	void init(cudaChannelFormatDesc* pFormat,
+	          UInt2                  dim,
+	          uint                   usageFlag = cudaArraySurfaceLoadStore)
+	{
+		GpuErrorCheck(cudaMallocArray(&array, pFormat, dim.x, dim.y, usageFlag));
+
+		cudaResourceDesc resDesc = {};
+		resDesc.resType = cudaResourceTypeArray;
+		resDesc.res.array.array = array;
+		GpuErrorCheck(cudaCreateSurfaceObject(&buffer, &resDesc));
+	}
+
+	void clear()
+	{
+		GpuErrorCheck(cudaDestroySurfaceObject(buffer));
+		GpuErrorCheck(cudaFreeArray(array));
+	}
+
+	SurfObj    buffer;
+	cudaArray* array;
+};
+
+struct Buffer2DManager
+{
+	enum Buffer2DFormat
+	{
+		FORMAT_HALF,
+		FORMAT_HALF2,
+		FORMAT_HALF4,
+		FORMAT_FLOAT2,
+		Buffer2DFormatCount,
+	};
+
+	enum Buffer2DDim
+	{
+		BUFFER_2D_RENDER_DIM,
+		BUFFER_2D_SCREEN_DIM,
+		BUFFER_2D_RENDER_DIM_4,
+		BUFFER_2D_RENDER_DIM_16,
+		BUFFER_2D_RENDER_DIM_64,
+		BUFFER_2D_SKY_DIM,
+		Buffer2DDimCount,
+	};
+
+	struct Buffer2DFeature
+	{
+		Buffer2DFormat format;
+	    Buffer2DDim    dim;
+	};
+
+	void init(int renderWidth, int renderHeight, int screenWidth, int screenHeight);
+
+	void clear() { for (auto& buffer : buffers) { buffer.clear(); } }
+
+	std::array<Buffer2D, Buffer2DCount> buffers;
 };
 
 class RayTracer
@@ -290,6 +377,8 @@ public:
 	void mouseButtenUpdate(int button, int action, int mods);
 	void SaveCameraToFile(const std::string &camFileName);
 	void LoadCameraFromFile(const std::string &camFileName);
+
+	SurfObj GetBuffer2D(Buffer2DName name) { return buffer2DManager.buffers[(uint)name].buffer; }
 
 private:
 
@@ -348,51 +437,13 @@ private:
 	cudaArray*                  texArraySandNormal;
 
 	// surface
-	SurfObj                     colorBufferA;
-	SurfObj                     colorBufferB;
-	cudaArray*                  colorBufferArrayA;
-	cudaArray*                  colorBufferArrayB;
-
-	SurfObj                     colorBuffer4;
-	SurfObj                     colorBuffer16;
-	SurfObj                     colorBuffer64;
-	cudaArray*                  colorBufferArray4;
-	cudaArray*                  colorBufferArray16;
-	cudaArray*                  colorBufferArray64;
-
-	SurfObj                     bloomBuffer4;
-	SurfObj                     bloomBuffer16;
-	cudaArray*                  bloomBufferArray4;
-	cudaArray*                  bloomBufferArray16;
-
-	SurfObj                     normalDepthBufferA;
-	SurfObj                     normalDepthBufferB;
-	cudaArray*                  normalDepthBufferArrayA;
-	cudaArray*                  normalDepthBufferArrayB;
-
-	SurfObj                     motionVectorBuffer;
-	cudaArray*                  motionVectorBufferArray;
-
-	SurfObj                     sampleCountBuffer;
-	cudaArray*                  sampleCountBufferArray;
-
-	SurfObj                     noiseLevelBuffer;
-	cudaArray*                  noiseLevelBufferArray;
-
-	SurfObj                     colorBufferC;
-	cudaArray*                  colorBufferArrayC;
-
-	SurfObj                     bsdfOverPdfBuffer;
-	cudaArray*                  bsdfOverPdfBufferArray;
+	Buffer2DManager             buffer2DManager;
 
 	// sky
 	static const uint           skyWidth = 64;
 	static const uint           skyHeight = 16;
 	static const uint           skySize = 1024;
 
-	SurfObj                     skyBuffer;
-	TexObj                      skyTex;
-	cudaArray*                  skyArray;
 	float*                      skyCdf;
 
 	// buffer

@@ -535,13 +535,13 @@ __global__ void BilateralFilter(
     // float sum = 0.0f;
     // float factor;
     // Float4 t = {0.f, 0.f, 0.f, 0.f};
-	// Float4 center = Load2D(colorBuffer, Int2(x, y));
+	// Float4 center = Load2D_float4 (colorBuffer, Int2(x, y));
 
     // for (int i = -r; i <= r; i++)
     // {
     //     for (int j = -r; j <= r; j++)
     //     {
-	// 		Float4 curPix = Load2D(colorBuffer, Int2(x + j, y + i));
+	// 		Float4 curPix = Load2D_float4 (colorBuffer, Int2(x + j, y + i));
     //         factor = cGaussian[i + r] * cGaussian[j + r] * euclideanLen(curPix, center, e_d);
 
     //         t += factor * curPix;
@@ -549,7 +549,7 @@ __global__ void BilateralFilter(
     //     }
     // }
 
-    // Store2D(Float4(t / sum), colorBuffer, Int2(x, y));
+    // Store2D_float4 (Float4(t / sum), colorBuffer, Int2(x, y));
 }
 
 //----------------------------------------------------------------------------------------------
