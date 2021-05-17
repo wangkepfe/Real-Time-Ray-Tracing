@@ -8,6 +8,85 @@
 #define USE_CATMULL_ROM_SAMPLER 0
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
 
+#define GAUSSIAN_5x5_SIGMA 3.0f
+#define GAUSSIAN_7x7_SIGMA 4.0f
+
+__constant__ float cGaussian5x5[25]; // 25
+__constant__ float cGaussian7x7[49]; // 49
+
+float GaussianIsotropic2D(float x, float y, float sigma)
+{
+	return expf(-(x * x + y * y) / (2 * sigma * sigma)) / (2 * M_PI * sigma * sigma);
+}
+
+void CalculateGaussianKernel(float* fGaussian, float sigma, int radius)
+{
+    int size = radius * 2 + 1;
+    const int step = 100;
+    int kernelSize = size * size;
+    int sampleDimSize = size * step;
+    int sampleCount = sampleDimSize * sampleDimSize;
+    float *sampleData = new float[sampleCount];
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        int xi = i % sampleDimSize;
+        int yi = i / sampleDimSize;
+        float x = (float)xi / (float)step;
+        float y = (float)yi / (float)step;
+        float offset = (float)size / 2;
+        x -= offset;
+        y -= offset;
+        sampleData[i] = GaussianIsotropic2D(x, y, sigma);
+    }
+    for (int i = 0; i < kernelSize; ++i)
+    {
+        int xi = i % size;
+        int yi = i / size;
+        float valSum = 0;
+        for (int x = xi * step; x < (xi + 1) * step; ++x)
+        {
+            for (int y = yi * step; y < (yi + 1) * step; ++y)
+            {
+                valSum += sampleData[y * sampleDimSize + x];
+            }
+        }
+        fGaussian[i] = valSum / (step * step);
+    }
+	if (1)
+	{
+		std::cout << "Gaussian " << size << "x" << size << "\n";
+		std::cout << "sigma = " << sigma << "\n";
+		for (int i = 0; i < size; ++i)
+		{
+			for (int j = 0; j < size; ++j)
+			{
+				std::cout << fGaussian[i + j * size] << ", ";
+			}
+			std::cout << std::endl;
+		}
+		std::cout << std::endl;
+	}
+    delete sampleData;
+}
+
+void CalculateGaussian5x5()
+{
+	int kernelSize = 25;
+	float* fGaussian = new float[kernelSize];
+	CalculateGaussianKernel(fGaussian, GAUSSIAN_5x5_SIGMA, 2);
+	GpuErrorCheck(cudaMemcpyToSymbol(cGaussian5x5, fGaussian, sizeof(float) * kernelSize));
+	delete fGaussian;
+}
+
+void CalculateGaussian7x7()
+{
+	int kernelSize = 49;
+	float* fGaussian = new float[kernelSize];
+	CalculateGaussianKernel(fGaussian, GAUSSIAN_7x7_SIGMA, 3);
+	GpuErrorCheck(cudaMemcpyToSymbol(cGaussian7x7, fGaussian, sizeof(float) * kernelSize));
+	delete fGaussian;
+}
+
 //----------------------------------------------------------------------------------------------
 //------------------------------------- Histogram and Auto Exposure ---------------------------------------
 //----------------------------------------------------------------------------------------------
@@ -335,13 +414,6 @@ __global__ void MedianFilter(
 //------------------------------------- Bloom ---------------------------------------
 //----------------------------------------------------------------------------------------------
 
-__constant__ float filterKernel[25] = {
-		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0,
-		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
-		3.0 / 128.0, 3.0 / 32.0, 9.0 / 64.0,  3.0 / 32.0, 3.0 / 128.0,
-		1.0 / 64.0,  1.0 / 16.0, 3.0 / 32.0,  1.0 / 16.0, 1.0 / 64.0,
-		1.0 / 256.0, 1.0 / 64.0, 3.0 / 128.0, 1.0 / 64.0, 1.0 / 256.0 };
-
 __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, float* exposure)
 {
 	// index for pixel 28 x 28
@@ -371,7 +443,7 @@ __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, fl
 	{
 		int x = threadIdx.x + (i % 5) - 2;
 		int y = threadIdx.y + (i / 5) - 2;
-		outColor += filterKernel[i] * sharedBuffer[x][y];
+		outColor += cGaussian5x5[i] * sharedBuffer[x][y];
 	}
 
 	Store2DHalf4(Float4(outColor, 1.0), outBuffer, idx2);
@@ -465,91 +537,11 @@ __global__ void LensFlare(Float2 sunPos, SurfObj colorBuffer, Int2 size)
 	Store2DHalf4(Float4(color, 1.0), colorBuffer, idx);
 }
 
-__global__ void LensFlarePred(SurfObj normalDepthBuffer, Float2 sunPos, Int2 sunUv, SurfObj colorBufferA, Int2 size, dim3 gridDim, dim3 blockDim, Int2 bufferDim)
+__global__ void LensFlarePred(SurfObj depthBuffer, Float2 sunPos, Int2 sunUv, SurfObj colorBufferA, Int2 size, dim3 gridDim, dim3 blockDim, Int2 bufferDim)
 {
-	float depthValue = Load2DFloat2(normalDepthBuffer, sunUv).y;
+	float depthValue = Load2DHalf1(depthBuffer, sunUv);
 	if (depthValue < RayMax) { return; }
 	LensFlare <<<gridDim, blockDim>>> (sunPos, colorBufferA, bufferDim);
-}
-
-//----------------------------------------------------------------------------------------------
-//------------------------------------- Bilateral Filter ---------------------------------------
-//----------------------------------------------------------------------------------------------
-
-__constant__ float cGaussian[64];
-#define BilateralFilterGuassianDelta 1.0f
-#define BilateralFilterEuclideanFactor 1.0f
-#define BilateralFilterRadius 2
-
-__device__ __inline__ float euclideanLen(Float4 a, Float4 b, float d)
-{
-
-    float mod = (b.x - a.x) * (b.x - a.x) +
-                (b.y - a.y) * (b.y - a.y) +
-                (b.z - a.z) * (b.z - a.z);
-
-    return __expf(-mod / (2.f * d * d));
-}
-
-void updateGaussian()
-{
-	float delta = BilateralFilterGuassianDelta;
-	int radius = BilateralFilterRadius;
-
-    float  fGaussian[64];
-
-    for (int i = 0; i < 2*radius + 1; ++i)
-    {
-        float x = i-radius;
-        fGaussian[i] = expf(-(x*x) / (2*delta*delta));
-    }
-
-    checkCudaErrors(cudaMemcpyToSymbol(cGaussian, fGaussian, sizeof(float)*(2*radius+1)));
-}
-
-__global__ void BilateralFilter(
-	SurfObj   colorBuffer,
-	SurfObj   accumulateBuffer,
-	SurfObj   normalDepthBuffer,
-	SurfObj   normalDepthHistoryBuffer,
-	Int2      size)
-{
-	// float e_d = BilateralFilterEuclideanFactor;
-	// int r = BilateralFilterRadius;
-
-	// Int2 idx2 (blockIdx.x * 28 + threadIdx.x - 2, blockIdx.y * 28 + threadIdx.y - 2); // index for pixel 28 x 28
-	// Int2 idx3 (threadIdx.x, threadIdx.y); // index for shared memory buffer
-
-	// // read global memory buffer. One-to-one mapping
-	// Float3Ushort1 colorAndMask = Load2DHalf3Ushort1(colorBuffer, idx2);
-	// Float3 colorValue = colorAndMask.xyz;
-	// ushort maskValue = colorAndMask.w;
-
-	// Float2 normalAndDepth  = Load2DFloat2(normalDepthBuffer, idx2);
-	// float normalEncoded = normalAndDepth.x;
-	// Float3 normalValue = DecodeNormal_R11_G10_B11(normalEncoded);
-	// float depthValue = normalAndDepth.y;
-
-    // if (idx3.x < 2 || idx3.y < 2 || idx3.x > 29 || idx3.y > 29) { return; }
-
-    // float sum = 0.0f;
-    // float factor;
-    // Float4 t = {0.f, 0.f, 0.f, 0.f};
-	// Float4 center = Load2D_float4 (colorBuffer, Int2(x, y));
-
-    // for (int i = -r; i <= r; i++)
-    // {
-    //     for (int j = -r; j <= r; j++)
-    //     {
-	// 		Float4 curPix = Load2D_float4 (colorBuffer, Int2(x + j, y + i));
-    //         factor = cGaussian[i + r] * cGaussian[j + r] * euclideanLen(curPix, center, e_d);
-
-    //         t += factor * curPix;
-    //         sum += factor;
-    //     }
-    // }
-
-    // Store2D_float4 (Float4(t / sum), colorBuffer, Int2(x, y));
 }
 
 //----------------------------------------------------------------------------------------------

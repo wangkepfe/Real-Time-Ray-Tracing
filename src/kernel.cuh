@@ -29,6 +29,7 @@
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
 #define DEBUG_FRAME -1
+#define DUMP_FRAME_NUM 100
 #define DEBUG_BVH_TRAVERSE 0
 #define DEBUG_RAY_AABB_INTERSECT 0
 
@@ -276,19 +277,48 @@ enum Buffer2DName
 	AccumulationColorBuffer,       // accumulation render buffer
 	ScaledColorBuffer,             // scaled to screen size
 	ScaledAccumulationColorBuffer, // accumulation of scaled to screen size buffer
+
 	ColorBuffer4,                  // 1/4 res color buffer
 	ColorBuffer16,                 // 1/6 res color buffer
 	ColorBuffer64,                 // 1/64 res color buffer
 	BloomBuffer4,                  // 1/4 res bloom buffer
 	BloomBuffer16,                 // 1/16 bloom buffer
-	RenderNormalDepthBuffer,       // normal depth buffer
-	HistoryNormalDepthBuffer,      // history normal depth buffer
+
+	NormalBuffer,                  // normalBu buffer
+	DepthBuffer,                   // depth buffer
+	HistoryDepthBuffer,            // depth buffer
+
 	MotionVectorBuffer,            // motion vector buffer
 	NoiseLevelBuffer,              // noise level
+	NoiseLevelBuffer16x16,
+
 	IndirectLightColorBuffer,      // indirect light color L1
 	IndirectLightDirectionBuffer,  // indirect light direction Wi_1
+
 	SkyBuffer,                     // sky
+
 	Buffer2DCount,
+};
+
+enum Buffer2DFormat
+{
+	FORMAT_HALF,
+	FORMAT_HALF2,
+	FORMAT_HALF4,
+	Buffer2DFormatCount,
+};
+
+enum Buffer2DDim
+{
+	BUFFER_2D_RENDER_DIM,
+	BUFFER_2D_SCREEN_DIM,
+	BUFFER_2D_RENDER_DIM_4,
+	BUFFER_2D_RENDER_DIM_16,
+	BUFFER_2D_RENDER_DIM_64,
+	BUFFER_2D_8x8_GRID_DIM,
+	BUFFER_2D_16x16_GRID_DIM,
+	BUFFER_2D_SKY_DIM,
+	Buffer2DDimCount,
 };
 
 struct Buffer2D
@@ -317,26 +347,6 @@ struct Buffer2D
 
 struct Buffer2DManager
 {
-	enum Buffer2DFormat
-	{
-		FORMAT_HALF,
-		FORMAT_HALF2,
-		FORMAT_HALF4,
-		FORMAT_FLOAT2,
-		Buffer2DFormatCount,
-	};
-
-	enum Buffer2DDim
-	{
-		BUFFER_2D_RENDER_DIM,
-		BUFFER_2D_SCREEN_DIM,
-		BUFFER_2D_RENDER_DIM_4,
-		BUFFER_2D_RENDER_DIM_16,
-		BUFFER_2D_RENDER_DIM_64,
-		BUFFER_2D_SKY_DIM,
-		Buffer2DDimCount,
-	};
-
 	struct Buffer2DFeature
 	{
 		Buffer2DFormat format;

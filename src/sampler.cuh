@@ -6,6 +6,30 @@
 
 #define uchar unsigned char
 
+__forceinline__ __device__ void ClampBorder(Int2& uv, Int2 size)
+{
+    if (uv.x >= size.x) { uv.x = size.x - 1; }
+    if (uv.y >= size.y) { uv.y = size.y - 1; }
+    if (uv.x < 0) { uv.x = 0; }
+    if (uv.y < 0) { uv.y = 0; }
+}
+
+__forceinline__ __device__ void RepeatBorder(Int2& uv, Int2 size)
+{
+    if (uv.x >= size.x) { uv.x %= size.x; }
+    if (uv.y >= size.y) { uv.y %= size.y; }
+    if (uv.x < 0) { uv.x = size.x - (-uv.x) % size.x; }
+    if (uv.y < 0) { uv.y = size.y - (-uv.y) % size.y; }
+}
+
+__forceinline__ __device__ void RepeatXClampYBorder(Int2& uv, Int2 size)
+{
+    if (uv.x >= size.x) { uv.x %= size.x; }
+    if (uv.x < 0) { uv.x = size.x - (-uv.x) % size.x; }
+    if (uv.y >= size.y) { uv.y = size.y - 1; }
+    if (uv.y < 0) { uv.y = 0; }
+}
+
 //------------------------------------------- 2d load store ---------------------------------------------------
 
 template<typename T>
@@ -68,8 +92,10 @@ __forceinline__ __device__ void Store2DFloat2(Float2 val, SurfObj tex, Int2 uv)
 // data  half  half  half  ushort
 
 struct Float3Ushort1 { Float3 xyz; ushort w; };
+struct Half3Ushort1 { Half3 xyz; ushort w; };
 
-__forceinline__ __device__ Float3Ushort1 Load2DHalf3Ushort1(
+template<typename ReturnType = Float3Ushort1>
+__forceinline__ __device__ ReturnType Load2DHalf3Ushort1(
 	SurfObj tex,
 	Int2    uv)
 {
@@ -82,7 +108,15 @@ __forceinline__ __device__ Float3Ushort1 Load2DHalf3Ushort1(
 	return { fl4.xyz, ret.w };
 }
 
-__forceinline__ __device__ Float3 Load2DHalf3Ushort1Float3(SurfObj tex, Int2 uv) { return Load2DHalf3Ushort1(tex, uv).xyz; }
+template<>
+__forceinline__ __device__ Half3Ushort1 Load2DHalf3Ushort1<Half3Ushort1>(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+	ushort4ToHalf3Converter conv(ret);
+	return { conv.hf3, ret.w };
+}
 
 __forceinline__ __device__ void Store2DHalf3Ushort1(
     Float3Ushort1 val,
@@ -103,12 +137,65 @@ __forceinline__ __device__ void Store2DHalf3Ushort1(
 // byte    2     2     2     2
 // data  half  half  half  half
 
+template<typename ReturnType = Float4>
+__forceinline__ __device__ ReturnType Load2DHalf4(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
+
+	ushort4ToHalf4Converter conv(ret);
+	Half4 hf4 = conv.hf4;
+
+	return half4ToFloat4(hf4);
+}
+
+template<>
+__forceinline__ __device__ Half4 Load2DHalf4<Half4>(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
+
+	ushort4ToHalf4Converter conv(ret);
+	Half4 hf4 = conv.hf4;
+
+	return hf4;
+}
+
+template<>
+__forceinline__ __device__ Half3 Load2DHalf4<Half3>(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
+
+	ushort4ToHalf3Converter conv(ret);
+	Half3 hf3 = conv.hf3;
+
+	return hf3;
+}
 
 __forceinline__ __device__ Float4 Load2DHalf4(
 	SurfObj tex,
 	Int2    uv)
 {
-	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
+
+	ushort4ToHalf4Converter conv(ret);
+	Half4 hf4 = conv.hf4;
+
+	return half4ToFloat4(hf4);
+}
+
+__forceinline__ __device__ Float4 Load2DHalf4ForSky(
+	SurfObj tex,
+	Int2    uv,
+    Int2    size)
+{
+    RepeatXClampYBorder(uv, size);
+
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
 
 	ushort4ToHalf4Converter conv(ret);
 	Half4 hf4 = conv.hf4;
@@ -128,8 +215,6 @@ __forceinline__ __device__ void Store2DHalf4(
 
     surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
 }
-
-__forceinline__ __device__ Float3 Load2DHalf4ToFloat3(SurfObj tex, Int2 uv) { return Load2DHalf4(tex, uv).xyz; }
 
 //------------------------------------------- 2d half2 ---------------------------------------------------
 // byte    2     2
@@ -152,10 +237,18 @@ __forceinline__ __device__ void Store2DHalf2(Float2 val, SurfObj tex, Int2 uv)
 // byte    2
 // data  half
 
-__forceinline__ __device__ float Load2DHalf1(SurfObj tex, Int2 uv)
+template<typename ReturnType = float>
+__forceinline__ __device__ ReturnType Load2DHalf1(SurfObj tex, Int2 uv)
 {
     ushort1ToHalf1Converter conv(surf2Dread<ushort1>(tex, uv.x * 1 * sizeof(short), uv.y, cudaBoundaryModeClamp));
     return __half2float(conv.hf1);
+}
+
+template<>
+__forceinline__ __device__ half Load2DHalf1<half>(SurfObj tex, Int2 uv)
+{
+    ushort1ToHalf1Converter conv(surf2Dread<ushort1>(tex, uv.x * 1 * sizeof(short), uv.y, cudaBoundaryModeClamp));
+    return conv.hf1;
 }
 
 __forceinline__ __device__ void Store2DHalf1(float val, SurfObj tex, Int2 uv)
@@ -180,7 +273,11 @@ __forceinline__ __device__ void Store2D_uchar1(int val, SurfObj tex, Int2 uv)
 
 //------------------------------------------- bicubic sample func ---------------------------------------------------
 
-typedef Float3 (*SampleFunc)(SurfObj, Int2);
+__forceinline__ __device__ Float3 Load2DHalf3Ushort1Float3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf3Ushort1(tex, uv).xyz; }
+__forceinline__ __device__ Float3 Load2DHalf4ToFloat3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf4(tex, uv).xyz; }
+__forceinline__ __device__ Float3 Load2DHalf4ToFloat3ForSky(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf4ForSky(tex, uv, size).xyz; }
+
+typedef Float3 (*SampleFunc)(SurfObj, Int2, Int2);
 
 __device__ Float3 SampleBicubicCatmullRom(
     SurfObj tex,
@@ -227,7 +324,7 @@ __device__ Float3 SampleBicubicCatmullRom(
 	for (int i = 0; i < 16; i++)
 	{
         sumWeight += weights[i];
-		OutColor += sampleFunc(tex, sampleUV[i]) * weights[i];
+		OutColor += sampleFunc(tex, sampleUV[i], texSize) * weights[i];
 	}
 
 	OutColor /= sumWeight;
@@ -272,7 +369,7 @@ __device__ Float3 SampleBicubicSmoothStep(
 	for (int i = 0; i < 4; i++)
 	{
         sumWeight += weights[i];
-		OutColor += sampleFunc(tex, sampleUV[i]) * weights[i];
+		OutColor += sampleFunc(tex, sampleUV[i], texSize) * weights[i];
 	}
 
 	OutColor /= sumWeight;

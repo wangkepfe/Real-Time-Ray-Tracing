@@ -3,6 +3,38 @@
 #include "cuda_fp16.h"
 #include "linear_math.h"
 
+struct Half3
+{
+    half2 a;
+    half b;
+};
+
+inline __device__ Float3 half3ToFloat3(Half3 v) {
+    float2 a = __half22float2(v.a);
+    float b = __half2float(v.b);
+
+    Float3 out;
+    out.x = a.x;
+    out.y = a.y;
+    out.z = b;
+
+    return out;
+}
+
+inline __device__ Half3 float3ToHalf3(Float3 v)
+{
+    float2 a;
+    a.x = v.x;
+    a.y = v.y;
+    float b = v.z;
+
+    Half3 out;
+    out.a = __float22half2_rn(a);
+    out.b = __float2half_rn(b);
+
+    return out;
+}
+
 struct Half4
 {
     half2 a;
@@ -60,6 +92,16 @@ union ushort4ToHalf4Converter
 	Half4 hf4;
 };
 
+union ushort4ToHalf3Converter
+{
+	__device__ ushort4ToHalf3Converter(const ushort4& v) : us4{v} {}
+	__device__ ushort4ToHalf3Converter(const Half3& v, const half v2) : hf3{v}, hf1{v2} {}
+
+	ushort4 us4;
+	Half3 hf3;
+	half hf1;
+};
+
 union ushort2ToHalf2Converter
 {
     __device__ ushort2ToHalf2Converter(const ushort2& v) : us2{v} {}
@@ -77,6 +119,7 @@ union ushort1ToHalf1Converter
 	ushort1 us1;
 	half hf1;
 };
+
 //
 //union ReconstructionInfo
 //{

@@ -4,9 +4,12 @@
 #include "sampler.cuh"
 #include "common.cuh"
 
-extern __constant__ float filterKernel[25];
+#define NOISE_THRESHOLD 3
 
-__constant__ float Gaussian3x3[9] =
+extern __constant__ float cGaussian5x5[25];
+extern __constant__ float cGaussian7x7[49];
+
+__constant__ float cGaussian3x3[9] =
 {
     1.0f/16.0f, 1.0f/8.0f, 1.0f / 16.0f,
 	1.0f / 8.0f, 1.0f/4.0f, 1.0f / 8.0f,
@@ -38,7 +41,7 @@ __inline__ __device__ void WarpReduceSum(T& v) {
 
 __global__ void CalculateTileNoiseLevel(
 	SurfObj colorBuffer,
-	SurfObj normalDepthBuffer,
+	SurfObj depthBuffer,
 	SurfObj noiseLevelBuffer,
 	Int2    size)
 {
@@ -52,16 +55,14 @@ __global__ void CalculateTileNoiseLevel(
 	int y2 = y * 2 + 1;
 
 	Float3Ushort1 colorAndMask1 = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
-	Float2 normalAndDepth1      = Load2DFloat2(normalDepthBuffer, Int2(x1, y1));
+	float depthValue1 = Load2DHalf1(depthBuffer, Int2(x1, y1));
 
 	Float3 colorValue1          = colorAndMask1.xyz;
-	float depthValue1           = normalAndDepth1.y;
 
 	Float3Ushort1 colorAndMask2 = Load2DHalf3Ushort1(colorBuffer, Int2(x2, y2));
-	Float2 normalAndDepth2      = Load2DFloat2(normalDepthBuffer, Int2(x2, y2));
+	float depthValue2 = Load2DHalf1(depthBuffer, Int2(x2, y2));
 
 	Float3 colorValue2          = colorAndMask2.xyz;
-	float depthValue2           = normalAndDepth2.y;
 
 	uint background1 = depthValue1 >= RayMax;
 	uint background2 = depthValue2 >= RayMax;
@@ -91,22 +92,39 @@ __global__ void CalculateTileNoiseLevel(
 
 		float noiseLevel = blockVariance / max(lumAveSq, 1e-20f);
 		noiseLevel *= notSkyRatio;
-		noiseLevel = min(noiseLevel * 10.0f, 1.0f);
+		noiseLevel = noiseLevel * 1000.0f;
 
 		Int2 gridLocation = Int2(blockIdx.x, blockIdx.y);
 		Store2DHalf1(noiseLevel, noiseLevelBuffer, gridLocation);
 	}
 }
 
+__global__ void TileNoiseLevel8x8to16x16(SurfObj noiseLevelBuffer, SurfObj noiseLevelBuffer16)
+{
+	int x = threadIdx.x + blockIdx.x * 8;
+	int y = threadIdx.y + blockIdx.y * 8;
+	float v1 = Load2DHalf1(noiseLevelBuffer, Int2(x * 2, y * 2));
+	float v2 = Load2DHalf1(noiseLevelBuffer, Int2(x * 2 + 1, y * 2));
+	float v3 = Load2DHalf1(noiseLevelBuffer, Int2(x * 2, y * 2 + 1));
+	float v4 = Load2DHalf1(noiseLevelBuffer, Int2(x * 2 + 1, y * 2 + 1));
+	Store2DHalf1((v1 + v2 + v3 + v4) / 4, noiseLevelBuffer16, Int2(x, y));
+}
+
 __global__ void TileNoiseLevelVisualize(SurfObj colorBuffer, SurfObj noiseLevelBuffer, Int2 size)
 {
 	float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
-	int x1 = threadIdx.x + blockIdx.x * 8;
-	int y1 = threadIdx.y + blockIdx.y * 8;
+	int x1 = threadIdx.x + blockIdx.x * blockDim.x;
+	int y1 = threadIdx.y + blockIdx.y * blockDim.y;
 	Float3Ushort1 colorAndMask1 = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
 	Float3 colorValue1          = colorAndMask1.xyz;
 	ushort maskValue1           = colorAndMask1.w;
-	Store2DHalf3Ushort1( { colorValue1 + Float3(noiseLevel, 0, 0), maskValue1 } , colorBuffer, Int2(x1, y1));
+	if (noiseLevel > NOISE_THRESHOLD)
+	{
+		if ((threadIdx.x == 0) || (threadIdx.x == (blockDim.x - 1)) || (threadIdx.y == 0) || (threadIdx.y == (blockDim.y - 1)))
+		{
+			Store2DHalf3Ushort1( { Float3(1, 0, 0), maskValue1 } , colorBuffer, Int2(x1, y1));
+		}
+	}
 }
 
 __global__ void CopyToHistoryBuffer(
@@ -126,66 +144,58 @@ __global__ void CopyToHistoryBuffer(
 
 __global__ void SpatialFilter5x5(
 	SurfObj colorBuffer,
-	SurfObj normalDepthBuffer,
-	SurfObj noiseLevelBuffer,
+	SurfObj normalBuffer,
+	SurfObj depthBuffer,
+	SurfObj noiseLevelBuffer16,
 	Int2    size)
 {
 	int x = threadIdx.x + blockIdx.x * 16;
 	int y = threadIdx.y + blockIdx.y * 16;
 
-	float noiseLevel1 = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x * 2, blockIdx.y * 2));
-	float noiseLevel2 = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x * 2 + 1, blockIdx.y * 2));
-	float noiseLevel3 = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x * 2, blockIdx.y * 2 + 1));
-	float noiseLevel4 = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x * 2 + 1, blockIdx.y * 2 + 1));
+	float noiseLevel = Load2DHalf1(noiseLevelBuffer16, Int2(blockIdx.x, blockIdx.y));
 
-	if ((noiseLevel1 < 0.1f) && (noiseLevel2 < 0.1f) && (noiseLevel3 < 0.1f) && (noiseLevel4 < 0.1f))
+	if (noiseLevel < NOISE_THRESHOLD)
 	{
 		return;
 	}
 
 	struct AtrousLDS
 	{
-		Float3 color;
-		float depth;
-		Float3 normal;
+		Half3 color;
 		ushort mask;
+		Half3 normal;
+		half depth;
 	};
 	__shared__ AtrousLDS sharedBuffer[20 * 20];
 
 	// calculate address
 	int id = (threadIdx.x + threadIdx.y * 16);
-
 	int x1 = blockIdx.x * 16 - 2 + id % 20;
 	int y1 = blockIdx.y * 16 - 2 + id / 20;
-
 	int x2 = blockIdx.x * 16 - 2 + (id + 256) % 20;
 	int y2 = blockIdx.y * 16 - 2 + (id + 256) / 20;
 
 	// global load 1
-	Float3Ushort1 colorAndMask1 = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
-	Float2 normalAndDepth1      = Load2DFloat2(normalDepthBuffer, Int2(x1, y1));
+	Half3Ushort1 colorAndMask1 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x1, y1));
+	sharedBuffer[id] =
+	{
+		colorAndMask1.xyz,
+		colorAndMask1.w,
+		Load2DHalf4<Half3>(normalBuffer, Int2(x1, y1)),
+		Load2DHalf1<half>(depthBuffer, Int2(x1, y1))
+	};
 
-	Float3 colorValue1          = colorAndMask1.xyz;
-	float depthValue1           = normalAndDepth1.y;
-	Float3 normalValue1         = DecodeNormal_R11_G10_B11(normalAndDepth1.x);
-	ushort maskValue1           = colorAndMask1.w;
-
-	// store to lds 1
-	sharedBuffer[id      ] = { colorValue1, depthValue1, normalValue1, maskValue1 };
-
+	// global load 2
 	if (id + 256 < 400)
 	{
-		// global load 2
-		Float3Ushort1 colorAndMask2 = Load2DHalf3Ushort1(colorBuffer, Int2(x2, y2));
-		Float2 normalAndDepth2 = Load2DFloat2(normalDepthBuffer, Int2(x2, y2));
-
-		Float3 colorValue2 = colorAndMask2.xyz;
-		float depthValue2 = normalAndDepth2.y;
-		Float3 normalValue2 = DecodeNormal_R11_G10_B11(normalAndDepth2.x);
-		ushort maskValue2 = colorAndMask2.w;
-
-		// store to lds 2
-		sharedBuffer[id + 256] = { colorValue2, depthValue2, normalValue2, maskValue2 };
+		Half3Ushort1 colorAndMask2 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x2, y2));
+		sharedBuffer[id + 256] =
+		{
+			colorAndMask2.xyz,
+			colorAndMask2.w,
+			Load2DHalf4<Half3>(normalBuffer, Int2(x2, y2)),
+			Load2DHalf1<half>(depthBuffer, Int2(x2, y2))
+		};
 	}
 
 	__syncthreads();
@@ -194,16 +204,16 @@ __global__ void SpatialFilter5x5(
 
 	// load center
 	AtrousLDS center   = sharedBuffer[threadIdx.x + 2 + (threadIdx.y + 2) * 20];
-	Float3 colorValue  = center.color;
-	float depthValue   = center.depth;
-	Float3 normalValue = center.normal;
+	Float3 colorValue  = half3ToFloat3(center.color);
+	float depthValue   = __half2float(center.depth);
+	Float3 normalValue = half3ToFloat3(center.normal);
 	ushort maskValue   = center.mask;
 
 	if (depthValue >= RayMax) return;
 
 	// -------------------------------- atrous filter --------------------------------
-	const float sigma_normal = 128.0f;
-	const float sigma_depth = 4.0f;
+	const float sigma_normal   = 128.0f;
+	const float sigma_depth    = 4.0f;
 	const float sigma_material = 2.0f;
 
 	Float3 sumOfColor = 0;
@@ -218,9 +228,9 @@ __global__ void SpatialFilter5x5(
 		AtrousLDS bufferReadTmp = sharedBuffer[threadIdx.x + xoffset + (threadIdx.y + yoffset) * 20];
 
 		// get data
-		Float3 color  = bufferReadTmp.color;
-		float depth   = bufferReadTmp.depth;
-		Float3 normal = bufferReadTmp.normal;
+		Float3 color  = half3ToFloat3(bufferReadTmp.color);
+		float depth   = __half2float(bufferReadTmp.depth);
+		Float3 normal = half3ToFloat3(bufferReadTmp.normal);
 		ushort mask   = bufferReadTmp.mask;
 
 		float weight = 1.0f;
@@ -230,22 +240,30 @@ __global__ void SpatialFilter5x5(
 
 		// depth diff fatcor
 		float deltaDepth = (depthValue - depth) / sigma_depth;
-		deltaDepth = deltaDepth * deltaDepth;
-		weight      *= expf(-0.5f * deltaDepth);
+		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
 		weight      *= (maskValue != mask) ? 1.0f / sigma_material : 1.0f;
 
 		// gaussian filter weight
-		weight      *= filterKernel[xoffset + yoffset * 5];
+		weight      *= cGaussian5x5[xoffset + yoffset * 5];
 
 		// accumulate
 		sumOfColor  += color * weight;
 		sumOfWeight += weight;
 	}
 
+	Float3 finalColor;
+
 	// final color
-	Float3 finalColor = SafeDivide3f1f(sumOfColor, sumOfWeight);
+	if (sumOfWeight == 0)
+    {
+        finalColor = 0;
+    }
+    else
+    {
+        finalColor = sumOfColor / sumOfWeight;
+    }
 
 	if (isnan(finalColor.x) || isnan(finalColor.y) || isnan(finalColor.z))
     {
@@ -256,6 +274,155 @@ __global__ void SpatialFilter5x5(
 	// store to current
 	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, Int2(x, y));
 }
+
+
+__global__ void SpatialFilter7x7(
+	SurfObj colorBuffer,
+	SurfObj normalBuffer,
+	SurfObj depthBuffer,
+	SurfObj noiseLevelBuffer16,
+	Int2    size)
+{
+	int x = threadIdx.x + blockIdx.x * 16;
+	int y = threadIdx.y + blockIdx.y * 16;
+
+	float noiseLevel = Load2DHalf1(noiseLevelBuffer16, Int2(blockIdx.x, blockIdx.y));
+
+	if (noiseLevel < NOISE_THRESHOLD)
+	{
+		return;
+	}
+
+	struct AtrousLDS
+	{
+		Half3 color;
+		ushort mask;
+		Half3 normal;
+		half depth;
+	};
+
+	constexpr int blockdim                  = 16;
+	constexpr int kernelRadius              = 3;
+
+	constexpr int threadCount     = blockdim * blockdim;
+
+	constexpr int kernelCoverDim  = blockdim + kernelRadius * 2;
+	constexpr int kernelCoverSize = kernelCoverDim * kernelCoverDim;
+
+	constexpr int kernelDim       = kernelRadius * 2 + 1;
+	constexpr int kernelSize      = kernelDim * kernelDim;
+
+	int centerIdx                 = threadIdx.x + kernelRadius + (threadIdx.y + kernelRadius) * kernelCoverDim;
+
+	__shared__ AtrousLDS sharedBuffer[kernelCoverSize];
+
+	// calculate address
+	int id = (threadIdx.x + threadIdx.y * blockdim);
+	int x1 = blockIdx.x * blockdim - kernelRadius + id % kernelCoverDim;
+	int y1 = blockIdx.y * blockdim - kernelRadius + id / kernelCoverDim;
+	int x2 = blockIdx.x * blockdim - kernelRadius + (id + threadCount) % kernelCoverDim;
+	int y2 = blockIdx.y * blockdim - kernelRadius + (id + threadCount) / kernelCoverDim;
+
+	// global load 1
+	Half3Ushort1 colorAndMask1 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x1, y1));
+	sharedBuffer[id] =
+	{
+		colorAndMask1.xyz,
+		colorAndMask1.w,
+		Load2DHalf4<Half3>(normalBuffer, Int2(x1, y1)),
+		Load2DHalf1<half>(depthBuffer, Int2(x1, y1))
+	};
+
+	// global load 2
+	if (id + threadCount < kernelCoverSize)
+	{
+		Half3Ushort1 colorAndMask2 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x2, y2));
+		sharedBuffer[id + threadCount] =
+		{
+			colorAndMask2.xyz,
+			colorAndMask2.w,
+			Load2DHalf4<Half3>(normalBuffer, Int2(x2, y2)),
+			Load2DHalf1<half>(depthBuffer, Int2(x2, y2))
+		};
+	}
+
+	__syncthreads();
+
+	if (x >= size.x && y >= size.y) return;
+
+	// load center
+	AtrousLDS center   = sharedBuffer[centerIdx];
+	Float3 colorValue  = half3ToFloat3(center.color);
+	float depthValue   = __half2float(center.depth);
+	Float3 normalValue = half3ToFloat3(center.normal);
+	ushort maskValue   = center.mask;
+
+	if (depthValue >= RayMax) return;
+
+	// -------------------------------- atrous filter --------------------------------
+	const float sigma_normal   = 128.0f;
+	const float sigma_depth    = 4.0f;
+	const float sigma_material = 2.0f;
+
+	Float3 sumOfColor = 0;
+	float sumOfWeight = 0;
+
+	#pragma unroll
+	for (int i = 0; i < kernelSize; i += 1)
+	{
+		int xoffset = i % kernelDim;
+		int yoffset = i / kernelDim;
+
+		AtrousLDS bufferReadTmp = sharedBuffer[threadIdx.x + xoffset + (threadIdx.y + yoffset) * kernelCoverDim];
+
+		// get data
+		Float3 color  = half3ToFloat3(bufferReadTmp.color);
+		float depth   = __half2float(bufferReadTmp.depth);
+		Float3 normal = half3ToFloat3(bufferReadTmp.normal);
+		ushort mask   = bufferReadTmp.mask;
+
+		float weight = 1.0f;
+
+		// normal diff factor
+		weight      *= powf(max(dot(normalValue, normal), 0.0f), sigma_normal);
+
+		// depth diff fatcor
+		float deltaDepth = (depthValue - depth) / sigma_depth;
+		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
+
+		// material mask diff factor
+		weight      *= (maskValue != mask) ? 1.0f / sigma_material : 1.0f;
+
+		// gaussian filter weight
+		weight      *= cGaussian5x5[xoffset + yoffset * kernelDim];
+
+		// accumulate
+		sumOfColor  += color * weight;
+		sumOfWeight += weight;
+	}
+
+	Float3 finalColor;
+
+	// final color
+	if (sumOfWeight == 0)
+    {
+        finalColor = 0;
+    }
+    else
+    {
+        finalColor = sumOfColor / sumOfWeight;
+    }
+
+	if (isnan(finalColor.x) || isnan(finalColor.y) || isnan(finalColor.z))
+    {
+        printf("SpatialFilter7x7: nan found at (%d, %d)\n", x, y);
+        finalColor = 0;
+    }
+
+	// store to current
+	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, Int2(x, y));
+}
+
 
 __global__ void SpatialFilter10x10(
 	SurfObj   colorBuffer,
@@ -326,7 +493,7 @@ __global__ void SpatialFilter10x10(
 			weight      *= min1f(expf(-(dist2) / 0.1f), 1.0f);
 
 			// gaussian filter weight
-			weight      *= filterKernel[j + i * 5];
+			weight      *= cGaussian5x5[j + i * 5];
 
 			// accumulate
 			sumOfColor  += color * weight;
@@ -347,158 +514,158 @@ __global__ void SpatialFilter10x10(
 	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, Int2(x, y));
 }
 
-__global__ void TemporalFilter(
-	SurfObj   colorBuffer,
-	SurfObj   accumulateBuffer,
-	SurfObj   normalDepthBuffer,
-	SurfObj   normalDepthHistoryBuffer,
-    SurfObj   motionVectorBuffer,
-	SurfObj   noiseLevelBuffer,
-	Int2      size,
-	Int2      historySize)
-{
-	float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
-	if (noiseLevel < 0.1f)
-	{
-		return;
-	}
+// __global__ void TemporalFilter(
+// 	SurfObj   colorBuffer,
+// 	SurfObj   accumulateBuffer,
+// 	SurfObj   normalDepthBuffer,
+// 	SurfObj   normalDepthHistoryBuffer,
+//     SurfObj   motionVectorBuffer,
+// 	SurfObj   noiseLevelBuffer,
+// 	Int2      size,
+// 	Int2      historySize)
+// {
+// 	float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
+// 	if (noiseLevel < 0.1f)
+// 	{
+// 		return;
+// 	}
 
-	__shared__ Float3Ushort1 sharedBuffer[10 * 10];
+// 	__shared__ Float3Ushort1 sharedBuffer[10 * 10];
 
-	// calculate address
-	int x = threadIdx.x + blockIdx.x * 8;
-	int y = threadIdx.y + blockIdx.y * 8;
+// 	// calculate address
+// 	int x = threadIdx.x + blockIdx.x * 8;
+// 	int y = threadIdx.y + blockIdx.y * 8;
 
-	int id = (threadIdx.x + threadIdx.y * 8);
+// 	int id = (threadIdx.x + threadIdx.y * 8);
 
-	int x1 = blockIdx.x * 8 - 1 + id % 10;
-	int y1 = blockIdx.y * 8 - 1 + id / 10;
+// 	int x1 = blockIdx.x * 8 - 1 + id % 10;
+// 	int y1 = blockIdx.y * 8 - 1 + id / 10;
 
-	int x2 = blockIdx.x * 8 - 1 + (id + 64) % 10;
-	int y2 = blockIdx.y * 8 - 1 + (id + 64) / 10;
+// 	int x2 = blockIdx.x * 8 - 1 + (id + 64) % 10;
+// 	int y2 = blockIdx.y * 8 - 1 + (id + 64) / 10;
 
-	// load current color and mask
-	sharedBuffer[id] = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
+// 	// load current color and mask
+// 	sharedBuffer[id] = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
 
-	if (id + 64 < 100)
-	{
-		sharedBuffer[id + 64] = Load2DHalf3Ushort1(colorBuffer, Int2(x2, y2));
-	}
+// 	if (id + 64 < 100)
+// 	{
+// 		sharedBuffer[id + 64] = Load2DHalf3Ushort1(colorBuffer, Int2(x2, y2));
+// 	}
 
-	__syncthreads();
+// 	__syncthreads();
 
-	if (x >= size.x || y >= size.y) return;
+// 	if (x >= size.x || y >= size.y) return;
 
-	// load current normal and depth
-	Float2 normalAndDepth = Load2DFloat2(normalDepthBuffer, Int2(x, y));
-	Float3 normal = DecodeNormal_R11_G10_B11(normalAndDepth.x);
-	float depth = normalAndDepth.y;
+// 	// load current normal and depth
+// 	Float2 normalAndDepth = Load2DFloat2(normalDepthBuffer, Int2(x, y));
+// 	Float3 normal = DecodeNormal_R11_G10_B11(normalAndDepth.x);
+// 	float depth = normalAndDepth.y;
 
-	// current center color and mask
-	Float3Ushort1 center = sharedBuffer[threadIdx.x + 1 + (threadIdx.y + 1) * 10];
-	Float3 color = center.xyz;
-	ushort mask = center.w;
+// 	// current center color and mask
+// 	Float3Ushort1 center = sharedBuffer[threadIdx.x + 1 + (threadIdx.y + 1) * 10];
+// 	Float3 color = center.xyz;
+// 	ushort mask = center.w;
 
-	// Load neighbour color, get max min and guassian
-	Float3 neighbourMax = Float3(FLT_MIN);
-	Float3 neighbourMin = Float3(FLT_MAX);
-	Float3 gaussianColor = 0;
-	#pragma unroll
-	for (int i = 0; i < 3; ++i)
-	{
-		#pragma unroll
-		for (int j = 0; j < 3; ++j)
-		{
-			Float3 neighbourColor = sharedBuffer[threadIdx.x + j + (threadIdx.y + i) * 10].xyz;
+// 	// Load neighbour color, get max min and guassian
+// 	Float3 neighbourMax = Float3(FLT_MIN);
+// 	Float3 neighbourMin = Float3(FLT_MAX);
+// 	Float3 gaussianColor = 0;
+// 	#pragma unroll
+// 	for (int i = 0; i < 3; ++i)
+// 	{
+// 		#pragma unroll
+// 		for (int j = 0; j < 3; ++j)
+// 		{
+// 			Float3 neighbourColor = sharedBuffer[threadIdx.x + j + (threadIdx.y + i) * 10].xyz;
 
-			// gaussian color
-			gaussianColor += Gaussian3x3[i * 3 + j] * neighbourColor;
+// 			// gaussian color
+// 			gaussianColor += cGaussian3x3[i * 3 + j] * neighbourColor;
 
-			// max min
-			neighbourColor = RgbToYcocg(neighbourColor);
-			neighbourMax = max3f(neighbourMax, neighbourColor);
-			neighbourMin = min3f(neighbourMin, neighbourColor);
-		}
-	}
+// 			// max min
+// 			neighbourColor = RgbToYcocg(neighbourColor);
+// 			neighbourMax = max3f(neighbourMax, neighbourColor);
+// 			neighbourMin = min3f(neighbourMin, neighbourColor);
+// 		}
+// 	}
 
-    // sample history color
-	Float2 motionVec = Load2DHalf2(motionVectorBuffer, Int2(x, y)) - Float2(0.5f);
-	Float2 uv = (Float2(x, y) + 0.5f) * (1.0f / Float2(size.x, size.y));
-	Float2 historyUv = uv + motionVec;
+//     // sample history color
+// 	Float2 motionVec = Load2DHalf2(motionVectorBuffer, Int2(x, y)) - Float2(0.5f);
+// 	Float2 uv = (Float2(x, y) + 0.5f) * (1.0f / Float2(size.x, size.y));
+// 	Float2 historyUv = uv + motionVec;
 
-	// history uv out of screen
-	if (historyUv.x < 0 || historyUv.y < 0 || historyUv.x > 1.0 || historyUv.y > 1.0)
-	{
-		Store2DHalf3Ushort1( { gaussianColor, mask } , colorBuffer, Int2(x, y));
-		return;
-	}
+// 	// history uv out of screen
+// 	if (historyUv.x < 0 || historyUv.y < 0 || historyUv.x > 1.0 || historyUv.y > 1.0)
+// 	{
+// 		Store2DHalf3Ushort1( { gaussianColor, mask } , colorBuffer, Int2(x, y));
+// 		return;
+// 	}
 
-	// sample history
-	Float3 colorHistory = SampleBicubicSmoothStep(accumulateBuffer, Load2DHalf3Ushort1Float3, historyUv, historySize);
+// 	// sample history
+// 	Float3 colorHistory = SampleBicubicSmoothStep(accumulateBuffer, Load2DHalf3Ushort1Float3, historyUv, historySize);
 
-	// clamp history
-	Float3 colorHistoryYcocg = RgbToYcocg(colorHistory);
-	colorHistoryYcocg = clamp3f(colorHistoryYcocg, neighbourMin, neighbourMax);
-	colorHistory = YcocgToRgb(colorHistoryYcocg);
+// 	// clamp history
+// 	Float3 colorHistoryYcocg = RgbToYcocg(colorHistory);
+// 	colorHistoryYcocg = clamp3f(colorHistoryYcocg, neighbourMin, neighbourMax);
+// 	colorHistory = YcocgToRgb(colorHistoryYcocg);
 
-	// float lumaHistory = colorHistoryYcocg.x;
-	// float lumaMin = neighbourMin.x;
-	// float lumaMax = neighbourMax.x;
-	// float lumaCurrent = GetLuma(color);
+// 	// float lumaHistory = colorHistoryYcocg.x;
+// 	// float lumaMin = neighbourMin.x;
+// 	// float lumaMax = neighbourMax.x;
+// 	// float lumaCurrent = GetLuma(color);
 
-	// load history normal and depth
-	Int2 nearestHistoryIdx = Int2(historyUv.x * historySize.x, historyUv.y * historySize.y);
-	Float2 normalAndDepthHistory = Load2DFloat2(normalDepthHistoryBuffer, nearestHistoryIdx);
-	Float3 normalHistory = DecodeNormal_R11_G10_B11(normalAndDepthHistory.x);
-	float depthHistory = normalAndDepthHistory.y;
-	ushort maskHistory = Load2DHalf3Ushort1(accumulateBuffer, nearestHistoryIdx).w;
+// 	// load history normal and depth
+// 	Int2 nearestHistoryIdx = Int2(historyUv.x * historySize.x, historyUv.y * historySize.y);
+// 	Float2 normalAndDepthHistory = Load2DFloat2(normalDepthHistoryBuffer, nearestHistoryIdx);
+// 	Float3 normalHistory = DecodeNormal_R11_G10_B11(normalAndDepthHistory.x);
+// 	float depthHistory = normalAndDepthHistory.y;
+// 	ushort maskHistory = Load2DHalf3Ushort1(accumulateBuffer, nearestHistoryIdx).w;
 
-	// discard history
-	float depthRatio = SafeDivide(depthHistory, depth);
-	const float depthRatioUpperLimit = 1.2f;
-	const float depthRatioLowerLimit = 1.0f / depthRatioUpperLimit;
+// 	// discard history
+// 	float depthRatio = SafeDivide(depthHistory, depth);
+// 	const float depthRatioUpperLimit = 1.2f;
+// 	const float depthRatioLowerLimit = 1.0f / depthRatioUpperLimit;
 
-	bool discardHistory =
-		(depthHistory >= RayMax) ||
-		(depthRatio > depthRatioUpperLimit) ||
-		(depthRatio < depthRatioLowerLimit) ||
-		(mask != maskHistory);
+// 	bool discardHistory =
+// 		(depthHistory >= RayMax) ||
+// 		(depthRatio > depthRatioUpperLimit) ||
+// 		(depthRatio < depthRatioLowerLimit) ||
+// 		(mask != maskHistory);
 
-	Float3 outColor;
-	if (discardHistory)
-	{
-		// use gaussian color if history is rejected
-		outColor = gaussianColor;
-	}
-	else
-	{
-		// blend factor base
-		float blendFactor = 1.0f / 16.0f;
+// 	Float3 outColor;
+// 	if (discardHistory)
+// 	{
+// 		// use gaussian color if history is rejected
+// 		outColor = gaussianColor;
+// 	}
+// 	else
+// 	{
+// 		// blend factor base
+// 		float blendFactor = 1.0f / 16.0f;
 
-		// history noies level
-		//blendFactor = lerpf(1.0f / 16.0f, 1.0f / 64.f, noiseLevel);
+// 		// history noies level
+// 		//blendFactor = lerpf(1.0f / 16.0f, 1.0f / 64.f, noiseLevel);
 
-		// anti flickering
-		//blendFactor *= 0.2f + 0.8f * clampf(0.5f * min( abs(lumaHistory - lumaMin), abs(lumaHistory - lumaMax) ) / max3( lumaHistory, lumaCurrent, 1e-4f ));
+// 		// anti flickering
+// 		//blendFactor *= 0.2f + 0.8f * clampf(0.5f * min( abs(lumaHistory - lumaMin), abs(lumaHistory - lumaMax) ) / max3( lumaHistory, lumaCurrent, 1e-4f ));
 
-		// weight with luma hdr factor
-		// float weightA = blendFactor * max(0.0001f, 1.0f / (GetLuma(color) + 4.0f));
-		// float weightB = (1.0f - blendFactor) * max(0.0001f, 1.0f / (GetLuma(colorHistory) + 4.0f));
-		// float weightSum = SafeDivide(1.0f, weightA + weightB);
-		// weightA *= weightSum;
-		// weightB *= weightSum;
+// 		// weight with luma hdr factor
+// 		// float weightA = blendFactor * max(0.0001f, 1.0f / (GetLuma(color) + 4.0f));
+// 		// float weightB = (1.0f - blendFactor) * max(0.0001f, 1.0f / (GetLuma(colorHistory) + 4.0f));
+// 		// float weightSum = SafeDivide(1.0f, weightA + weightB);
+// 		// weightA *= weightSum;
+// 		// weightB *= weightSum;
 
-		// blend
-		//outColor = color * weightA + colorHistory * weightB
-		outColor = color * blendFactor + colorHistory * (1.0f - blendFactor);
-	}
+// 		// blend
+// 		//outColor = color * weightA + colorHistory * weightB
+// 		outColor = color * blendFactor + colorHistory * (1.0f - blendFactor);
+// 	}
 
-	if (isnan(outColor.x) || isnan(outColor.y) || isnan(outColor.z))
-    {
-        printf("TemporalFilter: nan found at (%d, %d)\n", x, y);
-        outColor = 0;
-    }
+// 	if (isnan(outColor.x) || isnan(outColor.y) || isnan(outColor.z))
+//     {
+//         printf("TemporalFilter: nan found at (%d, %d)\n", x, y);
+//         outColor = 0;
+//     }
 
-	// store to current
-	Store2DHalf3Ushort1( { outColor, mask } , colorBuffer, Int2(x, y));
-}
+// 	// store to current
+// 	Store2DHalf3Ushort1( { outColor, mask } , colorBuffer, Int2(x, y));
+// }

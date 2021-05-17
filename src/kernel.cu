@@ -92,7 +92,8 @@ __device__ inline void DiffuseSurfaceInteraction(
     SceneTextures textures,
     float* skyCdf,
     float sampleLightProbablity,
-    Float3& beta)
+    Float3& beta,
+	Float3* indirectLightDir = nullptr)
 {
     // check for termination and hit light
     if (rayState.hitLight == true || rayState.isDiffuse == false || rayState.isOccluded == true) { return; }
@@ -226,7 +227,7 @@ __device__ inline void DiffuseSurfaceInteraction(
 
         if (isLightSampled)
         {
-            MacrofacetReflection(lightSampleSurfaceBsdfOverPdf, lightSampleSurfaceBsdf, lightSampleSurfacePdf, normal, rayDir, lightSampleDir, F0, albedo, alpha);
+            MacrofacetReflection(lightSampleSurfaceBsdfOverPdf, lightSampleSurfaceBsdf, lightSampleSurfacePdf, normal, -rayDir, lightSampleDir, F0, albedo, alpha);
         }
     }
 
@@ -240,7 +241,9 @@ __device__ inline void DiffuseSurfaceInteraction(
         {
             // if a delta light (or say distant/directional light, typically sun light) is sampled,
             // no surface sample is needed since the weight for surface is zero
-            CalculateCosines(rayDir, lightSampleDir, normal, cosThetaWoWh, cosThetaWo, cosThetaWi, cosThetaWh);
+            GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
+
+            if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
 
             float lightPdf = 1.0f;
 			brdfOverPdf = lightSampleSurfaceBsdf * cosThetaWi / lightPdf * sampleLightFactor;
@@ -278,22 +281,24 @@ __device__ inline void DiffuseSurfaceInteraction(
 
             if (misRand < misWeight)
             {
-                CalculateCosines(rayDir, surfSampleDir, normal, cosThetaWoWh, cosThetaWo, cosThetaWi, cosThetaWh);
-
                 // choose surface scatter sample
                 brdfOverPdf = surfaceBsdfOverPdf  * sampleLightFactor;
                 brdfOverPdf = min3f(brdfOverPdf, Float3(10.0f));
+
+                if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
 
                 beta = brdfOverPdf;
                 rayState.dir = surfSampleDir;
             }
             else
             {
-                CalculateCosines(rayDir, lightSampleDir, normal, cosThetaWoWh, cosThetaWo, cosThetaWi, cosThetaWh);
+                GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
 
                 // choose light sample
                 brdfOverPdf = lightSampleSurfaceBsdf * cosThetaWi / lightSamplePdf * sampleLightFactor;
                 brdfOverPdf = min3f(brdfOverPdf, Float3(10.0f));
+
+                if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
 
                 beta = brdfOverPdf;
                 rayState.dir = lightSampleDir;
@@ -305,11 +310,11 @@ __device__ inline void DiffuseSurfaceInteraction(
     }
     else
     {
-        CalculateCosines(rayDir, surfSampleDir, normal, cosThetaWoWh, cosThetaWo, cosThetaWi, cosThetaWh);
-
         // if no light sample, sample surface only
         brdfOverPdf = surfaceBsdfOverPdf * sampleSurfaceFactor;
         brdfOverPdf = min3f(brdfOverPdf, Float3(10.0f));
+
+        if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
 
         beta = brdfOverPdf;
         rayState.dir = surfSampleDir;
@@ -324,17 +329,20 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           SceneMaterial          sceneMaterial,
                           BlueNoiseRandGenerator randGen,
                           SurfObj                colorBuffer,
-                          SurfObj                normalDepthBuffer,
+                          SurfObj                normalBuffer,
+                          SurfObj                depthBuffer,
                           SceneTextures          textures,
                           SurfObj                skyBuffer,
                           float*                 skyCdf,
                           SurfObj                motionVectorBuffer,
                           SurfObj                noiseLevelBuffer,
                           SurfObj                indirectLightColorBuffer,
-                          SurfObj                indirectLightDirectionBuffer)
+                          SurfObj                indirectLightDirectionBuffer,
+                          Int2                   renderSize)
 {
     // index
     Int2 idx(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+    if (idx.x >= renderSize.x || idx.y >= renderSize.y) return;
     int i = gridDim.x * blockDim.x * idx.y + idx.x;
 
     float historyNoiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
@@ -361,11 +369,11 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // generate ray
     Float2 sampleUv;
-    GenerateRay(rayState.orig, rayState.dir, sampleUv, cbo.camera, idx, Float2(rayState.rand.x, rayState.rand.y), Float2(rayState.rand.z, rayState.rand.w));
+    GenerateRay(rayState.orig, rayState.dir, sampleUv, cbo.camera, idx, Float2(rayState.rand.x, rayState.rand.y), Float2(rayState.rand.x, rayState.rand.y));
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
-    // save encode normal and depth
-    Store2DFloat2(Float2(EncodeNormal_R11_G10_B11(rayState.normal), rayState.depth), normalDepthBuffer, idx);
+    Float3 outputNormal = rayState.normal;
+    float outputDepth = rayState.depth;
 
     // save material
     ushort materialMask = (ushort)rayState.matId;
@@ -377,10 +385,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
         Float2 lastFrameSampleUv = cbo.historyCamera.WorldToScreenSpace(rayState.pos, cbo.camera.tanHalfFov);
         motionVector = lastFrameSampleUv - sampleUv;
     }
-
-    // write motion vector
     motionVector += Float2(0.5f);
-    Store2DHalf2(motionVector, motionVectorBuffer, idx);
 
     // glossy only
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
@@ -389,13 +394,15 @@ __global__ void PathTrace(ConstBuffer            cbo,
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
+    Float3 indirectLightDir;
+
     // glossy + diffuse
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.5f, rayState.beta1);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta1, &indirectLightDir);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.5f, rayState.beta0);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta0);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // Light
@@ -405,6 +412,11 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // write to buffer
     Store2DHalf3Ushort1( { L2 , materialMask } , colorBuffer, idx);
+    Store2DHalf4(Float4(outputNormal, 0), normalBuffer, idx);
+    Store2DHalf1(outputDepth, depthBuffer, idx);
+    Store2DHalf2(motionVector, motionVectorBuffer, idx);
+    Store2DHalf4(Float4(L1, 0), indirectLightColorBuffer, idx);
+    Store2DHalf4(Float4(indirectLightDir, 0), indirectLightDirectionBuffer, idx);
 }
 
 void RayTracer::UpdateFrame()
@@ -475,6 +487,8 @@ void RayTracer::UpdateFrame()
     if (cbo.frameNum == 1)
     {
         cbo.historyCamera.Setup(cbo.camera);
+        CalculateGaussian5x5();
+        CalculateGaussian7x7();
     }
 }
 
@@ -595,8 +609,10 @@ void RayTracer::draw(SurfObj* renderTarget)
     auto colorBufferC                 = GetBuffer2D(ScaledColorBuffer);
     auto motionVectorBuffer           = GetBuffer2D(MotionVectorBuffer);
     auto noiseLevelBuffer             = GetBuffer2D(NoiseLevelBuffer);
-    auto normalDepthBufferA           = GetBuffer2D(RenderNormalDepthBuffer);
-    auto normalDepthBufferB           = GetBuffer2D(HistoryNormalDepthBuffer);
+    auto noiseLevelBuffer16           = GetBuffer2D(NoiseLevelBuffer16x16);
+    auto normalBuffer                 = GetBuffer2D(NormalBuffer);
+    auto depthBufferA                 = GetBuffer2D(DepthBuffer);
+    auto depthBufferB                 = GetBuffer2D(HistoryDepthBuffer);
     auto colorBuffer4                 = GetBuffer2D(ColorBuffer4);
     auto colorBuffer16                = GetBuffer2D(ColorBuffer16);
     auto colorBuffer64                = GetBuffer2D(ColorBuffer64);
@@ -610,36 +626,105 @@ void RayTracer::draw(SurfObj* renderTarget)
         d_sceneMaterial,
         d_randGen,
         colorBufferA,
-        normalDepthBufferA,
+        normalBuffer,
+        depthBufferA,
         sceneTextures,
         GetBuffer2D(SkyBuffer),
         skyCdf,
         motionVectorBuffer,
         noiseLevelBuffer,
         indirectLightColorBuffer,
-        indirectLightDirectionBuffer);
+        indirectLightDirectionBuffer,
+        bufferDim);
 
-    #if DEBUG_FRAME > 0
-    GpuErrorCheck(cudaDeviceSynchronize());
-	GpuErrorCheck(cudaPeekAtLastError());
-    #endif
+    if (1)
+    {
+        GpuErrorCheck(cudaDeviceSynchronize());
+	    GpuErrorCheck(cudaPeekAtLastError());
+    }
+
+    // ------------------------------- Reconstruction -------------------------------
+    if (1)
+    {
+        SpatialReconstruction5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+            colorBufferA,
+            normalBuffer,
+            depthBufferA,
+            indirectLightColorBuffer,
+            indirectLightDirectionBuffer,
+            d_sceneMaterial,
+            d_randGen,
+            cbo,
+            bufferDim);
+    }
 
     // ------------------------------- Denoising -------------------------------
     // update history camera
     cbo.historyCamera.Setup(cbo.camera);
 
-    // SpatialFilterReconstruction5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(colorBufferA, sceneMaterial, bufferDim);
+    CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
+        colorBufferA,
+        depthBufferA,
+        noiseLevelBuffer,
+        bufferDim);
 
-    // CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(colorBufferA, normalDepthBufferA, noiseLevelBuffer, bufferDim);
+    UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
+    TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
+        noiseLevelBuffer,
+        noiseLevelBuffer16);
+
+    if (0)
+    {
+        TileNoiseLevelVisualize<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+            colorBufferA,
+            noiseLevelBuffer16,
+            bufferDim);
+    }
+
+    if (0)
+    {
+        TileNoiseLevelVisualize<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
+            colorBufferA,
+            noiseLevelBuffer,
+            bufferDim);
+    }
+
+    if (1)
+    {
+        SpatialFilter7x7<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+            colorBufferA,
+            normalBuffer,
+            depthBufferA,
+            noiseLevelBuffer16,
+            bufferDim);
+    }
+
+    if (0)
+    {
+        SpatialFilter5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+            colorBufferA,
+            normalBuffer,
+            depthBufferA,
+            noiseLevelBuffer16,
+            bufferDim);
+    }
+
+    if (1)
+    {
+        GpuErrorCheck(cudaDeviceSynchronize());
+	    GpuErrorCheck(cudaPeekAtLastError());
+    }
 
     // if (cbo.frameNum != 1)
     // {
-    //     TemporalFilter <<<gridDim, blockDim>>>
-    //         (colorBufferA, colorBufferB, normalDepthBufferA, normalDepthBufferB, motionVectorBuffer, noiseLevelBuffer, bufferDim, historyDim);
+    //     TemporalFilter <<<gridDim, blockDim>>>(
+    //         colorBufferA, colorBufferB,
+    //         normalBuffer,
+    //         depthBufferA, depthBufferB,
+    //         motionVectorBuffer,
+    //         noiseLevelBuffer,
+    //         bufferDim, historyDim);
     // }
-
-    // SpatialFilter5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>
-    //     (colorBufferA, normalDepthBufferA, noiseLevelBuffer, bufferDim);
 
     // CopyToHistoryBuffer<<<gridDim, blockDim>>>(colorBufferA, normalDepthBufferA, colorBufferB, normalDepthBufferB, bufferDim);
 
@@ -666,12 +751,12 @@ void RayTracer::draw(SurfObj* renderTarget)
     // Bloom<<<gridDim, blockDim>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
 
     // Lens flare
-    if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.0 && dot(sunDir, cbo.camera.dir) > 0)
-    {
-        sunPos -= Float2(0.5);
-        sunPos.x *= (float)renderWidth / (float)renderHeight;
-        LensFlarePred<<<1,1>>>(normalDepthBufferA, sunPos, sunUv, colorBufferA, bufferDim, gridDim, blockDim, bufferDim);
-    }
+    // if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.0 && dot(sunDir, cbo.camera.dir) > 0)
+    // {
+    //     sunPos -= Float2(0.5);
+    //     sunPos.x *= (float)renderWidth / (float)renderHeight;
+    //     LensFlarePred<<<1,1>>>(depthBufferA, sunPos, sunUv, colorBufferA, bufferDim, gridDim, blockDim, bufferDim);
+    // }
 
     // Tone mapping
     ToneMapping<<<gridDim, blockDim>>>(colorBufferA , bufferDim , d_exposure);
@@ -680,18 +765,20 @@ void RayTracer::draw(SurfObj* renderTarget)
     BicubicScale<<<scaleGridDim, scaleBlockDim>>>(colorBufferC, colorBufferA, outputDim, bufferDim);
 
     // Sharpening
-    SharpeningFilter<<<scaleGridDim, scaleBlockDim>>>(colorBufferC , outputDim);
+    // SharpeningFilter<<<scaleGridDim, scaleBlockDim>>>(colorBufferC , outputDim);
 
     // Output
     CopyToOutput<<<scaleGridDim, scaleBlockDim>>>(renderTarget, colorBufferC, outputDim);
 
-    #if DEBUG_FRAME > 0
-    if (cbo.frameNum == DEBUG_FRAME)
+    #if DUMP_FRAME_NUM > 0
+    if (cbo.frameNum == DUMP_FRAME_NUM)
     {
         // debug
 	    CopyFrameBuffer <<<scaleGridDim, scaleBlockDim>>>(dumpFrameBuffer, renderTarget, outputDim);
 
-        writeToPPM("image.ppm", outputDim.x, outputDim.y, dumpFrameBuffer);
+        std::string outputName = "outputImage_frame_" + std::to_string(cbo.frameNum) + "_" + Timer::getTimeString() + ".ppm";
+
+        writeToPPM(outputName, outputDim.x, outputDim.y, dumpFrameBuffer);
     }
     #endif
 }

@@ -354,7 +354,6 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	std::array<UInt2, Buffer2DDimCount>                    dim;
 
 	// ------------------------- Format --------------------------
-	format[FORMAT_FLOAT2] = cudaCreateChannelDesc<float2>();
 	format[FORMAT_HALF2]  = cudaCreateChannelDescHalf2();
 	format[FORMAT_HALF]   = cudaCreateChannelDescHalf1();
 	format[FORMAT_HALF4]  = cudaCreateChannelDescHalf4();
@@ -365,12 +364,14 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	UInt2 bufferSize16 = UInt2(divRoundUp(bufferSize4.x, 4u), divRoundUp(bufferSize4.y, 4u));
 	UInt2 bufferSize64 = UInt2(divRoundUp(bufferSize16.x, 4u), divRoundUp(bufferSize16.y, 4u));
 
-	dim[BUFFER_2D_RENDER_DIM]    = UInt2(renderWidth, renderHeight);
-	dim[BUFFER_2D_SCREEN_DIM]    = UInt2(screenWidth, screenHeight);
-	dim[BUFFER_2D_RENDER_DIM_4]  = bufferSize4;
-	dim[BUFFER_2D_RENDER_DIM_16] = bufferSize16;
-	dim[BUFFER_2D_RENDER_DIM_64] = bufferSize64;
-	dim[BUFFER_2D_SKY_DIM]       = UInt2(64, 16);
+	dim[BUFFER_2D_RENDER_DIM]     = UInt2(renderWidth, renderHeight);
+	dim[BUFFER_2D_SCREEN_DIM]     = UInt2(screenWidth, screenHeight);
+	dim[BUFFER_2D_RENDER_DIM_4]   = bufferSize4;
+	dim[BUFFER_2D_RENDER_DIM_16]  = bufferSize16;
+	dim[BUFFER_2D_RENDER_DIM_64]  = bufferSize64;
+	dim[BUFFER_2D_8x8_GRID_DIM]   = UInt2(divRoundUp(renderWidth, 8u), divRoundUp(renderHeight, 8u));
+	dim[BUFFER_2D_16x16_GRID_DIM] = UInt2(divRoundUp(renderWidth, 16u), divRoundUp(renderHeight, 16u));
+	dim[BUFFER_2D_SKY_DIM]        = UInt2(64, 16);
 
 	// ------------------------- Mapping --------------------------
 
@@ -387,11 +388,14 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 		{ BloomBuffer4                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_64 } },
 		{ BloomBuffer16                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_16 } },
 
-		{ RenderNormalDepthBuffer       , { FORMAT_FLOAT2 , BUFFER_2D_RENDER_DIM    } },
-		{ HistoryNormalDepthBuffer      , { FORMAT_FLOAT2 , BUFFER_2D_RENDER_DIM    } },
+		{ NormalBuffer                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+		{ DepthBuffer                   , { FORMAT_HALF   , BUFFER_2D_RENDER_DIM    } },
+		{ HistoryDepthBuffer            , { FORMAT_HALF   , BUFFER_2D_RENDER_DIM    } },
 
-		{ MotionVectorBuffer            , { FORMAT_HALF2  , BUFFER_2D_RENDER_DIM    } },
-		{ NoiseLevelBuffer              , { FORMAT_HALF   , BUFFER_2D_RENDER_DIM    } },
+		{ MotionVectorBuffer            , { FORMAT_HALF2  , BUFFER_2D_RENDER_DIM        } },
+		{ NoiseLevelBuffer              , { FORMAT_HALF   , BUFFER_2D_8x8_GRID_DIM      } },
+		{ NoiseLevelBuffer16x16         , { FORMAT_HALF   , BUFFER_2D_16x16_GRID_DIM    } },
+
 		{ IndirectLightColorBuffer      , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
 		{ IndirectLightDirectionBuffer  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
 	};
@@ -400,7 +404,10 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 
 	for (int i = 0; i < Buffer2DCount; ++i)
 	{
+		assert(i < Buffer2DCount, "Static assert: Buffer2DCount max count error!");
 		Buffer2DFeature feature = map[static_cast<Buffer2DName>(i)];
+		assert(static_cast<int>(feature.format) < Buffer2DFormatCount, "Static assert: Buffer2DFormatCount max count error!");
+		assert(static_cast<int>(feature.dim) < Buffer2DDimCount, "Static assert: Buffer2DDimCount max count error!");
 		buffers[i].init(&format[static_cast<int>(feature.format)], dim[static_cast<int>(feature.dim)]);
 	}
 }

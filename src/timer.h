@@ -1,6 +1,8 @@
 #pragma once
 
 #include <chrono>
+#include <ctime>
+#include <iostream>
 
 struct Timer
 {
@@ -36,11 +38,24 @@ struct Timer
         return std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
     }
 
-    bool firstTimeUse = true;
-    double deltaTime = 0.0;
-    float fpsTimer = 0.0f;
+    static std::string getTimeString()
+    {
+        auto end = std::chrono::system_clock::now();
+        std::time_t end_time = std::chrono::system_clock::to_time_t(end);
+        std::string str = std::ctime(&end_time);
+        for (auto& c : str)
+        {
+            if (c == ' ') c = '-';
+            if (c == ':') c = '-';
+        }
+        return str.substr(0, str.size() - 1);
+    }
+
+    bool     firstTimeUse = true;
+    double   deltaTime    = 0.0;
+    float    fpsTimer     = 0.0f;
     uint32_t frameCounter = 0;
-    uint32_t fps = 0;
+    uint32_t fps          = 0;
 
     const std::chrono::steady_clock::time_point startTime {std::chrono::high_resolution_clock::now()};
     std::chrono::steady_clock::time_point currentTime;

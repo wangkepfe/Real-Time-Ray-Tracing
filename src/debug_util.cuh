@@ -86,6 +86,8 @@ void writeToPPM(const std::string& filename, int width, int height, uchar4* devi
 
 	std::string fullFilename = logDir + filename;
 
+	// std::cout << fullFilename << "\n";
+
     FILE *f = fopen(fullFilename.c_str(), "w");
 	assert(f != nullptr);
 
