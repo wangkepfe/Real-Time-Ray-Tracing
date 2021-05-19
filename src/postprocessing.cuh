@@ -8,9 +8,11 @@
 #define USE_CATMULL_ROM_SAMPLER 0
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
 
-#define GAUSSIAN_5x5_SIGMA 3.0f
-#define GAUSSIAN_7x7_SIGMA 4.0f
+#define GAUSSIAN_3x3_SIGMA 1.0f
+#define GAUSSIAN_5x5_SIGMA 1.0f
+#define GAUSSIAN_7x7_SIGMA 1.0f
 
+__constant__ float cGaussian3x3[9];  // 9
 __constant__ float cGaussian5x5[25]; // 25
 __constant__ float cGaussian7x7[49]; // 49
 
@@ -67,6 +69,15 @@ void CalculateGaussianKernel(float* fGaussian, float sigma, int radius)
 		std::cout << std::endl;
 	}
     delete sampleData;
+}
+
+void CalculateGaussian3x3()
+{
+	int kernelSize = 9;
+	float* fGaussian = new float[kernelSize];
+	CalculateGaussianKernel(fGaussian, GAUSSIAN_3x3_SIGMA, 1);
+	GpuErrorCheck(cudaMemcpyToSymbol(cGaussian3x3, fGaussian, sizeof(float) * kernelSize));
+	delete fGaussian;
 }
 
 void CalculateGaussian5x5()

@@ -487,6 +487,7 @@ void RayTracer::UpdateFrame()
     if (cbo.frameNum == 1)
     {
         cbo.historyCamera.Setup(cbo.camera);
+        CalculateGaussian3x3();
         CalculateGaussian5x5();
         CalculateGaussian7x7();
     }
@@ -639,13 +640,6 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     if (1)
     {
-        GpuErrorCheck(cudaDeviceSynchronize());
-	    GpuErrorCheck(cudaPeekAtLastError());
-    }
-
-    // ------------------------------- Reconstruction -------------------------------
-    if (1)
-    {
         SpatialReconstruction5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
             colorBufferA,
             normalBuffer,
@@ -656,6 +650,12 @@ void RayTracer::draw(SurfObj* renderTarget)
             d_randGen,
             cbo,
             bufferDim);
+    }
+
+    if (1)
+    {
+        GpuErrorCheck(cudaDeviceSynchronize());
+	    GpuErrorCheck(cudaPeekAtLastError());
     }
 
     // ------------------------------- Denoising -------------------------------
@@ -672,6 +672,20 @@ void RayTracer::draw(SurfObj* renderTarget)
     TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
         noiseLevelBuffer,
         noiseLevelBuffer16);
+
+    if (1)
+    {
+        if (cbo.frameNum != 1)
+        {
+            TemporalFilter <<<gridDim, blockDim>>>(
+                colorBufferA, colorBufferB,
+                normalBuffer,
+                depthBufferA, depthBufferB,
+                motionVectorBuffer,
+                noiseLevelBuffer,
+                bufferDim, historyDim);
+        }
+    }
 
     if (0)
     {
@@ -715,18 +729,10 @@ void RayTracer::draw(SurfObj* renderTarget)
 	    GpuErrorCheck(cudaPeekAtLastError());
     }
 
-    // if (cbo.frameNum != 1)
-    // {
-    //     TemporalFilter <<<gridDim, blockDim>>>(
-    //         colorBufferA, colorBufferB,
-    //         normalBuffer,
-    //         depthBufferA, depthBufferB,
-    //         motionVectorBuffer,
-    //         noiseLevelBuffer,
-    //         bufferDim, historyDim);
-    // }
-
-    // CopyToHistoryBuffer<<<gridDim, blockDim>>>(colorBufferA, normalDepthBufferA, colorBufferB, normalDepthBufferB, bufferDim);
+    if (1)
+    {
+        CopyToHistoryBuffer<<<gridDim, blockDim>>>(colorBufferA, depthBufferA, colorBufferB, depthBufferB, bufferDim);
+    }
 
     //CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(colorBufferA, normalDepthBufferA, noiseLevelBuffer, bufferDim);
 
