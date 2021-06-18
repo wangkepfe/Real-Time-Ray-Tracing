@@ -16,6 +16,7 @@
 #define DEBUG_PRINT(__THING__) if(IS_DEBUG_PIXEL()) { Print(#__THING__, __THING__); }
 #define DEBUG_PRINT_STRING(__STRING__) if(IS_DEBUG_PIXEL()) { Print(__STRING__); }
 #define DEBUG_PRINT_BAR if(IS_DEBUG_PIXEL()) { Print("------------------------------"); }
+#define NAN_DETECTER(__THING__) NanDetecter(__FUNCTION__,#__THING__, __THING__);
 
 #define DEBUG_CUDA() GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
 
@@ -155,4 +156,37 @@ __global__ void CopyFrameBuffer(
 	uchar4 val = surf2Dread<uchar4>(renderTarget[0], idx.x * 4 * sizeof(uchar1), idx.y, cudaBoundaryModeClamp);
 
 	dumpFrameBuffer[idx.x + idx.y * outSize.x] = val;
+}
+
+__device__ void NanDetecter(const char* name1, const char* name2, float& v)
+{
+	if (isnan(v))
+    {
+		int x = blockIdx.x * blockDim.x + threadIdx.x;
+		int y = blockIdx.y * blockDim.y + threadIdx.y;
+        //printf("%s::%s: Nan found at (%d, %d)!\n", name1, name2, x, y);
+		v = 0;
+    }
+}
+
+__device__ void NanDetecter(const char* name1, const char* name2, Float2& v2)
+{
+	if (isnan(v2.x) || isnan(v2.y))
+    {
+		int x = blockIdx.x * blockDim.x + threadIdx.x;
+		int y = blockIdx.y * blockDim.y + threadIdx.y;
+        //printf("%s::%s: Nan found at (%d, %d)!\n", name1, name2, x, y);
+		v2 = 0;
+    }
+}
+
+__device__ void NanDetecter(const char* name1, const char* name2, Float3& v3)
+{
+	if (isnan(v3.x) || isnan(v3.y) || isnan(v3.z))
+    {
+		int x = blockIdx.x * blockDim.x + threadIdx.x;
+		int y = blockIdx.y * blockDim.y + threadIdx.y;
+        //printf("%s::%s: Nan found at (%d, %d)!\n", name1, name2, x, y);
+		v3 = 0;
+    }
 }

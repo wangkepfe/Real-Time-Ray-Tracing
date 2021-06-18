@@ -37,6 +37,8 @@ def halton_sequence2(size, dim, primes):
         seq.append([vdc(i, base) for i in range(size)])
     return seq
 
+dim = 5
+
 sampleCount = 60
 
 seq = halton_sequence2(sampleCount, 3, [3,5,7])
@@ -44,24 +46,24 @@ seq = halton_sequence2(sampleCount, 3, [3,5,7])
 arr = np.array(seq)
 print(arr)
 
-arr = arr * 5
+arr = arr * dim
 print(arr)
 
-arr = np.floor(arr)
+arr = np.floor(arr).astype(int)
 print(arr)
 
 res = []
-for i in range(5):
+for i in range(dim):
     current = []
     for j in range(sampleCount):
         if arr[0][j] == i:
             current.append([arr[1][j], arr[2][j]])
     res.append(current)
 
-for i in range(5):
+for i in range(dim):
     print(res[i])
-    result = np.array(res[i])
-    result += 0.1 * i
+    result = np.array(res[i]).astype(float)
+    result += 0.02 * i
     plt.scatter(result[:,0], result[:,1])
 
 

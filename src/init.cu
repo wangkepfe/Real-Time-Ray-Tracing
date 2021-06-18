@@ -178,10 +178,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	materials[i].F0            = Float3(0.56f, 0.57f, 0.58f);
 	materials[i].alpha         = 0.05f;
 	++i;
-	materials[i].type          = MICROFACET_REFLECTION;
-	materials[i].albedo        = Float3(0.9f);
-	materials[i].F0            = Float3(0.56f, 0.57f, 0.58f);
-	materials[i].alpha         = 0.01f;
+	materials[i].type          = PERFECT_REFLECTION;
 	++i;
 	materials[i].type          = LAMBERTIAN_DIFFUSE;
 	materials[i].useTex0       = true;
@@ -315,8 +312,8 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	timer.init();
 
 	// set render dim to screen dim
-	renderWidth = screenWidth;
-	renderHeight = screenHeight;
+	//renderWidth = screenWidth;
+	//renderHeight = screenHeight;
 }
 
 void RayTracer::CameraSetup(Camera& camera)
@@ -379,6 +376,7 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	{
 		{ RenderColorBuffer             , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
 		{ AccumulationColorBuffer       , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+		{ HistoryColorBuffer            , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
 		{ ScaledColorBuffer             , { FORMAT_HALF4  , BUFFER_2D_SCREEN_DIM    } },
 		{ ScaledAccumulationColorBuffer , { FORMAT_HALF4  , BUFFER_2D_SCREEN_DIM    } },
 

@@ -275,6 +275,7 @@ enum Buffer2DName
 {
 	RenderColorBuffer,             // main render buffer
 	AccumulationColorBuffer,       // accumulation render buffer
+	HistoryColorBuffer,
 	ScaledColorBuffer,             // scaled to screen size
 	ScaledAccumulationColorBuffer, // accumulation of scaled to screen size buffer
 

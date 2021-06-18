@@ -164,12 +164,12 @@ __device__ inline void DiffuseSurfaceInteraction(
      // light sample
     float isDeltaLight = false;
     Float3 lightSampleDir;
-    float lightSamplePdf;
+    float lightSamplePdf = 1;
     int lightIdx;
 
     bool isLightSampled = rayState.rand.z < sampleLightProbablity;
-    float sampleLightFactor = 1.0f / (sampleLightProbablity / 0.5f);
-    float sampleSurfaceFactor = 1.0f / ((1.0f - sampleLightProbablity) / 0.5f);
+    float sampleLightFactor = sampleLightProbablity / 0.5f;
+    float sampleSurfaceFactor = (1.0f - sampleLightProbablity) / 0.5f;
 
     if (isLightSampled)
     {
@@ -231,8 +231,12 @@ __device__ inline void DiffuseSurfaceInteraction(
         }
     }
 
-    Float3 brdfOverPdf;
     float cosThetaWoWh, cosThetaWo, cosThetaWi, cosThetaWh;
+
+    NAN_DETECTER(lightSampleSurfaceBsdf);
+    NAN_DETECTER(surfaceSampleBsdf);
+    NAN_DETECTER(surfaceSamplePdf);
+    NAN_DETECTER(lightSamplePdf);
 
     if (isLightSampled)
     {
@@ -245,11 +249,9 @@ __device__ inline void DiffuseSurfaceInteraction(
 
             if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
 
-            float lightPdf = 1.0f;
-			brdfOverPdf = lightSampleSurfaceBsdf * cosThetaWi / lightPdf * sampleLightFactor;
-            brdfOverPdf = min3f(brdfOverPdf, Float3(10.0f));
+            float finalPdf = 1.0f * sampleLightFactor;
+			beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
 
-            beta = brdfOverPdf;
             rayState.dir = lightSampleDir;
 
             rayState.lightIdx = lightIdx;
@@ -281,13 +283,14 @@ __device__ inline void DiffuseSurfaceInteraction(
 
             if (misRand < misWeight)
             {
+                GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
+
                 // choose surface scatter sample
-                brdfOverPdf = surfaceBsdfOverPdf  * sampleLightFactor;
-                brdfOverPdf = min3f(brdfOverPdf, Float3(10.0f));
+                float finalPdf = surfaceSamplePdf * sampleLightFactor;
+                beta =  surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
 
                 if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
 
-                beta = brdfOverPdf;
                 rayState.dir = surfSampleDir;
             }
             else
@@ -295,12 +298,11 @@ __device__ inline void DiffuseSurfaceInteraction(
                 GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
 
                 // choose light sample
-                brdfOverPdf = lightSampleSurfaceBsdf * cosThetaWi / lightSamplePdf * sampleLightFactor;
-                brdfOverPdf = min3f(brdfOverPdf, Float3(10.0f));
+                float finalPdf = lightSamplePdf * sampleLightFactor;
+                beta =  lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
 
                 if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
 
-                beta = brdfOverPdf;
                 rayState.dir = lightSampleDir;
 
                 rayState.lightIdx = lightIdx;
@@ -310,15 +312,18 @@ __device__ inline void DiffuseSurfaceInteraction(
     }
     else
     {
+        GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
+
         // if no light sample, sample surface only
-        brdfOverPdf = surfaceBsdfOverPdf * sampleSurfaceFactor;
-        brdfOverPdf = min3f(brdfOverPdf, Float3(10.0f));
+        float finalPdf = surfaceSamplePdf * sampleSurfaceFactor;
+        beta =  surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
 
         if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
 
-        beta = brdfOverPdf;
         rayState.dir = surfSampleDir;
     }
+
+    NAN_DETECTER(beta);
 
     rayState.dir = dot(rayState.normal, rayState.dir) < 0 ? normalize(reflect3f(rayState.dir, rayState.normal)) : rayState.dir;
     rayState.orig = rayState.pos + rayState.offset * rayState.normal;
@@ -407,10 +412,17 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // Light
     Float3 L0 = GetLightSource(cbo, rayState, sceneMaterial, skyBuffer);
+    NAN_DETECTER(L0);
     Float3 L1 = L0 * rayState.beta0;
     Float3 L2 = L1 * rayState.beta1;
 
     // write to buffer
+    NAN_DETECTER(L2);
+    NAN_DETECTER(outputNormal);
+    NAN_DETECTER(outputDepth);
+    NAN_DETECTER(motionVector);
+    NAN_DETECTER(L1);
+    NAN_DETECTER(indirectLightDir);
     Store2DHalf3Ushort1( { L2 , materialMask } , colorBuffer, idx);
     Store2DHalf4(Float4(outputNormal, 0), normalBuffer, idx);
     Store2DHalf1(outputDepth, depthBuffer, idx);
@@ -421,6 +433,10 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
 void RayTracer::UpdateFrame()
 {
+    // frame number
+    static int framen = 1;
+    cbo.frameNum      = framen++;
+
     // timer
     timer.update();
     deltaTime = timer.getDeltaTime();
@@ -430,7 +446,7 @@ void RayTracer::UpdateFrame()
     cbo.camera.update();
 
     // dynamic resolution
-    if (g_settings->useDynamicResolution)
+    if (g_settings->useDynamicResolution && cbo.frameNum > 1)
     {
         const int minRenderWidth = g_settings->minWidth;
         const int minRenderHeight = g_settings->minHeight;
@@ -474,10 +490,6 @@ void RayTracer::UpdateFrame()
     const float angle = fmodf(clockTime * TWO_PI / 100.0f, TWO_PI);
     sunDir            = rotate3f(axis, angle, Float3(0.0f, 1.0f, 0.0f).normalized()).normalized();
     cbo.sunDir        = sunDir;
-
-    // frame number
-    static int framen = 1;
-    cbo.frameNum      = framen++;
 
     // prepare for lens flare
     sunPos = cbo.camera.WorldToScreenSpace(cbo.camera.pos + sunDir);
@@ -652,7 +664,7 @@ void RayTracer::draw(SurfObj* renderTarget)
             bufferDim);
     }
 
-    if (1)
+    if (0)
     {
         GpuErrorCheck(cudaDeviceSynchronize());
 	    GpuErrorCheck(cudaPeekAtLastError());
@@ -662,22 +674,21 @@ void RayTracer::draw(SurfObj* renderTarget)
     // update history camera
     cbo.historyCamera.Setup(cbo.camera);
 
-    CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
-        colorBufferA,
-        depthBufferA,
-        noiseLevelBuffer,
-        bufferDim);
-
-    UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
-    TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
-        noiseLevelBuffer,
-        noiseLevelBuffer16);
+    if (1)
+    {
+        CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
+            colorBufferA,
+            depthBufferA,
+            noiseLevelBuffer,
+            bufferDim);
+    }
 
     if (1)
     {
         if (cbo.frameNum != 1)
         {
-            TemporalFilter <<<gridDim, blockDim>>>(
+            TemporalFilter <<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
+                cbo,
                 colorBufferA, colorBufferB,
                 normalBuffer,
                 depthBufferA, depthBufferB,
@@ -685,6 +696,93 @@ void RayTracer::draw(SurfObj* renderTarget)
                 noiseLevelBuffer,
                 bufferDim, historyDim);
         }
+    }
+
+    if (1)
+    {
+        CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
+            colorBufferA,
+            depthBufferA,
+            noiseLevelBuffer,
+            bufferDim);
+
+        UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
+        TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
+            noiseLevelBuffer,
+            noiseLevelBuffer16);
+    }
+
+    if (1)
+    {
+        SpatialFilter7x7<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+            cbo,
+            colorBufferA,
+            normalBuffer,
+            depthBufferA,
+            noiseLevelBuffer16,
+            bufferDim);
+    }
+
+    if (1)
+    {
+        CopyToHistoryColorBuffer<<<gridDim, blockDim>>>(colorBufferA, colorBufferB, bufferDim);
+    }
+
+    for (int i = 0, int j = 1; i < 3; ++i, j *= 2)
+    {
+        if (1)
+        {
+            CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
+                colorBufferA,
+                depthBufferA,
+                noiseLevelBuffer,
+                bufferDim);
+
+            UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
+            TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
+                noiseLevelBuffer,
+                noiseLevelBuffer16);
+        }
+
+        if (0)
+        {
+            TileNoiseLevelVisualize<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+                colorBufferA,
+                noiseLevelBuffer16,
+                bufferDim);
+        }
+
+        if (1)
+        {
+            switch(3 * j)
+            {
+                case 3:
+                    SpatialFilterGlobal5x5<3><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
+                break;
+
+                case 6:
+                    SpatialFilterGlobal5x5<6><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
+                break;
+
+                case 12:
+                    SpatialFilterGlobal5x5<12><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
+                break;
+            }
+        }
+    }
+
+    if (0)
+    {
+        CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
+            colorBufferA,
+            depthBufferA,
+            noiseLevelBuffer,
+            bufferDim);
+
+        UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
+        TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
+            noiseLevelBuffer,
+            noiseLevelBuffer16);
     }
 
     if (0)
@@ -697,48 +795,26 @@ void RayTracer::draw(SurfObj* renderTarget)
 
     if (0)
     {
-        TileNoiseLevelVisualize<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
-            colorBufferA,
-            noiseLevelBuffer,
-            bufferDim);
-    }
-
-    if (1)
-    {
-        SpatialFilter7x7<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
-            colorBufferA,
-            normalBuffer,
-            depthBufferA,
-            noiseLevelBuffer16,
-            bufferDim);
+        if (cbo.frameNum != 1)
+        {
+            TemporalFilter2 <<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
+                cbo,
+                colorBufferA, GetBuffer2D(HistoryColorBuffer),
+                normalBuffer,
+                depthBufferA, depthBufferB,
+                motionVectorBuffer,
+                noiseLevelBuffer,
+                bufferDim, historyDim);
+        }
+        CopyToHistoryColorDepthBuffer<<<gridDim, blockDim>>>(colorBufferA, depthBufferA, GetBuffer2D(HistoryColorBuffer), depthBufferB, bufferDim);
     }
 
     if (0)
-    {
-        SpatialFilter5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
-            colorBufferA,
-            normalBuffer,
-            depthBufferA,
-            noiseLevelBuffer16,
-            bufferDim);
-    }
-
-    if (1)
     {
         GpuErrorCheck(cudaDeviceSynchronize());
 	    GpuErrorCheck(cudaPeekAtLastError());
     }
 
-    if (1)
-    {
-        CopyToHistoryBuffer<<<gridDim, blockDim>>>(colorBufferA, depthBufferA, colorBufferB, depthBufferB, bufferDim);
-    }
-
-    //CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(colorBufferA, normalDepthBufferA, noiseLevelBuffer, bufferDim);
-
-    //SpatialFilter10x10<<<gridDim, blockDim>>>(colorBufferA, normalDepthBufferA, noiseLevelBuffer, bufferDim);
-
-    //TileNoiseLevelVisualize<<<gridDim, blockDim>>>(colorBufferA, noiseLevelBuffer, bufferDim);
 
     // ------------------------------- post processing -------------------------------
     // Histogram

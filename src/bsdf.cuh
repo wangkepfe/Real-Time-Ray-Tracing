@@ -231,7 +231,7 @@ __forceinline__ __device__ void MacrofacetReflectionSample(
 	Float3 F = FresnelShlick(F0, cosThetaWoWh);
 
 	// Smith's Mask-shadowing function G
-	float cosThetaWo = max(SAFE_COSINE_EPSI, dot(wo, wn));
+	float cosThetaWo = clampf(dot(wo, wn), SAFE_COSINE_EPSI, 1.0f - SAFE_COSINE_EPSI);
 	float cosThetaWi = max(SAFE_COSINE_EPSI, dot(wi, wn));
 	float tanThetaWo = sqrt(1.0f - cosThetaWo * cosThetaWo) / cosThetaWo;
 	float G = 1.0f / (1.0f + (sqrtf(1.0f + alpha2 * tanThetaWo * tanThetaWo) - 1.0f) / 2.0f);
