@@ -382,8 +382,8 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 
 		{ ColorBuffer4                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_4  } },
 		{ ColorBuffer16                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_16 } },
-		{ ColorBuffer64                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
-		{ BloomBuffer4                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_64 } },
+		{ ColorBuffer64                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_64 } },
+		{ BloomBuffer4                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_4  } },
 		{ BloomBuffer16                 , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM_16 } },
 
 		{ NormalBuffer                  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },

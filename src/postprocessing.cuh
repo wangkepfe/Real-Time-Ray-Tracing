@@ -438,24 +438,33 @@ __global__ void BloomGuassian(SurfObj outBuffer, SurfObj inBuffer, Int2 size, fl
 	// discard dark pixels
 	float lum = inColor.getmax();
 	float brightLum = exposure[2];
-	//inColor = lum > brightLum ? inColor : 0;
+
 	inColor *= max(sqrtf(lum * lum - brightLum), 0.0);
 
 	// Save global memory to shared memory. One-to-one mapping
 	__shared__ Float3 sharedBuffer[16][16];
+
 	sharedBuffer[threadIdx.x][threadIdx.y] = inColor;
+	__syncthreads();
 
 	// Border margin pixel finish work
 	if (threadIdx.x < 2 || threadIdx.y < 2 || threadIdx.x > 13 || threadIdx.y > 13) { return; }
 
 	Float3 outColor = 0;
-	__syncthreads();
+	float weight = 0;
+
+	#pragma unroll
 	for (int i = 0; i < 25; ++i)
 	{
 		int x = threadIdx.x + (i % 5) - 2;
 		int y = threadIdx.y + (i / 5) - 2;
 		outColor += cGaussian5x5[i] * sharedBuffer[x][y];
+		weight += cGaussian5x5[i];
 	}
+
+	outColor /= weight;
+
+	NAN_DETECTER(outColor);
 
 	Store2DHalf4(Float4(outColor, 1.0), outBuffer, idx2);
 }
@@ -473,6 +482,8 @@ __global__ void Bloom(SurfObj colorBuffer, SurfObj buffer4, SurfObj buffer16, In
 	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
 
 	color = color + (sampledColor4 + sampledColor16) * 0.05;
+
+	NAN_DETECTER(color);
 
 	Store2DHalf4(Float4(color, 1.0), colorBuffer, idx);
 }
@@ -695,6 +706,8 @@ __global__ void BicubicScale(
 __global__ void CopyToOutput(
 	SurfObj* renderTarget,
 	SurfObj  outputResColor,
+	BlueNoiseRandGenerator randGen,
+	ConstBuffer            cbo,
 	Int2     outSize)
 {
 	Int2 idx;
@@ -705,11 +718,20 @@ __global__ void CopyToOutput(
 
 	Float3 sampledColor = Load2DHalf4(outputResColor, idx).xyz;
 
-	sampledColor = clamp3f(sampledColor, Float3(0), Float3(1));
+	 // setup rand gen
+    randGen.idx       = idx;
+    int sampleNum     = 1;
+    int sampleIdx     = 0;
+    randGen.sampleIdx = cbo.frameNum * sampleNum + sampleIdx;
+    Float4 blueNoise  = randGen.Rand4(0);
 
-	surf2Dwrite(make_uchar4(sampledColor.x * 255 + 0.5f,
-							sampledColor.y * 255 + 0.5f,
-							sampledColor.z * 255 + 0.5f,
+	Float3 jitter = blueNoise.xyz / 256 - 1 / 512;
+
+	sampledColor = clamp3f(sampledColor + jitter, Float3(0), Float3(1) - MachineEpsilon());
+
+	surf2Dwrite(make_uchar4(sampledColor.x * 256,
+							sampledColor.y * 256,
+							sampledColor.z * 256,
 							1.0f),
 		        renderTarget[0],
 				idx.x * 4,

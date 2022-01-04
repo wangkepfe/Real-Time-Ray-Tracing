@@ -26,7 +26,15 @@ __device__ inline void UpdateMaterial(
 	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
 
 	// finish mat type
-	rayState.matType = (rayState.hit == false) ? MAT_SKY : mat.type;
+	if (rayState.hit == false)
+	{
+		rayState.matType = MAT_SKY;
+		rayState.matId = 99999;
+	}
+	else
+	{
+		rayState.matType = mat.type;
+	}
 
 	// hit light
 	// shadow ray
@@ -526,6 +534,11 @@ __device__ inline void RaySceneIntersect(
 
 	rayState.hit = (t < RayMax);
 	rayState.depth = t;
+
+	if (rayState.hit == false)
+	{
+		rayState.normal = Float3(0, -1, 0);
+	}
 
 	UpdateMaterial(cbo, rayState, sceneMaterial, sceneGeometry);
 }

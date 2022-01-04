@@ -432,6 +432,7 @@ inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool i
 
 	// float4 texRead = tex2D<float4>(skyTex, u, v);
 	//Float3 color = Float3(texRead.x , texRead.y, texRead.z);
+	//Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DHalf4ToFloat3ForSky, Float2(u, v), Int2(64, 16));
 	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DHalf4ToFloat3ForSky, Float2(u, v) + (blueNoise * 0.1f - 0.05f), Int2(64, 16));
 
 	return color * beta;

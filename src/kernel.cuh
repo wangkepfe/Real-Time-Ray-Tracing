@@ -42,7 +42,7 @@
 // ---------------------- error handling ----------------------
 #define CheckCurandErrors(x) do { if((x)!=CURAND_STATUS_SUCCESS) { printf("Error at %s:%d\n",__FILE__,__LINE__); return EXIT_FAILURE;}} while(0)
 #define GpuErrorCheck(ans) { GpuAssert((ans), __FILE__, __LINE__); }
-inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort = true)
+inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort = false)
 {
 	if (code != cudaSuccess)
 	{

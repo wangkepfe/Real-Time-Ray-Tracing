@@ -609,11 +609,11 @@ __global__ void TemporalFilter(
 	Int2      size,
 	Int2      historySize)
 {
-	float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
-	if (noiseLevel < 0.003f)
-	{
-		return;
-	}
+	// float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
+	// if (noiseLevel < 0.003f)
+	// {
+	// 	return;
+	// }
 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -699,11 +699,11 @@ __global__ void TemporalFilter(
 	const float sigma_depth    = 4.0f;
 	const float sigma_material = 128.0f;
 
-	Float3 neighbourMax = Float3(FLT_MIN);
-	Float3 neighbourMin = Float3(FLT_MAX);
+	Float3 neighbourMax = RgbToYcocg(colorValue);
+	Float3 neighbourMin = RgbToYcocg(colorValue);
 
-	Float3 neighbourMax2 = Float3(FLT_MIN);
-	Float3 neighbourMin2 = Float3(FLT_MAX);
+	Float3 neighbourMax2 = RgbToYcocg(colorValue);
+	Float3 neighbourMin2 = RgbToYcocg(colorValue);
 
 	Float3 filteredColor = 0;
 	float weightSum = 0;
@@ -735,10 +735,6 @@ __global__ void TemporalFilter(
 		float depth   = __half2float(bufferReadTmp.depth);
 		Float3 normal = half3ToFloat3(bufferReadTmp.normal);
 		ushort mask   = bufferReadTmp.mask;
-
-		NAN_DETECTER(color);
-		NAN_DETECTER(depth);
-		NAN_DETECTER(normal);
 
 		float weight = 1.0f;
 
@@ -845,14 +841,12 @@ __global__ void TemporalFilter(
 	{
 		Int2 offset(i % 2, i / 2);
 
-		float depthHistory = Load2DHalf1(depthBuffer, historyIdx + offset);
+		//float depthHistory = Load2DHalf1(depthBuffer, historyIdx + offset);
 		ushort maskHistory = Load2DHalf3Ushort1(accumulateBuffer, historyIdx + offset).w;
 
 		discardHistory += (maskValue != maskHistory);
 	}
 	discardHistory /= 4.0f;
-
-
 
 	colorHistory = colorHistory * (1.0f - discardHistory) + filteredColor * discardHistory;
 
@@ -1027,7 +1021,6 @@ __global__ void TemporalFilter2(
 	// history uv out of screen
 	if (historyUv.x < 0 || historyUv.y < 0 || historyUv.x > 1.0 || historyUv.y > 1.0)
 	{
-		Store2DHalf3Ushort1( { colorValue, maskValue } , colorBuffer, Int2(x, y));
 		return;
 	}
 
@@ -1073,7 +1066,6 @@ __global__ void TemporalFilter2(
 
 	if (discardHistory == 1.0f)
 	{
-		Store2DHalf3Ushort1( { colorValue, maskValue } , colorBuffer, Int2(x, y));
 		return;
 	}
 
@@ -1092,7 +1084,7 @@ __global__ void TemporalFilter2(
 	if (enableAntiFlickering)
 	{
 		// anti flickering
-		blendFactor = 1.0f / 2.0f;
+		blendFactor = 3.0f / 4.0f;
 		blendFactor *= 0.2f + 0.8f * clampf(0.5f * min( abs(lumaHistory - lumaMin), abs(lumaHistory - lumaMax) ) / max3( lumaHistory, lumaCurrent, 1e-4f ));
 	}
 
@@ -1112,11 +1104,7 @@ __global__ void TemporalFilter2(
 		outColor = colorValue * blendFactor + colorHistory * (1.0f - blendFactor);
 	}
 
-	if (isnan(outColor.x) || isnan(outColor.y) || isnan(outColor.z))
-    {
-        printf("TemporalFilter2: nan found at (%d, %d)\n", x, y);
-        outColor = 0;
-    }
+	NAN_DETECTER(outColor);
 
 	// store to current
 	Store2DHalf3Ushort1( { outColor, maskValue } , colorBuffer, Int2(x, y));

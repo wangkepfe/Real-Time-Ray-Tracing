@@ -324,8 +324,8 @@ private:
     // CUDA objects
     cudaExternalMemory_t               m_cudaExtMemImageBuffer;
     cudaMipmappedArray_t               m_cudaMipmappedImageArray;
-    std::vector<SurfObj>   m_surfaceObjectList;
-    SurfObj*               d_surfaceObjectList;
+    std::vector<SurfObj>               m_surfaceObjectList;
+    SurfObj*                           d_surfaceObjectList;
 
     cudaStream_t                       m_streams[8];
 
@@ -1124,6 +1124,21 @@ private:
 
     void drawFrame()
     {
+        // cuda update
+        cudaExternalSemaphoreWaitParams extSemaphoreWaitParams;
+        memset(&extSemaphoreWaitParams, 0, sizeof(extSemaphoreWaitParams));
+        extSemaphoreWaitParams.params.fence.value = 0;
+        extSemaphoreWaitParams.flags = 0;
+        checkCudaErrors(cudaWaitExternalSemaphoresAsync(&m_cudaExtVkUpdateCudaSemaphore, &extSemaphoreWaitParams, 1, m_streams[0]));
+
+        g_rayTracer->draw(d_surfaceObjectList);
+
+        cudaExternalSemaphoreSignalParams extSemaphoreSignalParams;
+        memset(&extSemaphoreSignalParams, 0, sizeof(extSemaphoreSignalParams));
+        extSemaphoreSignalParams.params.fence.value = 0;
+        extSemaphoreSignalParams.flags = 0;
+        checkCudaErrors(cudaSignalExternalSemaphoresAsync(&m_cudaExtCudaUpdateVkSemaphore, &extSemaphoreSignalParams, 1, m_streams[0]));
+
         // cpu-gpu current frame fence
         vkWaitForFences(
             m_device                         , // VkDevice       device,
@@ -1159,60 +1174,28 @@ private:
         // reset fence of current frame
         vkResetFences(m_device, 1, &m_inFlightFences[m_currentFrame]);
 
-        static int startSubmit = 0;
-        if (!startSubmit)
+        // semaphores
+        VkSemaphore waitSemaphores[]      = { m_imageAvailableSemaphores[m_currentFrame], m_cudaUpdateVkSemaphore };
+        VkSemaphore signalSemaphores[]    = { m_renderFinishedSemaphores[m_currentFrame], m_vkUpdateCudaSemaphore };
+
+        // wait stage
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
+
+        // submit info
+        VkSubmitInfo submitInfo           = {};
+        submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.waitSemaphoreCount     = 2;
+        submitInfo.pWaitSemaphores        = waitSemaphores;
+        submitInfo.pWaitDstStageMask      = waitStages;
+        submitInfo.commandBufferCount     = 1;
+        submitInfo.pCommandBuffers        = &m_commandBuffers[imageIndex];
+        submitInfo.signalSemaphoreCount   = 2;
+        submitInfo.pSignalSemaphores      = signalSemaphores;
+
+        // submit command of graphics to queue
+        if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFences[m_currentFrame]) != VK_SUCCESS)
         {
-            // semaphores
-            VkSemaphore waitSemaphores[]   = { m_imageAvailableSemaphores[m_currentFrame] };
-            VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[m_currentFrame], m_vkUpdateCudaSemaphore };
-
-            // wait stage
-            VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-
-            // submit info
-            VkSubmitInfo submitInfo = {};
-            submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-            submitInfo.commandBufferCount   = 1;
-            submitInfo.pCommandBuffers      = &m_commandBuffers[imageIndex];
-            submitInfo.waitSemaphoreCount   = 1;
-            submitInfo.pWaitSemaphores      = waitSemaphores;
-            submitInfo.pWaitDstStageMask    = waitStages;
-            submitInfo.signalSemaphoreCount = 2;
-            submitInfo.pSignalSemaphores    = signalSemaphores;
-
-            // submit command of graphics to queue
-            if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFences[m_currentFrame]) != VK_SUCCESS)
-            {
-                throw std::runtime_error("failed to submit draw command buffer!");
-            }
-
-            startSubmit = 1;
-        }
-        else
-        {
-            // semaphores
-            VkSemaphore waitSemaphores[]      = { m_imageAvailableSemaphores[m_currentFrame], m_cudaUpdateVkSemaphore };
-            VkSemaphore signalSemaphores[]    = { m_renderFinishedSemaphores[m_currentFrame], m_vkUpdateCudaSemaphore };
-
-            // wait stage
-            VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
-
-            // submit info
-            VkSubmitInfo submitInfo           = {};
-            submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-            submitInfo.waitSemaphoreCount     = 2;
-            submitInfo.pWaitSemaphores        = waitSemaphores;
-            submitInfo.pWaitDstStageMask      = waitStages;
-            submitInfo.commandBufferCount     = 1;
-            submitInfo.pCommandBuffers        = &m_commandBuffers[imageIndex];
-            submitInfo.signalSemaphoreCount   = 2;
-            submitInfo.pSignalSemaphores      = signalSemaphores;
-
-            // submit command of graphics to queue
-            if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFences[m_currentFrame]) != VK_SUCCESS)
-            {
-                throw std::runtime_error("failed to submit draw command buffer!");
-            }
+            throw std::runtime_error("failed to submit draw command buffer!");
         }
 
         // swap chain
@@ -1231,21 +1214,6 @@ private:
 
         // submit command of present to queue
         vkQueuePresentKHR(m_presentQueue, &presentInfo);
-
-        // cuda update
-        cudaExternalSemaphoreWaitParams extSemaphoreWaitParams;
-        memset(&extSemaphoreWaitParams, 0, sizeof(extSemaphoreWaitParams));
-        extSemaphoreWaitParams.params.fence.value = 0;
-        extSemaphoreWaitParams.flags = 0;
-        checkCudaErrors(cudaWaitExternalSemaphoresAsync(&m_cudaExtVkUpdateCudaSemaphore, &extSemaphoreWaitParams, 1, m_streams[0]));
-
-        g_rayTracer->draw(d_surfaceObjectList);
-
-        cudaExternalSemaphoreSignalParams extSemaphoreSignalParams;
-        memset(&extSemaphoreSignalParams, 0, sizeof(extSemaphoreSignalParams));
-        extSemaphoreSignalParams.params.fence.value = 0;
-        extSemaphoreSignalParams.flags = 0;
-        checkCudaErrors(cudaSignalExternalSemaphoresAsync(&m_cudaExtCudaUpdateVkSemaphore, &extSemaphoreSignalParams, 1, m_streams[0]));
 
         // current in-flight frame number
         m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;

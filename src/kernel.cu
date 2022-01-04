@@ -364,6 +364,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
     rayState.isHitProcessed = true;
     rayState.isOccluded     = false;
     rayState.isShadowRay    = false;
+    rayState.normal         = Float3(0, -1, 0);
 
     // setup rand gen
     randGen.idx       = idx;
@@ -629,6 +630,8 @@ void RayTracer::draw(SurfObj* renderTarget)
     auto colorBuffer4                 = GetBuffer2D(ColorBuffer4);
     auto colorBuffer16                = GetBuffer2D(ColorBuffer16);
     auto colorBuffer64                = GetBuffer2D(ColorBuffer64);
+    auto bloomBuffer4                 = GetBuffer2D(BloomBuffer4);
+    auto bloomBuffer16                = GetBuffer2D(BloomBuffer16);
     auto indirectLightColorBuffer     = GetBuffer2D(IndirectLightColorBuffer);
     auto indirectLightDirectionBuffer = GetBuffer2D(IndirectLightDirectionBuffer);
 
@@ -650,7 +653,8 @@ void RayTracer::draw(SurfObj* renderTarget)
         indirectLightDirectionBuffer,
         bufferDim);
 
-    if (1)
+    // ------------------------------- Reconstruct -------------------------------
+    if (0)
     {
         SpatialReconstruction5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
             colorBufferA,
@@ -664,126 +668,52 @@ void RayTracer::draw(SurfObj* renderTarget)
             bufferDim);
     }
 
-    if (0)
-    {
-        GpuErrorCheck(cudaDeviceSynchronize());
-	    GpuErrorCheck(cudaPeekAtLastError());
-    }
-
-    // ------------------------------- Denoising -------------------------------
     // update history camera
     cbo.historyCamera.Setup(cbo.camera);
 
-    if (1)
-    {
-        CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
-            colorBufferA,
-            depthBufferA,
-            noiseLevelBuffer,
-            bufferDim);
-    }
+    // ------------------------------- Temporal Spatial Denoising -------------------------------
+    CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
+        colorBufferA,
+        depthBufferA,
+        noiseLevelBuffer,
+        bufferDim);
 
-    if (1)
-    {
-        if (cbo.frameNum != 1)
-        {
-            TemporalFilter <<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
-                cbo,
-                colorBufferA, colorBufferB,
-                normalBuffer,
-                depthBufferA, depthBufferB,
-                motionVectorBuffer,
-                noiseLevelBuffer,
-                bufferDim, historyDim);
-        }
-    }
+    UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
+    TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
+        noiseLevelBuffer,
+        noiseLevelBuffer16);
 
-    if (1)
+    if (cbo.frameNum != 1)
     {
-        CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
-            colorBufferA,
-            depthBufferA,
-            noiseLevelBuffer,
-            bufferDim);
-
-        UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
-        TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
-            noiseLevelBuffer,
-            noiseLevelBuffer16);
-    }
-
-    if (1)
-    {
-        SpatialFilter7x7<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+        TemporalFilter <<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
             cbo,
-            colorBufferA,
+            colorBufferA, colorBufferB,
             normalBuffer,
-            depthBufferA,
-            noiseLevelBuffer16,
-            bufferDim);
-    }
-
-    if (1)
-    {
-        CopyToHistoryColorBuffer<<<gridDim, blockDim>>>(colorBufferA, colorBufferB, bufferDim);
-    }
-
-    for (int i = 0, int j = 1; i < 3; ++i, j *= 2)
-    {
-        if (1)
-        {
-            CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
-                colorBufferA,
-                depthBufferA,
-                noiseLevelBuffer,
-                bufferDim);
-
-            UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
-            TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
-                noiseLevelBuffer,
-                noiseLevelBuffer16);
-        }
-
-        if (0)
-        {
-            TileNoiseLevelVisualize<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
-                colorBufferA,
-                noiseLevelBuffer16,
-                bufferDim);
-        }
-
-        if (1)
-        {
-            switch(3 * j)
-            {
-                case 3:
-                    SpatialFilterGlobal5x5<3><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
-                break;
-
-                case 6:
-                    SpatialFilterGlobal5x5<6><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
-                break;
-
-                case 12:
-                    SpatialFilterGlobal5x5<12><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
-                break;
-            }
-        }
-    }
-
-    if (0)
-    {
-        CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
-            colorBufferA,
-            depthBufferA,
+            depthBufferA, depthBufferB,
+            motionVectorBuffer,
             noiseLevelBuffer,
-            bufferDim);
-
-        UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
-        TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
-            noiseLevelBuffer,
-            noiseLevelBuffer16);
+            bufferDim, historyDim);
     }
+
+    SpatialFilter7x7<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
+        cbo,
+        colorBufferA,
+        normalBuffer,
+        depthBufferA,
+        noiseLevelBuffer16,
+        bufferDim);
+
+    CopyToHistoryColorBuffer<<<gridDim, blockDim>>>(colorBufferA, colorBufferB, bufferDim);
+
+    CalculateTileNoiseLevel<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 4, 1)>>>(
+        colorBufferA,
+        depthBufferA,
+        noiseLevelBuffer,
+        bufferDim);
+
+    TileNoiseLevel8x8to16x16<<<dim3(divRoundUp(noiseLevel16x16Dim.x, 8), divRoundUp(noiseLevel16x16Dim.y, 8), 1), dim3(8, 8, 1)>>>(
+        noiseLevelBuffer,
+        noiseLevelBuffer16);
 
     if (0)
     {
@@ -793,28 +723,28 @@ void RayTracer::draw(SurfObj* renderTarget)
             bufferDim);
     }
 
-    if (0)
+    SpatialFilterGlobal5x5<3><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
+    SpatialFilterGlobal5x5<6><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
+    SpatialFilterGlobal5x5<12><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(cbo,colorBufferA,normalBuffer,depthBufferA,noiseLevelBuffer16,bufferDim);
+
+    if (cbo.frameNum != 1)
     {
-        if (cbo.frameNum != 1)
-        {
-            TemporalFilter2 <<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
-                cbo,
-                colorBufferA, GetBuffer2D(HistoryColorBuffer),
-                normalBuffer,
-                depthBufferA, depthBufferB,
-                motionVectorBuffer,
-                noiseLevelBuffer,
-                bufferDim, historyDim);
-        }
-        CopyToHistoryColorDepthBuffer<<<gridDim, blockDim>>>(colorBufferA, depthBufferA, GetBuffer2D(HistoryColorBuffer), depthBufferB, bufferDim);
+        TemporalFilter2 <<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
+            cbo,
+            colorBufferA, GetBuffer2D(HistoryColorBuffer),
+            normalBuffer,
+            depthBufferA, depthBufferB,
+            motionVectorBuffer,
+            noiseLevelBuffer,
+            bufferDim, historyDim);
     }
+    CopyToHistoryColorDepthBuffer<<<gridDim, blockDim>>>(colorBufferA, depthBufferA, GetBuffer2D(HistoryColorBuffer), depthBufferB, bufferDim);
 
     if (0)
     {
         GpuErrorCheck(cudaDeviceSynchronize());
 	    GpuErrorCheck(cudaPeekAtLastError());
     }
-
 
     // ------------------------------- post processing -------------------------------
     // Histogram
@@ -828,17 +758,23 @@ void RayTracer::draw(SurfObj* renderTarget)
     AutoExposure<<<1, 1>>>(/*out*/d_exposure, /*in*/d_histogram, (float)(bufferSize64.x * bufferSize64.y), deltaTime);
 
     // Bloom
-    // BloomGuassian<<<dim3(divRoundUp(bufferSize4.x, 12), divRoundUp(bufferSize4.y, 12), 1), dim3(16, 16, 1)>>>(bloomBuffer4, colorBuffer4, bufferSize4, d_exposure);
-    // BloomGuassian<<<dim3(divRoundUp(bufferSize16.x, 12), divRoundUp(bufferSize16.y, 12), 1), dim3(16, 16, 1)>>>(bloomBuffer16, colorBuffer16, bufferSize16, d_exposure);
-    // Bloom<<<gridDim, blockDim>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
+    if (0)
+    {
+        BloomGuassian<<<dim3(divRoundUp(bufferSize4.x, 12), divRoundUp(bufferSize4.y, 12), 1), dim3(16, 16, 1)>>>(bloomBuffer4, colorBuffer4, bufferSize4, d_exposure);
+        BloomGuassian<<<dim3(divRoundUp(bufferSize16.x, 12), divRoundUp(bufferSize16.y, 12), 1), dim3(16, 16, 1)>>>(bloomBuffer16, colorBuffer16, bufferSize16, d_exposure);
+        Bloom<<<gridDim, blockDim>>>(colorBufferA, bloomBuffer4, bloomBuffer16, bufferDim, bufferSize4, bufferSize16);
+    }
 
     // Lens flare
-    // if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.0 && dot(sunDir, cbo.camera.dir) > 0)
-    // {
-    //     sunPos -= Float2(0.5);
-    //     sunPos.x *= (float)renderWidth / (float)renderHeight;
-    //     LensFlarePred<<<1,1>>>(depthBufferA, sunPos, sunUv, colorBufferA, bufferDim, gridDim, blockDim, bufferDim);
-    // }
+    if (0)
+    {
+        if (sunPos.x > 0 && sunPos.x < 1 && sunPos.y > 0 && sunPos.y < 1 && sunDir.y > -0.0 && dot(sunDir, cbo.camera.dir) > 0)
+        {
+            sunPos -= Float2(0.5);
+            sunPos.x *= (float)renderWidth / (float)renderHeight;
+            LensFlarePred<<<1,1>>>(depthBufferA, sunPos, sunUv, colorBufferA, bufferDim, gridDim, blockDim, bufferDim);
+        }
+    }
 
     // Tone mapping
     ToneMapping<<<gridDim, blockDim>>>(colorBufferA , bufferDim , d_exposure);
@@ -847,10 +783,13 @@ void RayTracer::draw(SurfObj* renderTarget)
     BicubicScale<<<scaleGridDim, scaleBlockDim>>>(colorBufferC, colorBufferA, outputDim, bufferDim);
 
     // Sharpening
-    // SharpeningFilter<<<scaleGridDim, scaleBlockDim>>>(colorBufferC , outputDim);
+    if (0)
+    {
+        SharpeningFilter<<<scaleGridDim, scaleBlockDim>>>(colorBufferC , outputDim);
+    }
 
     // Output
-    CopyToOutput<<<scaleGridDim, scaleBlockDim>>>(renderTarget, colorBufferC, outputDim);
+    CopyToOutput<<<scaleGridDim, scaleBlockDim>>>(renderTarget, colorBufferC, d_randGen, cbo, outputDim);
 
     #if DUMP_FRAME_NUM > 0
     if (cbo.frameNum == DUMP_FRAME_NUM)
