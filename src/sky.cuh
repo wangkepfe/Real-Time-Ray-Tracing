@@ -416,6 +416,8 @@ inline __device__ Float3 EnvLight(const Float3& raydir, const Float3& sunDir, fl
 	}
 }
 
+#define USE_HALF_PRECISION_SKY 0
+
 inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool isDiffuseRay, SurfObj skyBuffer, Float2 blueNoise)
 {
 	Float3 rayDirOrRefl = raydir;
@@ -429,11 +431,17 @@ inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool i
 
 	float u = atan2f(-rayDirOrRefl.z, -rayDirOrRefl.x) / TWO_PI + 0.5f;
 	float v = abs(rayDirOrRefl.y);
+	
+#if 0 // tex read sky
+	float4 texRead = tex2D<float4>(skyTex, u, v);
+	Float3 color = Float3(texRead.x , texRead.y, texRead.z);
+#endif
 
-	// float4 texRead = tex2D<float4>(skyTex, u, v);
-	//Float3 color = Float3(texRead.x , texRead.y, texRead.z);
-	//Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DHalf4ToFloat3ForSky, Float2(u, v), Int2(64, 16));
+#if USE_HALF_PRECISION_SKY // half precision sky
 	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DHalf4ToFloat3ForSky, Float2(u, v) + (blueNoise * 0.1f - 0.05f), Int2(64, 16));
+#else // full precision sky
+	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DFloat4ToFloat3ForSky, Float2(u, v) + (blueNoise * 0.1f - 0.05f), Int2(64, 16));
+#endif
 
 	return color * beta;
 }
@@ -476,7 +484,11 @@ __global__ void Sky(SurfObj skyBuffer, float* skyCdf, Int2 size, Float3 sunDir)
 	//color = Float3(0.8f);
 
 	// store
+	#if USE_HALF_PRECISION_SKY
 	Store2DHalf4(Float4(color, 0), skyBuffer, Int2(x, y));
+	#else
+	Store2D_float4(Float4(color, 0), skyBuffer, Int2(x, y));
+	#endif
 
 	// sky cdf
 	int i = size.x * y + x;

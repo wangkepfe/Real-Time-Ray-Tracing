@@ -3,6 +3,7 @@
 #include "fileUtils.cuh"
 #include "blueNoiseRandGenData.h"
 #include "cuda_fp16.h"
+#include "terrain.h"
 
 extern GlobalSettings* g_settings;
 
@@ -17,6 +18,33 @@ __global__ void InitBuffer(T val, SurfObj buffer, Int2 bufferSize)
 
 	surf2Dwrite(val, buffer, idx.x, idx.y, cudaBoundaryModeClamp);
 }
+
+namespace
+{
+void LoadTrianglesFromFile(std::vector<Triangle>& h_triangles, uint& triCount)
+{
+	std::string fileName = g_settings->inputMeshFileName;
+	std::ifstream infile (fileName, std::ifstream::binary);
+	if (infile.good())
+	{
+		size_t currentSize = sizeof(uint);
+		char* pTriCount = new char[currentSize];
+		infile.read(pTriCount, currentSize);
+		triCount = *reinterpret_cast<uint*>(pTriCount);
+
+		currentSize = sizeof(Triangle) * triCount;
+		char* pTrianglesRaw = new char[currentSize];
+		infile.read(pTrianglesRaw, currentSize);
+		Triangle* pTriangles = reinterpret_cast<Triangle*>(pTrianglesRaw);
+		h_triangles.assign(pTriangles, pTriangles + triCount);
+
+		infile.close();
+		std::cout << "Successfully read scene data from \"" << fileName << "\"!\n";
+	} else {
+		std::cout << "Error: Failed to read scene data from \"" << fileName << "\".\n";
+	}
+}
+} // namespace
 
 void RayTracer::init(cudaStream_t* cudaStreams)
 {
@@ -46,68 +74,51 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		// load triangles
 		std::vector<Triangle> h_triangles;
 
-		//const char* filename = "resources/models/test.dae";
-		//LoadScene(filename, h_triangles);
+		//LoadTrianglesFromFile(h_triangles, triCount);
 
-		std::string fileName = g_settings->inputMeshFileName;
-		std::ifstream infile (fileName, std::ifstream::binary);
-		if (infile.good())
-		{
-			size_t currentSize = sizeof(uint);
-			char* pTriCount = new char[currentSize];
-			infile.read(pTriCount, currentSize);
-			triCount = *reinterpret_cast<uint*>(pTriCount);
+		pTerrainGenerator = new TerrainGenerator(h_triangles);
+		pTerrainGenerator->Generate();
+		triCount = h_triangles.size();
 
-			currentSize = sizeof(Triangle) * triCount;
-			char* pTrianglesRaw = new char[currentSize];
-			infile.read(pTrianglesRaw, currentSize);
-			Triangle* pTriangles = reinterpret_cast<Triangle*>(pTrianglesRaw);
-			h_triangles.assign(pTriangles, pTriangles + triCount);
-
-			infile.close();
-			std::cout << "Successfully read scene data from \"" << fileName << "\"!\n";
-		} else {
-			std::cout << "Error: Failed to read scene data from \"" << fileName << "\".\n";
-		}
-
-		//triCount = static_cast<uint>(h_triangles.size());
-		// pad the tricount to a multiply of BatchSize
+		// pad with repeat triangles, required by update geometry
 		triCountPadded = triCount;
-		if (triCountPadded % BatchSize != 0)
+		if (triCountPadded % KernalBatchSize != 0)
 		{
-			triCountPadded += (BatchSize - triCountPadded % BatchSize);
-
+			triCountPadded += (KernalBatchSize - triCount % KernalBatchSize);
 			h_triangles.resize(triCountPadded);
-
-			// repeat the last triangle for a few times
 			for (int i = triCount; i < triCountPadded; ++i)
 			{
-				h_triangles[i] = h_triangles[triCount - 1];
+				h_triangles[i] = h_triangles[0];
 			}
 		}
 
-		GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCountPadded * sizeof(Triangle)));
-		GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCountPadded * sizeof(Triangle), cudaMemcpyHostToDevice));
+		// pad size for radix sort
+		triCountPadded2 = triCount;
+		if (triCountPadded2 % BatchSize != 0)
+		{
+			triCountPadded2 += (BatchSize - triCount % BatchSize);
+		}
 
 		// batch count
-		batchCount = triCountPadded / BatchSize;
-
-		GpuErrorCheck(cudaMalloc((void**)& batchCountArray, 1 * sizeof(uint)));
-		GpuErrorCheck(cudaMemcpy(batchCountArray, &batchCount, 1 * sizeof(uint), cudaMemcpyHostToDevice));
+		batchCount = triCountPadded2 / BatchSize;
+		assert(batchCount < BatchSize);
 
 		// triangle batch count array
 		std::vector<uint> h_triCountArray(batchCount, BatchSize);
-		h_triCountArray[batchCount - 1] = triCount - (triCountPadded - BatchSize);
+		h_triCountArray[batchCount - 1] = triCount - (triCountPadded2 - BatchSize);
 
+		// copy triangle data to gpu
+		const uint allocSize = triCountPadded * sizeof(Triangle);
+		GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCountPadded * sizeof(Triangle)));
+		GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCountPadded * sizeof(Triangle), cudaMemcpyHostToDevice));
+
+		// copy batch count to gpu
+		GpuErrorCheck(cudaMalloc((void**)& batchCountArray, 1 * sizeof(uint)));
+		GpuErrorCheck(cudaMemcpy(batchCountArray, &batchCount, 1 * sizeof(uint), cudaMemcpyHostToDevice));
+
+		// copy tri count of each batch to gpu
 		GpuErrorCheck(cudaMalloc((void**)& triCountArray, batchCount * sizeof(uint)));
 		GpuErrorCheck(cudaMemcpy(triCountArray, h_triCountArray.data(), batchCount * sizeof(uint), cudaMemcpyHostToDevice));
-
-		// pad the batch count to a multiply of KernalBatchSize
-		batchCountPadded = batchCount;
-		if (batchCountPadded % KernalBatchSize != 0)
-		{
-			batchCountPadded += (KernalBatchSize - batchCountPadded % KernalBatchSize);
-		}
 	}
 
 	// -------------------------------- bvh ---------------------------------------
@@ -118,11 +129,11 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)& aabbs, triCountPadded * sizeof(AABB)));
 
 	// morton code
-	GpuErrorCheck(cudaMalloc((void**)& morton, triCountPadded * sizeof(uint)));
-	GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCountPadded * sizeof(uint))); // init morton code to UINT_MAX
+	GpuErrorCheck(cudaMalloc((void**)& morton, triCountPadded2 * sizeof(uint)));
+	GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCountPadded2 * sizeof(uint))); // init morton code to UINT_MAX
 
 	// reorder idx
-	GpuErrorCheck(cudaMalloc((void**)& reorderIdx, triCountPadded * sizeof(uint)));
+	GpuErrorCheck(cudaMalloc((void**)& reorderIdx, triCountPadded2 * sizeof(uint)));
 
 	// bvh nodes
 	GpuErrorCheck(cudaMalloc((void**)& bvhNodes, triCountPadded * sizeof(BVHNode)));
@@ -130,7 +141,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	//------------------------------------ tlas -------------------------------------------
 
 	// aabb
-	GpuErrorCheck(cudaMalloc((void**)& tlasAabbs, BatchSize * sizeof(AABB)));
+	GpuErrorCheck(cudaMalloc((void**)& tlasAabbs, batchCount * sizeof(AABB)));
 
 	// morton code
 	GpuErrorCheck(cudaMalloc((void**)& tlasMorton, BatchSize * sizeof(uint)));
@@ -140,7 +151,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)& tlasReorderIdx, BatchSize * sizeof(uint)));
 
 	// bvh nodes
-	GpuErrorCheck(cudaMalloc((void**)& tlasBvhNodes, BatchSize * sizeof(BVHNode)));
+	GpuErrorCheck(cudaMalloc((void**)& tlasBvhNodes, batchCount * sizeof(BVHNode)));
 
 	//-------------------------------------------------------------------------------
 
@@ -152,11 +163,13 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	sceneAabbs[i++] = AABB({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f});
 
 	// sphere
+	#if RENDER_SPHERE
 	numSpheres = 2;
 	spheres    = new Sphere[numSpheres];
 	i = 0;
 	spheres[i++] = Sphere({0.0f, 1.0f, 4.0f}, 1.0f);
 	spheres[i++] = Sphere({0.0f, 1.0f, -4.0f}, 1.0f);
+	#endif
 
 	// surface materials
 	const int numMaterials     = 10;
@@ -194,24 +207,32 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	materials[i].albedo        = Float3(0.1f, 0.2f, 0.9f);
 
 	// number of objects
-	const int numObjects = triCount + numSpheres;
+	int numObjects = triCount;
+
+	#if RENDER_SPHERE
+	numObjects += numSpheres;
+	#endif
 
 	// material index
 	int* materialsIdx = new int[numObjects];
 	for (i = 0; i < triCount; ++i)
 	{
-		materialsIdx[i] = 4;
+		materialsIdx[i] = 3;
 	}
+	#if RENDER_SPHERE
 	materialsIdx[i++] = 0;
 	materialsIdx[i++] = 2;
+	#endif
 
 	// light source
+	#if RENDER_SPHERE_LIGHT
 	numSphereLights = 2;
 	sphereLights = new Sphere[numSphereLights];
 	for (i = 0; i < numSphereLights; ++i)
 	{
 		sphereLights[i] = spheres[i];
 	}
+	#endif
 
 	// constant buffer
 	cbo.frameNum = 0;
@@ -262,27 +283,41 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMemset(dumpFrameBuffer, 0, screenWidth * screenHeight * sizeof(uchar4)));
 
 	// scene
-	GpuErrorCheck(cudaMalloc((void**)& d_spheres          , numSpheres *       sizeof(Sphere)));
 	GpuErrorCheck(cudaMalloc((void**)& d_sceneAabbs       , numAabbs *         sizeof(AABB)));
 	GpuErrorCheck(cudaMalloc((void**)& d_materialsIdx     , numObjects *       sizeof(int)));
 	GpuErrorCheck(cudaMalloc((void**)& d_surfaceMaterials , numMaterials *     sizeof(SurfaceMaterial)));
+	#if RENDER_SPHERE
+	GpuErrorCheck(cudaMalloc((void**)& d_spheres          , numSpheres *       sizeof(Sphere)));
+	#endif
+	#if RENDER_SPHERE_LIGHT
 	GpuErrorCheck(cudaMalloc((void**)& d_sphereLights     , numSphereLights *  sizeof(Float4)));
+	#endif
 
-	GpuErrorCheck(cudaMemcpy(d_spheres          , spheres      , numSpheres *      sizeof(Float4)         , cudaMemcpyHostToDevice));
+	
 	GpuErrorCheck(cudaMemcpy(d_surfaceMaterials , materials    , numMaterials *    sizeof(SurfaceMaterial), cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_sceneAabbs       , sceneAabbs   , numAabbs *        sizeof(AABB)           , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_materialsIdx     , materialsIdx , numObjects *      sizeof(int)            , cudaMemcpyHostToDevice));
+
+	#if RENDER_SPHERE
+	GpuErrorCheck(cudaMemcpy(d_spheres, spheres, numSpheres * sizeof(Float4), cudaMemcpyHostToDevice));
+	#endif
+	#if RENDER_SPHERE_LIGHT
 	GpuErrorCheck(cudaMemcpy(d_sphereLights     , sphereLights , numSphereLights * sizeof(Float4)         , cudaMemcpyHostToDevice));
+	#endif
 
 	// setup scene
+	#if RENDER_SPHERE
 	d_sceneGeometry.numSpheres      = numSpheres;
 	d_sceneGeometry.spheres         = d_spheres;
+	#endif
+	#if RENDER_SPHERE_LIGHT
+	d_sceneMaterial.numSphereLights = numSphereLights;
+
+	d_sceneMaterial.sphereLights    = d_sphereLights;
+	#endif
 
 	d_sceneGeometry.numAabbs        = numAabbs;
 	d_sceneGeometry.aabbs           = d_sceneAabbs;
-
-	d_sceneMaterial.numSphereLights = numSphereLights;
-	d_sceneMaterial.sphereLights    = d_sphereLights;
 
 	d_sceneMaterial.materials       = d_surfaceMaterials;
 	d_sceneMaterial.materialsIdx    = d_materialsIdx;
@@ -320,13 +355,13 @@ void RayTracer::CameraSetup(Camera& camera)
 {
 	//cameraFocusPos = Float3(0, 1.0f, 0);
 	//camera.pos = cameraFocusPos + Float3(7.3f, 2.0f, -6.9f);
-	camera.pos = Float3(4.3f, 1.4f, -3.9f);
+	camera.pos = Float3(-2.f, 2.0f, -2.0f);
 
 	//Float3 cameraLookAtPoint = cameraFocusPos;
 	//Float3 camToObj = cameraLookAtPoint - camera.pos;
 
 	//camera.dir = normalize(camToObj);
-	camera.yaw = -M_PI / 4.0f;
+	camera.yaw = 0;
 	camera.pitch = 0;
 	camera.up  = { 0.0f, 1.0f, 0.0f };
 
@@ -351,6 +386,7 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	std::array<UInt2, Buffer2DDimCount>                    dim;
 
 	// ------------------------- Format --------------------------
+	format[FORMAT_FLOAT4] = cudaCreateChannelDesc<float4>();
 	format[FORMAT_HALF2]  = cudaCreateChannelDescHalf2();
 	format[FORMAT_HALF]   = cudaCreateChannelDescHalf1();
 	format[FORMAT_HALF4]  = cudaCreateChannelDescHalf4();
@@ -396,6 +432,8 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 
 		{ IndirectLightColorBuffer      , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
 		{ IndirectLightDirectionBuffer  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
+
+		{ SkyBuffer                     , { FORMAT_FLOAT4 , BUFFER_2D_SKY_DIM       } },
 	};
 
 	// -------------------------- Init buffer -------------------------
@@ -414,7 +452,6 @@ void RayTracer::cleanup()
 {
 	// ---------------- Destroy surface objects ----------------------
 	// triangle
-	cudaFree(triCountArray);
 	cudaFree(batchCountArray);
 
 	cudaFree(constTriangles);
@@ -453,11 +490,17 @@ void RayTracer::cleanup()
 	cudaFree(d_histogram);
 
 	// scene
-	cudaFree(d_spheres);
 	cudaFree(d_surfaceMaterials);
 	cudaFree(d_sceneAabbs);
 	cudaFree(d_materialsIdx);
+	#if RENDER_SPHERE
+	cudaFree(d_spheres);
+	delete spheres;
+	#endif
+	#if RENDER_SPHERE_LIGHT
 	cudaFree(d_sphereLights);
+	delete sphereLights;
+	#endif
 
 	cudaFree(dumpFrameBuffer);
 
@@ -466,6 +509,5 @@ void RayTracer::cleanup()
 
 	// free cpu buffer
 	delete sceneAabbs;
-	delete spheres;
-	delete sphereLights;
+	delete pTerrainGenerator;
 }

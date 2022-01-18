@@ -60,7 +60,7 @@ __device__ inline void UpdateMaterial(
 	rayState.isDiffuse = (rayState.matType == LAMBERTIAN_DIFFUSE) || (rayState.matType == MICROFACET_REFLECTION);
 }
 
-#define RAY_TRAVERSE_SPHERES 1
+#define RAY_TRAVERSE_SPHERES 0
 #define RAY_TRAVERSE_AABBS 0
 #define RAY_TRAVERSE_PLANE 1
 #define RAY_TRAVERSE_BVH 1

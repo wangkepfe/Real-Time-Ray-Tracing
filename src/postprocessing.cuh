@@ -12,6 +12,8 @@
 #define GAUSSIAN_5x5_SIGMA 1.0f
 #define GAUSSIAN_7x7_SIGMA 1.0f
 
+#define PRINT_GAUSSIAN_KERNAL 0
+
 __constant__ float cGaussian3x3[9];  // 9
 __constant__ float cGaussian5x5[25]; // 25
 __constant__ float cGaussian7x7[49]; // 49
@@ -54,7 +56,7 @@ void CalculateGaussianKernel(float* fGaussian, float sigma, int radius)
         }
         fGaussian[i] = valSum / (step * step);
     }
-	if (1)
+	if (PRINT_GAUSSIAN_KERNAL)
 	{
 		std::cout << "Gaussian " << size << "x" << size << "\n";
 		std::cout << "sigma = " << sigma << "\n";

@@ -19,7 +19,7 @@ struct  __align__(16) AABB
 	Float3 min;
 	float pad32;
 
-	__host__ __device__ AABB() : max(), min() {}
+	__host__ __device__ AABB() : max(-FLT_MAX), min(FLT_MAX) {}
 	__host__ __device__ AABB(const Float3& max, const Float3& min) : max{ max }, min{ min } {}
 
 	__host__ __device__ static AABB CreateCenterEdge(const Float3& center, float edgeLength) { return AABB(center + Float3(edgeLength / 2.0f), center - Float3(edgeLength / 2.0f)); }

@@ -4,6 +4,7 @@
 #include "linear_math.h"
 #include "bvhNode.cuh"
 
+// LCP Longest Common Prefix
 __device__ __inline__ int LCP(uint* morton, uint triCount, int m0, int j)
 {
 	int res;
@@ -26,6 +27,16 @@ __global__ void BuildLBVH (
 	uint triStart = objectId * blocksize;
 	uint triCount = triCountArray[objectId];
 
+	// For triCount == 1, TLAS is ok, BLAS is not ok: AABBCompact needs at least two triangles!!
+	if (triCount == 1)
+	{
+		bvhNodes[0].aabb = AABBCompact(aabbs[0], AABB(0, 0));
+		bvhNodes[0].idxLeft = 0;
+		bvhNodes[0].idxRight = 0;
+		bvhNodes[0].isLeftLeaf = 1;
+		bvhNodes[0].isRightLeaf = 1;
+	}
+
 	bvhNodes   += triStart;
 	aabbs      += triStart;
 	morton     += triStart;
@@ -38,6 +49,13 @@ __global__ void BuildLBVH (
 
 	__shared__ ushort parentIdx[kernelSize * perThreadBatch];
 	__shared__ uint tempIdx[kernelSize * perThreadBatch];
+
+	// Init lds!!
+	for (uint k = 0; k < perThreadBatch; ++k)
+	{
+		uint i = tid * perThreadBatch + k;
+		tempIdx[i] = 0;
+	}
 
 	for (uint k = 0; k < perThreadBatch; ++k)
 	{
@@ -89,8 +107,6 @@ __global__ void BuildLBVH (
 		}
 		int gamma = i + s * d + min(d, 0);
 
-		tempIdx[i] = 0;
-
 		// Output child pointers. the children of Ii cover the ranges [min(i, j), γ] and [γ + 1,max(i, j)]
 		if (min(i, j) == gamma)
 		{
@@ -120,106 +136,136 @@ __global__ void BuildLBVH (
 	__syncthreads();
 
 	//------------------------------------------------- bvh build ----------------------------------------------------------
-	bool isValid[perThreadBatch];
 
+	// Find valid workitems
+	bool isValid[perThreadBatch];
 	for (uint j = 0; j < perThreadBatch; ++j)
 	{
 		uint i = tid * perThreadBatch + j;
 
 		if (i >= triCount - 1)
 		{
+			// out of index
 			isValid[j] = false;
-		}
-
-		// The node with two leaves
-		if (bvhNodes[i].isLeftLeaf && bvhNodes[i].isRightLeaf)
-		{
-			bvhNodes[i].aabb = AABBCompact(aabbs[bvhNodes[i].idxLeft], aabbs[bvhNodes[i].idxRight]);
-			isValid[j] = true;
 		}
 		else
 		{
-			isValid[j] = false;
+			// We start work with nodes with two leaves
+			if (bvhNodes[i].isLeftLeaf && bvhNodes[i].isRightLeaf)
+			{
+				bvhNodes[i].aabb = AABBCompact(aabbs[bvhNodes[i].idxLeft], aabbs[bvhNodes[i].idxRight]);
+				isValid[j] = true;
+			}
+			else
+			{
+				// Otherwise no work to do
+				isValid[j] = false;
+			}
 		}
 	}
 
-	// keep merging, until top has a bvh
-	bool finished = false;
+	// early return for thread that doens't have any work to do
 	uint countValid = 0;
-	uint idx[perThreadBatch];
-
 	for (uint j = 0; j < perThreadBatch; ++j)
 	{
-		idx[j] = tid * perThreadBatch + j;
-
 		if (isValid[j])
 		{
 			countValid++;
 		}
 	}
-	finished = (countValid == 0);
+	if (countValid == 0)
+		return;
 
-	while(!finished)
+	// Set index for the workitems
+	uint idx[perThreadBatch];
+	for (uint j = 0; j < perThreadBatch; ++j)
 	{
+		idx[j] = tid * perThreadBatch + j;
+	}
+
+	// Keep merging, until top has a bvh
+	bool reachedTopNode = false;
+	while (reachedTopNode == false && countValid != 0)
+	{
+		// Reset valid workitem count
 		countValid = 0;
 
 		for (uint j = 0; j < perThreadBatch; ++j)
 		{
-			if (isValid[j])
+			if (isValid[j] == false)
 			{
-				countValid++;
+				continue;
+			}
 
-				uint i = idx[j];
+			// Add to valie workitem count
+			countValid++;
 
-				// save current node idx
-				uint thisIndex = i;
+			// Save current node idx
+			uint thisIndex = idx[j];
 
-				// go to parent node
-				i = parentIdx[i];
+			// Go to parent node
+			uint i = parentIdx[idx[j]];
 
-				idx[j] = i;
+			// Save parent node index
+			idx[j] = i;
 
-				// If the node has a leaf
-				if (bvhNodes[i].isLeftLeaf)
+			
+			// If the node has one leaf
+			if (bvhNodes[i].isLeftLeaf)
+			{
+				bvhNodes[i].aabb = AABBCompact(aabbs[bvhNodes[i].idxLeft], bvhNodes[thisIndex].aabb.GetMerged());
+				#if DEBUG_BVH_BUILD
+				printf("tid = %d, thisIndex = %d, i = %d, left is leaf\n", tid, thisIndex, i);
+				#endif
+			}
+			else if (bvhNodes[i].isRightLeaf)
+			{
+				bvhNodes[i].aabb = AABBCompact(bvhNodes[thisIndex].aabb.GetMerged(), aabbs[bvhNodes[i].idxRight]);
+				#if DEBUG_BVH_BUILD
+				printf("tid = %d, thisIndex = %d, i = %d, right is leaf\n", tid, thisIndex, i);
+				#endif
+			}
+			// If the node has two children nodes
+			else
+			{
+				// Two nodes will be here, the first one should record index and return, the second node can process
+				uint theOtherIndex = atomicCAS(&tempIdx[i], 0, thisIndex);
+
+				if (theOtherIndex == 0)
 				{
-					bvhNodes[i].aabb = AABBCompact(aabbs[bvhNodes[i].idxLeft], bvhNodes[thisIndex].aabb.GetMerged());
-
+					// The first node will read other index as zero
+					isValid[j] = false;
+					countValid--;
+					#if DEBUG_BVH_BUILD
+					printf("tid = %d, thisIndex = %d, i = %d, both node, first, return\n", tid, thisIndex, i);
+					#endif
+					continue;
 				}
-				else if (bvhNodes[i].isRightLeaf)
-				{
-					bvhNodes[i].aabb = AABBCompact(bvhNodes[thisIndex].aabb.GetMerged(), aabbs[bvhNodes[i].idxRight]);
-				}
-				// If the node has two children nodes
 				else
 				{
-					// Two nodes will be here, the first one should record index and return, the second node can process
-					uint theOtherIndex = atomicCAS(&tempIdx[i], 0, thisIndex);
-
-					if (theOtherIndex == 0)
+					// The second node processes BVH merge and continue in loop
+					if (bvhNodes[i].idxLeft == thisIndex)
 					{
-						isValid[j] = false;
-						countValid--;
+						bvhNodes[i].aabb = AABBCompact(bvhNodes[thisIndex].aabb.GetMerged(), bvhNodes[theOtherIndex].aabb.GetMerged());
 					}
 					else
 					{
-						if (bvhNodes[i].idxLeft == thisIndex)
-						{
-							bvhNodes[i].aabb = AABBCompact(bvhNodes[thisIndex].aabb.GetMerged(), bvhNodes[theOtherIndex].aabb.GetMerged());
-						}
-						else
-						{
-							bvhNodes[i].aabb = AABBCompact(bvhNodes[theOtherIndex].aabb.GetMerged(), bvhNodes[thisIndex].aabb.GetMerged());
-						}
-
-						if (i == 0)
-						{
-							finished = true;
-						}
+						bvhNodes[i].aabb = AABBCompact(bvhNodes[theOtherIndex].aabb.GetMerged(), bvhNodes[thisIndex].aabb.GetMerged());
 					}
+					#if DEBUG_BVH_BUILD
+					printf("tid = %d, thisIndex = %d, i = %d, both node, second, continue\n", tid, thisIndex, i);
+					#endif
 				}
 			}
-		}
 
-		if (!finished) finished = (countValid == 0);
+			// After processing BVH merge, check if we are at the top
+			if (i == 0)
+			{
+				reachedTopNode = true;
+			}
+		}
 	}
+	#if DEBUG_BVH_BUILD
+	printf("tid = %d, reachedTopNode = %d, countValid = %d\n", tid, reachedTopNode, countValid);
+	#endif
 }

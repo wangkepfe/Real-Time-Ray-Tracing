@@ -16,8 +16,28 @@ __device__ __inline__ bool SampleLight(
     float*                  skyCdf,
     int&                    lightIdx)
 {
+#if RENDERI_SPHERE_LIGHT
 	const int numSphereLight = sceneMaterial.numSphereLights;
 	Sphere* sphereLights = sceneMaterial.sphereLights;
+	const int sunLightIdx = numSphereLight;
+	const int envLightIdx = numSphereLight + 1;
+	for (; i < numSphereLight; ++i)
+	{
+#if 0
+		Float3 vec = sphereLights[i].center - rayState.pos;
+		float dist2 = vec.length2();
+		if (dot(normal, vec) > 0/* && dist2 < 10.0f*/)
+		{
+			indexRemap[idx++] = i; // sphere light
+		}
+#else
+		indexRemap[idx++] = i;
+#endif
+	}
+#else
+	const int sunLightIdx = 0;
+	const int envLightIdx = 1;
+#endif
 
     const Float3& normal = rayState.normal;
 
@@ -27,23 +47,6 @@ __device__ __inline__ bool SampleLight(
 	int indexRemap[TOTAL_LIGHT_MAX_COUNT] = {};
 	int i = 0;
 	int idx = 0;
-
-	const int sunLightIdx = numSphereLight;
-    const int envLightIdx = numSphereLight + 1;
-
-	for (; i < numSphereLight; ++i)
-	{
-#if 0
-		Float3 vec = sphereLights[i].center - rayState.pos;
-        float dist2 = vec.length2();
-		if (dot(normal, vec) > 0/* && dist2 < 10.0f*/)
-        {
-            indexRemap[idx++] = i; // sphere light
-        }
-#else
-        indexRemap[idx++] = i;
-#endif
-	}
 
 	indexRemap[idx++] = i++; // sun/moon light
     indexRemap[idx++] = i++; // env light
@@ -116,7 +119,7 @@ __device__ __inline__ bool SampleLight(
         float u = ((sampledSkyIdx % 64) + 0.5f) / 64;
         float v = ((sampledSkyIdx / 64) + 0.5f) / 16;
 
-        // DEBUG_PRINT(u);
+        // (u);
         // DEBUG_PRINT(v);
 
         // hemisphere projection
@@ -139,6 +142,7 @@ __device__ __inline__ bool SampleLight(
             return false;
         }
 	}
+#if RENDER_SPHERE_LIGHT
 	else
 	{
 		Sphere sphereLight = sphereLights[sampledIdx];
@@ -169,7 +173,7 @@ __device__ __inline__ bool SampleLight(
             return false;
         }
 	}
-
+#endif
     //DEBUG_PRINT(lightSampleDir);
 
 	return true;

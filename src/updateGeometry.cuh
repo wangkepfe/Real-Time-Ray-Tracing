@@ -40,7 +40,7 @@ __inline__ __device__ void WarpReduceMaxMin3f(Float3& vmax, Float3& vmin) {
 	}
 }
 
-template<uint kernelSize,          // thread number per kernel, same as LDS size, LDS-thread 1-to-1 mapping
+template<uint kernelSize,          // thread number per kernel, same as sharedAabb size, sharedAabb-thread 1-to-1 mapping
          uint perThreadBatch>      // batch process count per thread
 __global__ void UpdateSceneGeometry(
 	Triangle*    constTriangles,   // [const] reference mesh
@@ -50,6 +50,8 @@ __global__ void UpdateSceneGeometry(
 	uint*        triCountArray,
 	float        clockTime)        // for animation
 {
+	const bool applyTransform = false;
+
 	const uint blocksize = kernelSize * perThreadBatch;
 
 	uint objectId = blockIdx.x;
@@ -62,6 +64,9 @@ __global__ void UpdateSceneGeometry(
 	morton           += triStart;
 
 	__shared__ AABB sceneBoundingBox[1];
+	__shared__ AABB sharedAabb[kernelSize];
+
+	sharedAabb[threadIdx.x] = AABB();
 
 	if (threadIdx.x * perThreadBatch > triCount - 1)
 		return;
@@ -81,21 +86,24 @@ __global__ void UpdateSceneGeometry(
 	{
 		mytriangle[i] = constTriangles[idx[i]];
 
-		Float3 v1 = mytriangle[i].v1;
-		Float3 v2 = mytriangle[i].v2;
-		Float3 v3 = mytriangle[i].v3;
+		if (applyTransform)
+		{
+			Float3 v1 = mytriangle[i].v1;
+			Float3 v2 = mytriangle[i].v2;
+			Float3 v3 = mytriangle[i].v3;
 
-		v1.y += 1.2f;
-		v2.y += 1.2f;
-		v3.y += 1.2f;
+			v1.y += 1.2f;
+			v2.y += 1.2f;
+			v3.y += 1.2f;
 
-		Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
+			Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
 
-		v1 = rotMat * v1;
-		v2 = rotMat * v2;
-		v3 = rotMat * v3;
+			v1 = rotMat * v1;
+			v2 = rotMat * v2;
+			v3 = rotMat * v3;
 
-		mytriangle[i] = Triangle(v1, v2, v3);
+			mytriangle[i] = Triangle(v1, v2, v3);
+		}
 
 	#if RAY_TRIANGLE_COORDINATE_TRANSFORM
 		PreCalcTriangleCoordTrans(mytriangle[i]);
@@ -140,13 +148,13 @@ __global__ void UpdateSceneGeometry(
 	}
 
 	// ------------------------------------ reduce across threads for scene bounding box ------------------------------------
-	__shared__ AABB lds[kernelSize];
+	
 
 	// thread id: tid
 	uint tid = threadIdx.x;
 
-	// init lds with AABB of per thread batch
-	lds[tid] = currentBatchAABB;
+	// init sharedAabb with AABB of per thread batch
+	sharedAabb[tid] = currentBatchAABB;
 
 	__syncthreads();
 
@@ -156,16 +164,16 @@ __global__ void UpdateSceneGeometry(
 	{
 		if (kernelSize > stride && tid < stride && tid + stride < triCount)
 		{
-			lds[tid].min = min3f(lds[tid].min, lds[tid + stride].min);
-			lds[tid].max = max3f(lds[tid].max, lds[tid + stride].max);
+			sharedAabb[tid].min = min3f(sharedAabb[tid].min, sharedAabb[tid + stride].min);
+			sharedAabb[tid].max = max3f(sharedAabb[tid].max, sharedAabb[tid + stride].max);
 		}
 		__syncthreads();
 	}
 
 	if (tid < 32)
 	{
-		lds[tid].min = min3f(lds[tid].min, lds[tid + 32].min);
-		lds[tid].max = max3f(lds[tid].max, lds[tid + 32].max);
+		sharedAabb[tid].min = min3f(sharedAabb[tid].min, sharedAabb[tid + 32].min);
+		sharedAabb[tid].max = max3f(sharedAabb[tid].max, sharedAabb[tid + 32].max);
 	}
 
 	// Reduce inside warps
@@ -173,7 +181,7 @@ __global__ void UpdateSceneGeometry(
 
 	if (tid < 32)
 	{
-		sceneAabb = lds[tid];
+		sceneAabb = sharedAabb[tid];
 		WarpReduceMaxMin3f(sceneAabb.max, sceneAabb.min);
 	}
 	__syncthreads();
@@ -182,6 +190,10 @@ __global__ void UpdateSceneGeometry(
 	if (tid == 0)
 	{
 		sceneBoundingBox[0] = sceneAabb;
+		#if DEBUG_BVH_BUILD
+		Print("sceneAabb.min", sceneAabb.min);
+		Print("sceneAabb.max", sceneAabb.max);
+		#endif
 	}
 	__syncthreads();
 
@@ -217,6 +229,8 @@ __global__ void UpdateTLAS(
 	uint tid = threadIdx.x;
 	uint triCount = *batchCount;
 	__shared__ AABB sceneBoundingBox[1];
+	__shared__ AABB sharedAabb[kernelSize];
+	sharedAabb[tid] = AABB();
 
 	if (tid * perThreadBatch > triCount - 1)
 		return;
@@ -224,7 +238,7 @@ __global__ void UpdateTLAS(
 	// get aabb of blas
 	AABB currentAABB[perThreadBatch];
 	Float3 blasCenter[perThreadBatch];
-	AABB currentBatchAABB;
+	AABB currentBatchAABB = AABB();
 	#pragma unroll
 	for (uint i = 0; i < perThreadBatch; ++i)
 	{
@@ -253,8 +267,7 @@ __global__ void UpdateTLAS(
 	}
 
 	// get scene aabb
-	__shared__ AABB lds[kernelSize];
-	lds[tid] = currentBatchAABB;
+	sharedAabb[tid] = currentBatchAABB;
 
 	// Reduce across warps
 	__syncthreads();
@@ -263,8 +276,8 @@ __global__ void UpdateTLAS(
 	{
 		if (kernelSize > stride && tid < stride && tid + stride < triCount)
 		{
-			lds[tid].min = min3f(lds[tid].min, lds[tid + stride].min);
-			lds[tid].max = max3f(lds[tid].max, lds[tid + stride].max);
+			sharedAabb[tid].min = min3f(sharedAabb[tid].min, sharedAabb[tid + stride].min);
+			sharedAabb[tid].max = max3f(sharedAabb[tid].max, sharedAabb[tid + stride].max);
 		}
 		__syncthreads();
 	}
@@ -273,7 +286,7 @@ __global__ void UpdateTLAS(
 	AABB sceneAabb;
 	if (tid < 32)
 	{
-		sceneAabb = lds[tid];
+		sceneAabb = sharedAabb[tid];
 		WarpReduceMaxMin3f(sceneAabb.max, sceneAabb.min);
 	}
 	__syncthreads();

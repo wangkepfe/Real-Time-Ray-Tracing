@@ -218,6 +218,11 @@ struct Float3
 	__forceinline__ __host__ __device__ bool operator!=(const Float3& v) const   { return x != v.x || y != v.y || z != v.z; }
 	__forceinline__ __host__ __device__ bool operator==(const Float3& v) const   { return x == v.x && y == v.y && z == v.z; }
 
+	__forceinline__ __host__ __device__ bool operator<(const Float3& v) const    { return x < v.x; }
+	__forceinline__ __host__ __device__ bool operator<=(const Float3& v) const   { return x <= v.x; }
+	__forceinline__ __host__ __device__ bool operator>(const Float3& v) const    { return x > v.x; }
+	__forceinline__ __host__ __device__ bool operator>=(const Float3& v) const   { return x >= v.x; }
+
 	__forceinline__ __host__ __device__ float& operator[](int i)                 { return _v[i]; }
 	__forceinline__ __host__ __device__ float  operator[](int i) const           { return _v[i]; }
 
@@ -225,8 +230,28 @@ struct Float3
 	__forceinline__ __host__ __device__ float   length2() const                  { return x*x + y*y + z*z; }
 	__forceinline__ __host__ __device__ float   getmax() const                   { return max(max(x, y), z); }
 	__forceinline__ __host__ __device__ float   getmin() const                   { return min(min(x, y), z); }
+	__forceinline__ __host__ __device__ float   norm() const                     { float norm = sqrtf(x * x + y * y + z * z); return norm; }
 	__forceinline__ __host__ __device__ Float3& normalize()                      { float norm = sqrtf(x*x + y*y + z*z); x /= norm; y /= norm; z /= norm; return *this; }
 	__forceinline__ __host__ __device__ Float3  normalized() const               { float norm = sqrtf(x*x + y*y + z*z); return Float3(x / norm, y / norm, z / norm); }
+};
+
+struct Float3Hasher 
+{
+	unsigned long long operator() (const Float3& v) const 
+	{
+		union FloatToSizeT
+		{
+			FloatToSizeT(float a) : a{a} {}
+			float a;
+			unsigned long long b;
+		};
+		
+		unsigned long long h = 17;
+		h = (h * 37) ^ FloatToSizeT(v.x).b;
+		h = (h * 37) ^ FloatToSizeT(v.y).b;
+		h = (h * 37) ^ FloatToSizeT(v.z).b;
+		return h;
+	}
 };
 
 __forceinline__ __host__ __device__ Float3 operator+(float a, const Float3& v)   { return Float3(v.x + a, v.y + a, v.z + a); }

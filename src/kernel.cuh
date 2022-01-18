@@ -12,6 +12,8 @@
 #include <array>
 #include <vector>
 #include <unordered_map>
+#include <string>
+#include <fstream>
 
 #include "helper_cuda.h"
 #include "linear_math.h"
@@ -20,6 +22,8 @@
 #include "blueNoiseRandGen.h"
 #include "bvhNode.cuh"
 #include "globalSettings.h"
+
+class TerrainGenerator;
 
 #define PLANE_OBJECT_IDX 666666
 #define ENV_LIGHT_ID 9999
@@ -32,6 +36,10 @@
 #define DUMP_FRAME_NUM 100
 #define DEBUG_BVH_TRAVERSE 0
 #define DEBUG_RAY_AABB_INTERSECT 0
+#define DEBUG_BVH_BUILD 0
+
+#define RENDER_SPHERE 0
+#define RENDER_SPHERE_LIGHT 0
 
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
@@ -42,7 +50,7 @@
 // ---------------------- error handling ----------------------
 #define CheckCurandErrors(x) do { if((x)!=CURAND_STATUS_SUCCESS) { printf("Error at %s:%d\n",__FILE__,__LINE__); return EXIT_FAILURE;}} while(0)
 #define GpuErrorCheck(ans) { GpuAssert((ans), __FILE__, __LINE__); }
-inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort = false)
+inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort = true)
 {
 	if (code != cudaSuccess)
 	{
@@ -133,13 +141,16 @@ struct __align__(16) HistoryCamera
 
 struct __align__(16) SceneGeometry
 {
+	#if RENDER_SPHERE
 	Sphere*   spheres;
+	int       numSpheres;
+	#endif
+
 	AABB*     aabbs;
 	Triangle* triangles;
 	BVHNode*  bvhNodes;
 	BVHNode*  tlasBvhNodes;
 	int       numAabbs;
-	int       numSpheres;
 	int       numTriangles;
 };
 
@@ -191,9 +202,12 @@ struct __align__(16) SceneMaterial
 {
 	SurfaceMaterial* materials;
 	int*             materialsIdx;
-	Sphere*          sphereLights;
 	int              numMaterials;
+
+	#if RENDER_SPHERE_LIGHT
+	Sphere*          sphereLights;
 	int              numSphereLights;
+	#endif
 };
 
 struct __align__(16) ConstBuffer
@@ -303,6 +317,7 @@ enum Buffer2DName
 
 enum Buffer2DFormat
 {
+	FORMAT_FLOAT4,
 	FORMAT_HALF,
 	FORMAT_HALF2,
 	FORMAT_HALF4,
@@ -429,10 +444,14 @@ private:
 	ConstBuffer                 cbo;
 
 	// primitives
+	#if RENDER_SPHERE
 	Sphere*                     d_spheres;
-	AABB*                       d_sceneAabbs;
+	#endif
+	#if RENDER_SPHERE_LIGHT
 	Sphere*                     d_sphereLights;
-
+	#endif
+	AABB*                       d_sceneAabbs;
+	
 	// materials
 	SurfaceMaterial*            d_surfaceMaterials;
 	SceneMaterial               d_sceneMaterial;
@@ -473,11 +492,15 @@ private:
 
 	// cpu buffers
 	Float3                      cameraFocusPos;
-	Sphere*                     spheres;
-	Sphere*                     sphereLights;
 	AABB*                       sceneAabbs;
+	#if RENDER_SPHERE
+	Sphere*                     spheres;
 	int                         numSpheres;
+	#endif
+	#if RENDER_SPHERE_LIGHT
+	Sphere*                     sphereLights;
 	int                         numSphereLights;
+	#endif
 
 	// cpu update
 	Float2                      sunPos;
@@ -494,6 +517,7 @@ private:
 	// sizes
 	uint                        triCount;
 	uint                        triCountPadded;
+	uint                        triCountPadded2;
 	uint                        batchCount;
 	uint                        batchCountPadded;
 
@@ -517,5 +541,7 @@ private:
 
 	// debug
 	uchar4*                     dumpFrameBuffer;
+
+	TerrainGenerator*           pTerrainGenerator;
 };
 

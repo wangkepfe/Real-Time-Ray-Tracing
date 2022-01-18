@@ -446,6 +446,7 @@ void RayTracer::UpdateFrame()
     cbo.camera.resolution = Float2(renderWidth, renderHeight);
     cbo.camera.update();
 
+
     // dynamic resolution
     if (g_settings->useDynamicResolution && cbo.frameNum > 1)
     {
@@ -486,6 +487,7 @@ void RayTracer::UpdateFrame()
     // update camera
     InputControlUpdate();
 
+    
     // sun dir
     const Float3 axis = normalize(Float3(0.0f, 0.0f, 1.0f));
     const float angle = fmodf(clockTime * TWO_PI / 100.0f, TWO_PI);
@@ -495,6 +497,7 @@ void RayTracer::UpdateFrame()
     // prepare for lens flare
     sunPos = cbo.camera.WorldToScreenSpace(cbo.camera.pos + sunDir);
     sunUv = floor2(sunPos * Float2(renderWidth, renderHeight));
+    
 
     // init history camera
     if (cbo.frameNum == 1)
@@ -588,8 +591,8 @@ void RayTracer::draw(SurfObj* renderTarget)
 	GpuErrorCheck(cudaPeekAtLastError());
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("TLAS_aabbs.csv"           , tlasAabbs           , BatchSize);
-        DebugPrintFile("TLAS_morton.csv"          , tlasMorton          , BatchSize);
+        DebugPrintFile("TLAS_aabbs.csv"           , tlasAabbs           , batchCount);
+        DebugPrintFile("TLAS_morton.csv"          , tlasMorton          , batchCount);
     }
     #endif
 
@@ -599,8 +602,8 @@ void RayTracer::draw(SurfObj* renderTarget)
     #if DEBUG_FRAME > 0
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("TLAS_reorderIdx.csv"       , tlasReorderIdx      , BatchSize);
-        DebugPrintFile("TLAS_morton2.csv"          , tlasMorton          , BatchSize);
+        DebugPrintFile("TLAS_reorderIdx.csv"       , tlasReorderIdx      , batchCount);
+        DebugPrintFile("TLAS_morton2.csv"          , tlasMorton          , batchCount);
     }
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
@@ -612,7 +615,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     #if DEBUG_FRAME > 0
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("TLAS_bvhNodes.csv"       , tlasBvhNodes      , BatchSize);
+        DebugPrintFile("TLAS_bvhNodes.csv"       , tlasBvhNodes      , batchCount);
     }
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
@@ -792,7 +795,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     CopyToOutput<<<scaleGridDim, scaleBlockDim>>>(renderTarget, colorBufferC, d_randGen, cbo, outputDim);
 
     #if DUMP_FRAME_NUM > 0
-    if (cbo.frameNum == DUMP_FRAME_NUM)
+    if (cbo.frameNum == DUMP_FRAME_NUM || cbo.frameNum == DEBUG_FRAME)
     {
         // debug
 	    CopyFrameBuffer <<<scaleGridDim, scaleBlockDim>>>(dumpFrameBuffer, renderTarget, outputDim);
