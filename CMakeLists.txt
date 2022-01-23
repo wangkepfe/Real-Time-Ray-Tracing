@@ -21,7 +21,7 @@ add_executable(meshProcesor ${toolSrc})
 target_include_directories(meshProcesor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # c++
-set_target_properties(realtimeraytracing PROPERTIES CXX_STANDARD 17)
+set_target_properties(realtimeraytracing PROPERTIES CXX_STANDARD 20)
 add_definitions(-DNOMINMAX)
 
 # cuda

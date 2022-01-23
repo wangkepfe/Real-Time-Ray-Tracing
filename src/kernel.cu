@@ -3,7 +3,7 @@
 #include "geometry.cuh"
 #include "bsdf.cuh"
 #include "sampler.cuh"
-#include "common.cuh"
+#include "scan.cuh"
 #include "sky.cuh"
 #include "postprocessing.cuh"
 #include "raygen.cuh"
@@ -36,15 +36,15 @@ __device__ inline Float3 GetLightSource(ConstBuffer& cbo, RayState& rayState, Sc
         // env light
         //Float3 envLightColor = EnvLight(lightDir, cbo.sunDir, cbo.clockTime, rayState.isDiffuseRay);
         //Float3 envLightColor = Float3(0.8f);
-        if (cbo.sunDir.y > 0.0f && dot(lightDir, cbo.sunDir) > 0.99999f)
-        {
-            L0 = Float3(1.0f, 1.0f, 0.9f);
-        }
-        else if (cbo.sunDir.y < 0.0f && dot(lightDir, -cbo.sunDir) > 0.9999f)
-        {
-            L0 = Float3(0.9f, 0.95f, 1.0f) * 0.1f;
-        }
-        else
+        // if (cbo.sunDir.y > 0.0f && dot(lightDir, cbo.sunDir) > 0.99999f)
+        // {
+        //     L0 = Float3(1.0f, 1.0f, 0.9f);
+        // }
+        // else if (cbo.sunDir.y < 0.0f && dot(lightDir, -cbo.sunDir) > 0.9999f)
+        // {
+        //     L0 = Float3(0.9f, 0.95f, 1.0f) * 0.1f;
+        // }
+        // else
         {
             Float3 envLightColor = EnvLight2(lightDir, cbo.clockTime, rayState.isDiffuseRay, skyBuffer, Float2(rayState.rand.x, rayState.rand.y));
             L0 = envLightColor;
@@ -532,8 +532,9 @@ void RayTracer::draw(SurfObj* renderTarget)
     GpuErrorCheck(cudaMemset(tlasMorton, UINT_MAX, BatchSize * sizeof(uint)));
 
     // ------------------------------- Sky -------------------------------
-    Sky<<<dim3(8, 2, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyCdf, Int2(64, 16), sunDir);
-    PrefixScan <1024> <<<1, dim3(512, 1, 1), 1024 * sizeof(float)>>> (skyCdf);
+    Sky<<<dim3(SKY_WIDTH / 8, SKY_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyCdf, Int2(SKY_WIDTH, SKY_HEIGHT), sunDir);
+    // ScanSingleBlock <1024, 1, 4> <<<1, dim3(128, 1, 1), 1024 * sizeof(float)>>> (skyCdf, skyCdf);
+    Scan(skyPdf, skyCdf, skyCdfScanTmp, SKY_SIZE, SKY_SCAN_BLOCK_SIZE, 1);
 
     // ----------------------------------------------- Build bottom level BVH -------------------------------------------------
     // ------------------------------- Update Geometry -----------------------------------

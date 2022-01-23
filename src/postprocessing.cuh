@@ -3,7 +3,6 @@
 
 #include <cuda_runtime.h>
 #include "sampler.cuh"
-#include "common.cuh"
 
 #define USE_CATMULL_ROM_SAMPLER 0
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
@@ -98,6 +97,11 @@ void CalculateGaussian7x7()
 	CalculateGaussianKernel(fGaussian, GAUSSIAN_7x7_SIGMA, 3);
 	GpuErrorCheck(cudaMemcpyToSymbol(cGaussian7x7, fGaussian, sizeof(float) * kernelSize));
 	delete fGaussian;
+}
+
+__device__ __forceinline__ float GetLuma(const Float3& rgb)
+{
+	return rgb.y * 2.0f + rgb.x + rgb.z;
 }
 
 //----------------------------------------------------------------------------------------------

@@ -22,8 +22,9 @@
 #include "blueNoiseRandGen.h"
 #include "bvhNode.cuh"
 #include "globalSettings.h"
+#include "cudaError.cuh"
 
-class TerrainGenerator;
+class VoxelsGenerator;
 
 #define PLANE_OBJECT_IDX 666666
 #define ENV_LIGHT_ID 9999
@@ -36,28 +37,26 @@ class TerrainGenerator;
 #define DUMP_FRAME_NUM 100
 #define DEBUG_BVH_TRAVERSE 0
 #define DEBUG_RAY_AABB_INTERSECT 0
+#define DEBUG_RAY_AABB_INTERSECT_DETAIL 0
 #define DEBUG_BVH_BUILD 0
 
 #define RENDER_SPHERE 0
 #define RENDER_SPHERE_LIGHT 0
+
+#define MAX_TRIANGLE_COUNT_ALLOWED 1024 * 1024
+#define MIN_TRIANGLE_COUNT_ALLOWED 2
+
+#define SKY_WIDTH 2048
+#define SKY_HEIGHT 512
+#define SKY_SIZE SKY_WIDTH * SKY_HEIGHT
+#define SKY_SCAN_BLOCK_SIZE 1024
+#define SKY_SCAN_BLOCK_COUNT SKY_SIZE / SKY_SCAN_BLOCK_SIZE
 
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
 #define RandInitVec curandDirectionVectors32_t
 #define SurfObj cudaSurfaceObject_t
 #define TexObj cudaTextureObject_t
-
-// ---------------------- error handling ----------------------
-#define CheckCurandErrors(x) do { if((x)!=CURAND_STATUS_SUCCESS) { printf("Error at %s:%d\n",__FILE__,__LINE__); return EXIT_FAILURE;}} while(0)
-#define GpuErrorCheck(ans) { GpuAssert((ans), __FILE__, __LINE__); }
-inline void GpuAssert(cudaError_t code, const char* file, int line, bool abort = true)
-{
-	if (code != cudaSuccess)
-	{
-		fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-		if (abort) exit(code);
-	}
-}
 
 // ---------------------- struct ----------------------
 struct __align__(16) Camera
@@ -470,11 +469,9 @@ private:
 	Buffer2DManager             buffer2DManager;
 
 	// sky
-	static const uint           skyWidth = 64;
-	static const uint           skyHeight = 16;
-	static const uint           skySize = 1024;
-
+	float*                      skyPdf;
 	float*                      skyCdf;
+	float*                      skyCdfScanTmp;
 
 	// buffer
 	float*                      d_exposure;
@@ -542,6 +539,6 @@ private:
 	// debug
 	uchar4*                     dumpFrameBuffer;
 
-	TerrainGenerator*           pTerrainGenerator;
+	VoxelsGenerator*           pVoxelsGenerator;
 };
 

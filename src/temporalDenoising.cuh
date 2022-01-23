@@ -2,7 +2,6 @@
 
 #include "kernel.cuh"
 #include "sampler.cuh"
-#include "common.cuh"
 
 #define NOISE_THRESHOLD 3
 

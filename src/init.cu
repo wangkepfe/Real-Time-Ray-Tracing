@@ -4,6 +4,7 @@
 #include "blueNoiseRandGenData.h"
 #include "cuda_fp16.h"
 #include "terrain.h"
+#include "meshing.h"
 
 extern GlobalSettings* g_settings;
 
@@ -71,14 +72,23 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	gpuDeviceInit(0);
 
 	{
-		// load triangles
-		std::vector<Triangle> h_triangles;
+		// load triangles from mesh file
+		// std::vector<Triangle> h_triangles
+		// LoadTrianglesFromFile(h_triangles, triCount);
 
-		//LoadTrianglesFromFile(h_triangles, triCount);
+		// Generate terrain voxels
+		pVoxelsGenerator = new VoxelsGenerator();
+		pVoxelsGenerator->Generate();
 
-		pTerrainGenerator = new TerrainGenerator(h_triangles);
-		pTerrainGenerator->Generate();
+		// Convert voxels to triangle mesh
+		BlockMeshGenerator blockMeshGenerator(*pVoxelsGenerator);
+		std::vector<Triangle> h_triangles = *blockMeshGenerator.VoxelToMesh();
+
 		triCount = h_triangles.size();
+
+		// Max and min tri count supported
+		assert(triCount >= MIN_TRIANGLE_COUNT_ALLOWED);
+		assert(triCount <= MAX_TRIANGLE_COUNT_ALLOWED);
 
 		// pad with repeat triangles, required by update geometry
 		triCountPadded = triCount;
@@ -267,8 +277,14 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	//InitBuffer<<<dim3(divRoundUp(gridDim.x, 8), divRoundUp(gridDim.y, 8), 1), dim3(8, 8, 1)>>> (make_ushort1(0), GetBuffer2D(NoiseLevelBuffer), Int2(gridDim.x, gridDim.y));
 
-	GpuErrorCheck(cudaMalloc((void**)&skyCdf, skySize * sizeof(float)));
-	GpuErrorCheck(cudaMemset(skyCdf, 0, skySize * sizeof(float)));
+	GpuErrorCheck(cudaMalloc((void**)&skyCdf, SKY_SIZE * sizeof(float)));
+	GpuErrorCheck(cudaMemset(skyCdf, 0, SKY_SIZE * sizeof(float)));
+
+	GpuErrorCheck(cudaMalloc((void**)&skyPdf, SKY_SIZE * sizeof(float)));
+	GpuErrorCheck(cudaMemset(skyPdf, 0, SKY_SIZE * sizeof(float)));
+
+	GpuErrorCheck(cudaMalloc((void**)&skyCdfScanTmp, SKY_SCAN_BLOCK_COUNT * sizeof(float)));
+	GpuErrorCheck(cudaMemset(skyCdfScanTmp, 0, SKY_SCAN_BLOCK_COUNT * sizeof(float)));
 
 	// exposure
 	GpuErrorCheck(cudaMalloc((void**)& d_exposure, 4 * sizeof(float)));
@@ -404,7 +420,7 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	dim[BUFFER_2D_RENDER_DIM_64]  = bufferSize64;
 	dim[BUFFER_2D_8x8_GRID_DIM]   = UInt2(divRoundUp(renderWidth, 8u), divRoundUp(renderHeight, 8u));
 	dim[BUFFER_2D_16x16_GRID_DIM] = UInt2(divRoundUp(renderWidth, 16u), divRoundUp(renderHeight, 16u));
-	dim[BUFFER_2D_SKY_DIM]        = UInt2(64, 16);
+	dim[BUFFER_2D_SKY_DIM]        = UInt2(SKY_WIDTH, SKY_HEIGHT);
 
 	// ------------------------- Mapping --------------------------
 
@@ -483,6 +499,8 @@ void RayTracer::cleanup()
 	// sky
 	//cudaDestroyTextureObject(skyTex);
 	cudaFree(skyCdf);
+	cudaFree(skyPdf);
+	cudaFree(skyCdfScanTmp);
 
 	// --------------------- free other gpu buffer ----------------------------
 	// exposure and histogram
@@ -509,5 +527,5 @@ void RayTracer::cleanup()
 
 	// free cpu buffer
 	delete sceneAabbs;
-	delete pTerrainGenerator;
+	delete pVoxelsGenerator;
 }

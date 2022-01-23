@@ -53,7 +53,7 @@ void LoadSceneRecursive(std::vector<Triangle>& h_triangles, const aiScene* scene
 			// }
 
 			// push into list
-			if (h_triangles.size() < 1024 * 1024)
+			if (h_triangles.size() < MAX_TRIANGLE_COUNT_ALLOWED)
 			{
 				h_triangles.push_back(triangle);
 			}

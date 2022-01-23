@@ -61,3 +61,19 @@ struct Timer
     std::chrono::steady_clock::time_point currentTime;
     std::chrono::steady_clock::time_point previousTime;
 };
+
+struct ScopeTimer
+{
+    ScopeTimer(const std::string& name) : 
+        name {name}, 
+        startTime {std::chrono::high_resolution_clock::now()}
+    {}
+    ~ScopeTimer()
+    {
+        auto endTime = std::chrono::high_resolution_clock::now();
+        double deltaTime = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+        std::cout << "ScopeTimer: " << name << " takes " << deltaTime << " milliseconds.\n";
+    }
+    std::string name;
+    std::chrono::steady_clock::time_point startTime;
+};

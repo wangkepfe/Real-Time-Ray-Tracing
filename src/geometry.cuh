@@ -418,19 +418,24 @@ __device__ __forceinline__ bool RayAABBIntersect(const Float3& invRayDir, const 
     tmin = tsmaller.getmax();
 	tmax = tbigger.getmin();
 
+	#if DEBUG_RAY_AABB_INTERSECT_DETAIL
 	Int2 idx = Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	if (IS_DEBUG_PIXEL())
+	{
+		printf("RayAABBIntersect: t0s=(%f, %f, %f), t1s=(%f, %f, %f)\n", t0s.x, t0s.y, t0s.z, t1s.x, t1s.y, t1s.z);
+		printf("RayAABBIntersect: tsmaller=(%f, %f, %f), tbigger=(%f, %f, %f)\n", tsmaller.x, tsmaller.y, tsmaller.z, tbigger.x, tbigger.y, tbigger.z);
+		printf("RayAABBIntersect: tmin=%f, tmax=%f\n", tmin, tmax);
+	}
+	#endif
 
-	//if (IS_DEBUG_PIXEL())
-	//{
-		//printf("RayAABBIntersect: t0s=(%f, %f, %f), t1s=(%f, %f, %f)\n", t0s.x, t0s.y, t0s.z, t1s.x, t1s.y, t1s.z);
-		//printf("RayAABBIntersect: tsmaller=(%f, %f, %f), tbigger=(%f, %f, %f)\n", tsmaller.x, tsmaller.y, tsmaller.z, tbigger.x, tbigger.y, tbigger.z);
-		//printf("RayAABBIntersect: tmin=%f, tmax=%f\n", tmin, tmax);
-	//}
+	bool result = (tmin < tmax) && (tmax > 0);
 
-	return (tmin < tmax) && (tmin > 0);
+	tmin = max(tmin, 0.0f);
+
+	return result;
 }
 
-__device__ __forceinline__ void RayAabbPairIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABBCompact& aabbpair, bool& intersect1, bool& intersect2, bool& isClosestIntersect1)
+__device__ __forceinline__ void RayAabbPairIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABBCompact& aabbpair, bool& intersect1, bool& intersect2, float& t1, float& t2)
 {
 	AABB aabbLeft = aabbpair.GetLeftAABB();
 	AABB aabbRight = aabbpair.GetRightAABB();
@@ -441,11 +446,11 @@ __device__ __forceinline__ void RayAabbPairIntersect(const Float3& invRayDir, co
 	intersect1 = RayAABBIntersect(invRayDir, rayOrig, aabbLeft, tmin1, tmax1);
 	intersect2 = RayAABBIntersect(invRayDir, rayOrig, aabbRight, tmin2, tmax2);
 
-	isClosestIntersect1 = (tmin1 <= tmin2);
-
-	Int2 idx = Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	t1 = tmin1;
+	t2 = tmin2;
 
 	#if DEBUG_RAY_AABB_INTERSECT
+	Int2 idx = Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
 	if (IS_DEBUG_PIXEL())
 	{
 		Float3 rayDir = SafeDivide3f(Float3(1.0f), invRayDir);

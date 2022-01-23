@@ -12,10 +12,12 @@ __device__ __forceinline__ void LocalizeSample(
 {
 	Float3 w;
 
-	if (abs(n.y) < 1.0f - 1e-5f)
-		w = Float3(0, 1, 0);
-	else
+	if (abs(n.y) > 0.707)
 		w = Float3(1, 0, 0);
+	else if (abs(n.z) > 0.707)
+		w = Float3(1, 0, 0);
+	else
+		w = Float3(0, 1, 0);
 
 	u = cross(n, w);
 	v = cross(n, u);

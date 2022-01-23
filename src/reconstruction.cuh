@@ -2,7 +2,6 @@
 
 #include "kernel.cuh"
 #include "sampler.cuh"
-#include "common.cuh"
 #include "bsdf.cuh"
 
 extern __constant__ float cGaussian5x5[25];

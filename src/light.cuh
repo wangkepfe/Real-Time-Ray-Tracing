@@ -35,8 +35,8 @@ __device__ __inline__ bool SampleLight(
 #endif
 	}
 #else
-	const int sunLightIdx = 0;
-	const int envLightIdx = 1;
+    const int envLightIdx = 0;
+	//const int sunLightIdx = 0;
 #endif
 
     const Float3& normal = rayState.normal;
@@ -48,8 +48,8 @@ __device__ __inline__ bool SampleLight(
 	int i = 0;
 	int idx = 0;
 
-	indexRemap[idx++] = i++; // sun/moon light
     indexRemap[idx++] = i++; // env light
+    //indexRemap[idx++] = i++; // sun/moon light
 
 	// choose light
     float chooseLightRand = rayState.rand.x;
@@ -62,22 +62,23 @@ __device__ __inline__ bool SampleLight(
 
     //DEBUG_PRINT(sampledIdx);
 
-	if (sampledIdx == sunLightIdx)
-	{
-        Float3 moonDir = -cbo.sunDir;
-        lightSampleDir = cbo.sunDir.y > 0.0f ? cbo.sunDir : moonDir;
+	// if (sampledIdx == sunLightIdx)
+	// {
+    //     Float3 moonDir = -cbo.sunDir;
+    //     lightSampleDir = cbo.sunDir.y > 0.0f ? cbo.sunDir : moonDir;
 
-        if (dot(normal, lightSampleDir) > 0)
-        {
-            isDeltaLight   = true;
-            lightIdx = ENV_LIGHT_ID;
-        }
-        else
-        {
-            return false;
-        }
-	}
-    else if (sampledIdx == envLightIdx)
+    //     if (dot(normal, lightSampleDir) > 0)
+    //     {
+    //         isDeltaLight   = true;
+    //         lightIdx = ENV_LIGHT_ID;
+    //     }
+    //     else
+    //     {
+    //         return false;
+    //     }
+	// }
+    // else 
+    if (sampledIdx == envLightIdx)
 	{
         float maxSkyCdf = skyCdf[1023];
         float sampledSkyValue = lightSampleRand2[0] * maxSkyCdf;
@@ -116,8 +117,8 @@ __device__ __inline__ bool SampleLight(
         // DEBUG_PRINT(sampledSkyPdf);
 
         // index to 2D coordinates
-        float u = ((sampledSkyIdx % 64) + 0.5f) / 64;
-        float v = ((sampledSkyIdx / 64) + 0.5f) / 16;
+        float u = ((sampledSkyIdx % SKY_WIDTH) + 0.5f) / SKY_WIDTH;
+        float v = ((sampledSkyIdx / SKY_WIDTH) + 0.5f) / SKY_HEIGHT;
 
         // (u);
         // DEBUG_PRINT(v);

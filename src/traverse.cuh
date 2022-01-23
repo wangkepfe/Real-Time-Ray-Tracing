@@ -94,6 +94,8 @@ __device__ inline void RaySceneIntersect(
 
 	// init t with max distance
 	float t         = RayMax;
+	float t1;
+	float t2;
 
 	// init ray state
 	objectIdx       = -1;
@@ -125,8 +127,9 @@ __device__ inline void RaySceneIntersect(
 			uint blasOffset : 15;
 			uint isBlas : 1;
 			uint isLeaf : 1;
+			float t;
 		};
-		uint uint32All;
+		uint uint32All[2];
 	};
 
 	struct BvhNodeStack
@@ -137,7 +140,8 @@ __device__ inline void RaySceneIntersect(
 			stackTop = -1;
 			for (int i = 0; i < stackSize; ++i)
 			{
-				data[i].uint32All = 0;
+				data[i].uint32All[0] = 0;
+				data[i].uint32All[1] = 0;
 			}
 		}
 		#endif
@@ -157,21 +161,23 @@ __device__ inline void RaySceneIntersect(
 			return node;
 		}
 
-		__device__ void push(int _idx, int _blasOffset, int _isBlas, int _isLeaf)
+		__device__ void push(int _idx, int _blasOffset, int _isBlas, int _isLeaf, float _t)
 		{
 			++stackTop;
 			data[stackTop].idx = _idx;
 			data[stackTop].blasOffset = _blasOffset;
 			data[stackTop].isBlas = _isBlas;
 			data[stackTop].isLeaf = _isLeaf;
+			data[stackTop].t = _t;
 		}
 
-		__device__ void pop(int& _idx, int& _blasOffset, int& _isBlas, int& _isLeaf)
+		__device__ void pop(int& _idx, int& _blasOffset, int& _isBlas, int& _isLeaf, float& _t)
 		{
 			_idx = data[stackTop].idx;
 			_blasOffset = data[stackTop].blasOffset;
 			_isBlas = data[stackTop].isBlas;
 			_isLeaf = data[stackTop].isLeaf;
+			_t = data[stackTop].t;
 			--stackTop;
 		}
 
@@ -264,20 +270,28 @@ __device__ inline void RaySceneIntersect(
 					#endif
 				}
 
-				// if stack is empty, finished
-				if (bvhNodeStack.isEmpty())
+				bool finished = false;
+				do
 				{
-					#if DEBUG_BVH_TRAVERSE
-					DEBUG_PRINT_STRING("Stack empty, quit");
-					DEBUG_PRINT(objectIdx);
-					DEBUG_PRINT_BAR
-					#endif
+					// if stack is empty, finished
+					if (bvhNodeStack.isEmpty())
+					{
+						#if DEBUG_BVH_TRAVERSE
+						DEBUG_PRINT_STRING("Stack empty, quit");
+						DEBUG_PRINT(objectIdx);
+						DEBUG_PRINT_BAR
+						#endif
 
+						finished = true;
+						break;
+					}
+
+					// if not, go fetch one in stack
+					curr = bvhNodeStack.pop();
+				} while (curr.t > t); // if the one in stack is further than the closest hit, continue
+
+				if (finished)
 					break;
-				}
-
-				// if not, go fetch one in stack
-				curr = bvhNodeStack.pop();
 			}
 			else
 			{
@@ -316,7 +330,7 @@ __device__ inline void RaySceneIntersect(
 			}
 
 			// test two aabb
-			RayAabbPairIntersect(invRayDir, ray.orig, currNode.aabb, intersect1, intersect2, isClosestIntersect1);
+			RayAabbPairIntersect(invRayDir, ray.orig, currNode.aabb, intersect1, intersect2, t1, t2);
 
 			#if DEBUG_BVH_TRAVERSE
 			DEBUG_PRINT(currNode.idxLeft);
@@ -327,19 +341,27 @@ __device__ inline void RaySceneIntersect(
 
 			if (!intersect1 && !intersect2) // no hit for both sides
 			{
-				// if stack empty, quit
-				if (bvhNodeStack.isEmpty())
+				bool finished = false;
+				do
 				{
-					#if DEBUG_BVH_TRAVERSE
-					DEBUG_PRINT_STRING("Stack empty, quit");
-					DEBUG_PRINT_BAR
-					#endif
+					// if stack is empty, finished
+					if (bvhNodeStack.isEmpty())
+					{
+						#if DEBUG_BVH_TRAVERSE
+						DEBUG_PRINT_STRING("Stack empty, quit");
+						DEBUG_PRINT_BAR
+						#endif
 
+						finished = true;
+						break;
+					}
+
+					// if not, go fetch one in stack
+					curr = bvhNodeStack.pop();
+				} while (curr.t > t); // if the one in stack is further than the closest hit, continue
+
+				if (finished)
 					break;
-				}
-
-				// if not, get one from stack
-				curr = bvhNodeStack.pop();
 			}
 			else if (intersect1 && !intersect2) // left hit
 			{
@@ -389,14 +411,18 @@ __device__ inline void RaySceneIntersect(
 			{
 				int idx1, idx2;
 				bool isLeaf1, isLeaf2;
+				float tt1, tt2;
 
-				if (isClosestIntersect1)
+				if (t1 < t2)
 				{
 					// left is closer. go left next, push right to stack
 					idx2    = currNode.idxRight;
 					isLeaf2 = currNode.isRightLeaf;
 					idx1    = currNode.idxLeft;
 					isLeaf1 = currNode.isLeftLeaf;
+
+					tt1 = t1;
+					tt2 = t2;
 
 					#if DEBUG_BVH_TRAVERSE
 					if (i == cbo.bvhDebugLevel)
@@ -423,6 +449,9 @@ __device__ inline void RaySceneIntersect(
 					idx1    = currNode.idxRight;
 					isLeaf1 = currNode.isRightLeaf;
 
+					tt1 = t2;
+					tt2 = t1;
+
 					#if DEBUG_BVH_TRAVERSE
 					if (i == cbo.bvhDebugLevel)
 					{
@@ -442,7 +471,7 @@ __device__ inline void RaySceneIntersect(
 				}
 
 				// push
-				bvhNodeStack.push(idx2, curr.blasOffset, curr.isBlas, isLeaf2);
+				bvhNodeStack.push(idx2, curr.blasOffset, curr.isBlas, isLeaf2, t2);
 
 				curr.idx = idx1;
 				curr.isLeaf = isLeaf1;
