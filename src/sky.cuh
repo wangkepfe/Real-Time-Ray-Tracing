@@ -188,143 +188,11 @@ inline __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3&
 	return result;
 }
 
+
 inline __device__ Float3 GetEnvIncidentLight2(const Float3& raydir, const Float3& sunDir)
 {
-	// Quality setting
-	const int numSamplesMax = 32;
-	const int numSamplesLightMax = 32;
-
-	// Earth and atmosphere radius in meter
-	const float earthRadius = 6360.0e3f;
-	const float atmosphereRadius = 6420.0e3f;
-
-	float maxThickness = sqrt(atmosphereRadius * atmosphereRadius - earthRadius * earthRadius);
-
-	// Elevation
-	const float elevation = 0.0f;
-
-	// Sun radiance
-	const Float3 sunPower = Float3(20.0f);
-
-	// Phase function anisotropic factor
-    const float g = 0.76f;
-
-    // Scattering coefficients at sea level (meter)
-    const Float3 scatteringCoeffRayleigh = Float3(5.5e-6f, 13.0e-6f, 22.4e-6f);
-    const Float3 scatteringCoeffMie = Float3(21.0e-6f);
-	const Float3 absorptionCoeffMie = Float3(2.1e-6f);
-
-    // Thickness of the atmosphere (meter)
-    const float heightRayleigh = 8.0e3f;
-    const float heightMie = 1.2e3f;
-
-	// Distance between eye and the edge of atmosphere, which is the total path to trace
-    Ray eyeRay;
-    eyeRay.orig = Float3(0, earthRadius + elevation, 0);
-    eyeRay.dir = raydir;
-
-    Sphere atmosphereSphere;
-    atmosphereSphere.center = 0;
-    atmosphereSphere.radius = atmosphereRadius;
-
-	Sphere earthSphere;
-    earthSphere.center = 0;
-    earthSphere.radius = earthRadius;
-
-    float errorSphereRayIntersect;
-	float t = SphereRayIntersect(atmosphereSphere, eyeRay, errorSphereRayIntersect);
-
-	// Marching step
-	int numSamples = (int)(numSamplesMax * (t / maxThickness));
-    float marchStep = t / float(numSamples + 1);
-
-	// Optical depth = integral of extinction coefficient = sum()
-    float opticalDepthRayleigh = 0;
-	float opticalDepthMie = 0;
-
-	Float3 sumR = Float3(0);
-	Float3 sumM = Float3(0);
-	float marchPos = 0;
-
-    for (int i = 0; i < numSamples; i++)
-    {
-		Float3 s = eyeRay.orig + eyeRay.dir * (marchPos + 0.5f * marchStep);
-
-		Ray lightRay;
-        lightRay.orig = s;
-        lightRay.dir = sunDir;
-
-		// Current sample point height
-		float height = s.length() - earthRadius;
-
-		// Optical depth integral
-		float expHeightDeltaRayleigh = expf(-height / heightRayleigh) * marchStep;
-		float expHeightDeltaMie = expf(-height / heightMie) * marchStep;
-
-		opticalDepthRayleigh += expHeightDeltaRayleigh;
-		opticalDepthMie += expHeightDeltaMie;
-
-		// Sun ray blocked by earth
-		float t2 = SphereRayIntersect(earthSphere, lightRay, errorSphereRayIntersect);
-		if (t2 != RayMax)
-		{
-			marchPos += marchStep;
-			continue;
-		}
-
-		// Optical depth for light ray integral
-		float opticalDepthLightRayleigh = 0;
-		float opticalDepthLightMie = 0;
-
-		float t1 = SphereRayIntersect(atmosphereSphere, lightRay, errorSphereRayIntersect);
-
-		float sunLightMarchPos = 0;
-		int numSamplesLight = (int)(numSamplesLightMax * (t1 / (maxThickness * 2)));
-		float sunLightMarchStep = t1 / float(numSamplesLight + 1);
-
-		for (int i = 0; i < numSamplesLight; i++)
-		{
-			Float3 s1 = lightRay.orig + lightRay.dir * (sunLightMarchPos + 0.5f * sunLightMarchStep);
-			float height1 = s1.length() - earthRadius;
-
-			opticalDepthLightRayleigh += expf(-height1 / heightRayleigh) * sunLightMarchStep;
-			opticalDepthLightMie += expf(-height1 / heightMie) * sunLightMarchStep;
-
-			sunLightMarchPos += sunLightMarchStep;
-		}
-
-		Float3 attenuationCoeffRayleigh = scatteringCoeffRayleigh;
-		Float3 attenuationCoeffMie = scatteringCoeffMie + absorptionCoeffMie;
-
-		Float3 totalTransmittance = attenuationCoeffRayleigh * (opticalDepthRayleigh + opticalDepthLightRayleigh) + 
-		                            attenuationCoeffMie * (opticalDepthMie + opticalDepthLightMie);
-
-		Float3 attenuation = exp3f(-totalTransmittance);
-
-		Float3 scatteringCoeffIntegralRayleigh = expHeightDeltaRayleigh * scatteringCoeffRayleigh;
-		Float3 scatteringCoeffIntegralfMie = expHeightDeltaMie * scatteringCoeffMie;
-
-		sumR += scatteringCoeffIntegralRayleigh * attenuation;
-		sumM += scatteringCoeffIntegralfMie * attenuation;
-		
-		marchPos += marchStep;
-	}
-
-	// Evaluate phase functions
-	float mu = dot(eyeRay.dir, sunDir);
-    float phaseRayleigh = RayleighPhaseFunc(mu);
-	float phaseMie = MiePhaseFunc(mu, g);
-
-	Float3 result = sunPower * (sumR * phaseRayleigh + 
-	                            sumM * phaseMie);
-
-	return result;
-}
-
-inline __device__ Float3 GetEnvIncidentLight3(const Float3& raydir, const Float3& sunDir)
-{
-	int numSamples = 16;
-	int numSamplesLight = 8;
+	int numSamples = 32;
+	int numSamplesLight = 16;
 
 	// Earth and atmosphere radius in meter
 	const float earthRadius = 6360.0e3f;
@@ -345,8 +213,8 @@ inline __device__ Float3 GetEnvIncidentLight3(const Float3& raydir, const Float3
 	const Float3 absorptionCoeffMie = Float3(2.1e-6f);
 
     // Thickness of the atmosphere (meter)
-    const float heightRayleigh = 8.0e3f;
-    const float heightMie = 1.2e3f;
+    const float heightRayleigh = 20.0e3f;
+    const float heightMie = 2.0e3f;
 
 	// Distance between eye and the edge of atmosphere, which is the total path to trace
     Ray eyeRay;
@@ -448,6 +316,7 @@ inline __device__ Float3 GetEnvIncidentLight3(const Float3& raydir, const Float3
 
 	return result;
 }
+
 
 inline __device__ Float3 EqualRectMap(float u, float v)
 {
@@ -507,10 +376,13 @@ inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool i
 	Float3 color = Float3(texRead.x , texRead.y, texRead.z);
 #endif
 
+	Float2 jitterSize = Float2(0.5f) / Float2(SKY_WIDTH, SKY_HEIGHT);
+	Float2 jitter = (blueNoise * jitterSize - jitterSize * 0.5f);
+
 #if USE_HALF_PRECISION_SKY // half precision sky
-	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DHalf4ToFloat3ForSky, HemisphereUniformMap(rayDirOrRefl) + (blueNoise * 0.1f - 0.05f), Int2(SKY_WIDTH, SKY_HEIGHT));
+	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DHalf4ToFloat3ForSky, HemisphereUniformMap(rayDirOrRefl) + jitter, Int2(SKY_WIDTH, SKY_HEIGHT));
 #else // full precision sky
-	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DFloat4ToFloat3ForSky, EqualAreaMap(rayDirOrRefl)/* + (blueNoise * 0.1f - 0.05f)*/, Int2(SKY_WIDTH, SKY_HEIGHT));
+	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DFloat4ToFloat3ForSky, EqualAreaMap(rayDirOrRefl) + jitter, Int2(SKY_WIDTH, SKY_HEIGHT));
 #endif
 
 	return color * beta;
@@ -534,10 +406,10 @@ __global__ void Sky(SurfObj skyBuffer, float* skyCdf, Int2 size, Float3 sunDir)
 	Float3 color = 0;
 
 	if (sunOrMoonDir.y > -sin(Pi_over_180 * 30.0f))
-		color += GetEnvIncidentLight(rayDir, sunOrMoonDir);
+		color += GetEnvIncidentLight2(rayDir, sunOrMoonDir);
 
-	if (sunOrMoonDir.y < sin(Pi_over_180 * 30.0f))
-		color += GetEnvIncidentLight(rayDir, -sunOrMoonDir) * 0.005f;
+	// if (sunOrMoonDir.y < sin(Pi_over_180 * 30.0f))
+	// 	color += GetEnvIncidentLight2(rayDir, -sunOrMoonDir) * 0.005f;
 
 	// store
 	#if USE_HALF_PRECISION_SKY

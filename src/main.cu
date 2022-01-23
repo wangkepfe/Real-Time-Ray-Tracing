@@ -28,7 +28,6 @@
 #include <helper_cuda.h>
 #include <helper_image.h>
 #include <helper_math.h>
-//#include "linmath.h"
 
 #include "kernel.cuh"
 #include "configLoader.h"
