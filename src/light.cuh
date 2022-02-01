@@ -80,16 +80,16 @@ __device__ __inline__ bool SampleLight(
     // else 
     if (sampledIdx == envLightIdx)
 	{
-        float maxSkyCdf = skyCdf[1023];
+        float maxSkyCdf = skyCdf[SKY_SIZE - 1];
         float sampledSkyValue = lightSampleRand2[0] * maxSkyCdf;
 
         // DEBUG_PRINT(maxSkyCdf);
         // DEBUG_PRINT(sampledSkyValue);
 
         int left = 0;
-        int right = 1022;
+        int right = SKY_SIZE - 2;
         int mid;
-        for (int j = 0; j < 8; ++j)
+        while (right - left > 1)
         {
             mid = (left + right) / 2;
             float midVal = skyCdf[mid];
@@ -107,11 +107,11 @@ __device__ __inline__ bool SampleLight(
                 right = mid;
             }
         }
-        mid = (left + right) / 2;
+        mid = left;
 
         int sampledSkyIdx = mid + 1;
         float sampledSkyPdf = (skyCdf[mid + 1] - skyCdf[mid]) / maxSkyCdf; // choose 1 from 1024 tiles
-        sampledSkyPdf = sampledSkyPdf * 1024 / TWO_PI; // each tile has area 2Pi / 1024
+        sampledSkyPdf = sampledSkyPdf * SKY_SIZE / TWO_PI; // each tile has area 2Pi / 1024, pdf = 1/area = 1024 / 2Pi
 
         // DEBUG_PRINT(sampledSkyIdx);
         // DEBUG_PRINT(sampledSkyPdf);

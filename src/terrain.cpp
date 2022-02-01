@@ -18,17 +18,19 @@ void Chunk::Generate(const Perlin& perlin, float noiseScale, float baseY, float 
             noiseVal -= 0.5f;
             noiseVal = baseY + noiseVal * scaleY;
 
-            for (uint k = 0; k < kBlockDimY; ++k)
-            {   
-                if (k < noiseVal)
-                {
-                    blocks[k][i][j] = 1;
-                }
-                else
-                {
-                    break;
-                }
-            }
+            // for (uint k = 0; k < kBlockDimY; ++k)
+            // {   
+            //     if (k < noiseVal)
+            //     {
+            //         blocks[k][i][j] = 1;
+            //     }
+            //     else
+            //     {
+            //         break;
+            //     }
+            // }
+
+            blocks[0][i][j] = 1;
         }
     }
 }
@@ -54,9 +56,13 @@ uint VoxelsGenerator::GetBlockAt(uint x, uint y, uint z) const
     uint cz = z / Chunk::kBlockDim;
     z = z % Chunk::kBlockDim;
 
+    if (cx >= kChunkDim || cz >= kChunkDim || y >= Chunk::kBlockDimY)
+        return 0xFFFF;
+
     return chunks[cx][cz].blocks[y][x][z];
 }
 
+// y-, y+, x-, x+, z-, z+
 std::vector<uint> VoxelsGenerator::GetNeighborBlockAt(uint x, uint y, uint z) const
 {
     uint cx = x / Chunk::kBlockDim;
@@ -78,7 +84,7 @@ std::vector<uint> VoxelsGenerator::GetNeighborBlockAt(uint x, uint y, uint z) co
     }
 
     // y+
-    if (y == Chunk::kBlockDimY - 1)
+    if (y >= Chunk::kBlockDimY - 1)
     {
         result.push_back(0xFFFF);
     }
@@ -102,7 +108,7 @@ std::vector<uint> VoxelsGenerator::GetNeighborBlockAt(uint x, uint y, uint z) co
     }
 
     // x+
-    if (x == Chunk::kBlockDim - 1 && cx == kChunkDim - 1)
+    if ((x == Chunk::kBlockDim - 1 && cx == kChunkDim - 1) || cx >= kChunkDim)
     {
         result.push_back(0xFFFF);
     }
@@ -130,7 +136,7 @@ std::vector<uint> VoxelsGenerator::GetNeighborBlockAt(uint x, uint y, uint z) co
     }
 
     // z+
-    if (z == Chunk::kBlockDim - 1 && cz == kChunkDim - 1)
+    if ((z == Chunk::kBlockDim - 1 && cz == kChunkDim - 1) || cz >= kChunkDim)
     {
         result.push_back(0xFFFF);
     }
@@ -141,6 +147,140 @@ std::vector<uint> VoxelsGenerator::GetNeighborBlockAt(uint x, uint y, uint z) co
     else
     {
         result.push_back(chunks[cx][cz].blocks[y][x][z + 1]);
+    }
+
+    return result;
+}
+
+// (), (-x), (-y), (-x, -y), (-z), (-x, -z), (-y, -z), (-x,-y, -z)
+std::vector<uint> VoxelsGenerator::GetNeighborBlockAt2(uint x, uint y, uint z) const
+{
+    uint cx = x / Chunk::kBlockDim;
+    x = x % Chunk::kBlockDim;
+
+    uint cz = z / Chunk::kBlockDim;
+    z = z % Chunk::kBlockDim;
+
+    std::vector<uint> result;
+
+    // 0
+    if (cx >= kChunkDim || cz >= kChunkDim || y >= Chunk::kBlockDimY)
+    {
+        result.push_back(0xFFFF);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y][x][z]);
+    }
+
+    // -x
+    if (cz >= kChunkDim || (x == 0 && cx == 0) || y >= Chunk::kBlockDimY)
+    {
+        result.push_back(0xFFFF);
+    }
+    else if (x == 0)
+    {
+        result.push_back(chunks[cx - 1][cz].blocks[y][Chunk::kBlockDim - 1][z]);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y][x - 1][z]);
+    }
+
+    // -y
+    if (cx >= kChunkDim || cz >= kChunkDim || y == 0)
+    {
+        result.push_back(0xFFFF);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y - 1][x][z]);
+    }
+
+    // -x, -y
+    if (cz >= kChunkDim || (x == 0 && cx == 0) || y == 0)
+    {
+        result.push_back(0xFFFF);
+    }
+    else if (x == 0)
+    {
+        result.push_back(chunks[cx - 1][cz].blocks[y - 1][Chunk::kBlockDim - 1][z]);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y - 1][x - 1][z]);
+    }
+
+    // z-
+    if (cx >= kChunkDim || (z == 0 && cz == 0) || y >= Chunk::kBlockDimY)
+    {
+        result.push_back(0xFFFF);
+    }
+    else if (z == 0)
+    {
+        result.push_back(chunks[cx][cz - 1].blocks[y][x][Chunk::kBlockDim - 1]);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y][x][z - 1]);
+    }
+
+    // -x, -z
+    if ((x == 0 && cx == 0) || (z == 0 && cz == 0) || y >= Chunk::kBlockDimY)
+    {
+        result.push_back(0xFFFF);
+    }
+    else if (x == 0 && z == 0)
+    {
+        result.push_back(chunks[cx - 1][cz - 1].blocks[y][Chunk::kBlockDim - 1][Chunk::kBlockDim - 1]);
+    }
+    else if (x == 0 && z != 0)
+    {
+        result.push_back(chunks[cx - 1][cz].blocks[y][Chunk::kBlockDim - 1][z - 1]);
+    }
+    else if (x != 0 && z == 0)
+    {
+        result.push_back(chunks[cx][cz - 1].blocks[y][x - 1][Chunk::kBlockDim - 1]);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y][x - 1][z - 1]);
+    }
+
+    // -y, -z
+    if (cx >= kChunkDim || (z == 0 && cz == 0) || y == 0)
+    {
+        result.push_back(0xFFFF);
+    }
+    else if (z == 0)
+    {
+        result.push_back(chunks[cx][cz - 1].blocks[y - 1][x][Chunk::kBlockDim - 1]);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y - 1][x][z - 1]);
+    }
+
+    // -x, -y, -z
+    if ((x == 0 && cx == 0) || (z == 0 && cz == 0) || y == 0)
+    {
+        result.push_back(0xFFFF);
+    }
+    else if (x == 0 && z == 0)
+    {
+        result.push_back(chunks[cx - 1][cz - 1].blocks[y - 1][Chunk::kBlockDim - 1][Chunk::kBlockDim - 1]);
+    }
+    else if (x == 0 && z != 0)
+    {
+        result.push_back(chunks[cx - 1][cz].blocks[y - 1][Chunk::kBlockDim - 1][z - 1]);
+    }
+    else if (x != 0 && z == 0)
+    {
+        result.push_back(chunks[cx][cz - 1].blocks[y - 1][x - 1][Chunk::kBlockDim - 1]);
+    }
+    else
+    {
+        result.push_back(chunks[cx][cz].blocks[y - 1][x - 1][z - 1]);
     }
 
     return result;

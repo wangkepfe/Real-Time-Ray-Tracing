@@ -81,8 +81,11 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		pVoxelsGenerator->Generate();
 
 		// Convert voxels to triangle mesh
-		BlockMeshGenerator blockMeshGenerator(*pVoxelsGenerator);
-		std::vector<Triangle> h_triangles = *blockMeshGenerator.VoxelToMesh();
+		//BlockMeshGenerator blockMeshGenerator(*pVoxelsGenerator);
+		//std::vector<Triangle> h_triangles = *blockMeshGenerator.VoxelToMesh();
+
+		MarchingCubeMeshGenerator marchingCubeMeshGenerator(*pVoxelsGenerator);
+		std::vector<Triangle> h_triangles = *marchingCubeMeshGenerator.VoxelToMesh();
 
 		triCount = h_triangles.size();
 

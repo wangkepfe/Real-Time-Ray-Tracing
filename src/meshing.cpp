@@ -1,12 +1,21 @@
 #include "meshing.h"
 #include "terrain.h"
 #include "mesh.h"
+#include "fileUtils.cuh"
 #include <unordered_map>
 #include <iostream>
 
-enum class Axis
+namespace
 {
-    pX, pY, pZ, nX, nY, nZ,
+
+enum Axis
+{
+    pX = 0x1, 
+    pY = 0x2, 
+    pZ = 0x4, 
+    nX = 0x8, 
+    nY = 0x10, 
+    nZ = 0x20,
 };
 
 struct QuadFace
@@ -30,6 +39,111 @@ struct QuadFaceEqualOperator
         return a.point == b.point;
     }
 };
+
+inline bool isEmpty(uint block)
+{
+    return block == 0 || block == 0xFFFF;
+}
+
+inline bool isSolid(uint block)
+{
+    return !isEmpty(block);
+}
+
+enum class MarchingCubeType
+{
+    t1_px_py_pz,
+    t1_nx_py_pz,
+    t1_px_ny_pz,
+    t1_nx_ny_pz,
+    t1_px_py_nz,
+    t1_nx_py_nz,
+    t1_px_ny_nz,
+    t1_nx_ny_nz,
+    count,
+};
+
+inline Float3 PointRotate(const Float3& v, Axis axis, int cosTheta, int sinTheta)
+{
+    if (axis == Axis::pY)
+    {
+        return Float3(cosTheta * v.x + sinTheta * v.z , v.y, - sinTheta * v.x + cosTheta * v.z);
+    }
+    else if (axis == Axis::pX)
+    {
+        return Float3(v.x, cosTheta * v.y - sinTheta * v.z, sinTheta * v.y + cosTheta * v.z);
+    }
+    else if (axis == Axis::pZ)
+    {
+        return Float3(cosTheta * v.x - sinTheta * v.y , sinTheta * v.x + cosTheta * v.y, v.z);
+    }
+}
+
+inline void MeshRotate(std::vector<Triangle>& out, const std::vector<Triangle>& in, Axis axis, int cosTheta, int sinTheta)
+{
+    int s = in.size();
+    out.resize(s);
+    for (int i = 0; i < s; ++i)
+    {
+        out[i].v1 = PointRotate(in[i].v1, axis, cosTheta, sinTheta);
+        out[i].v2 = PointRotate(in[i].v2, axis, cosTheta, sinTheta);
+        out[i].v3 = PointRotate(in[i].v3, axis, cosTheta, sinTheta);  
+    }
+}
+
+inline Float3 PointMirror(const Float3& v, Axis axis)
+{
+    if (axis == Axis::pY)
+    {
+        return Float3(v.x, -v.y, v.z);
+    }
+    else if (axis == Axis::pX)
+    {
+        return Float3(-v.x, v.y, v.z);
+    }
+    else if (axis == Axis::pZ)
+    {
+        return Float3(v.x, v.y, -v.z);
+    }
+}
+
+inline void MeshMirror(std::vector<Triangle>& out, const std::vector<Triangle>& in, Axis axis)
+{
+    int s = in.size();
+    out.resize(s);
+    for (int i = 0; i < s; ++i)
+    {
+        out[i].v1 = PointMirror(in[i].v1, axis);
+        out[i].v2 = PointMirror(in[i].v2, axis);
+        out[i].v3 = PointMirror(in[i].v3, axis);
+    }
+}
+
+inline void MeshTraslate(std::vector<Triangle>& out, const std::vector<Triangle>& in, const Float3& t)
+{
+    int s = in.size();
+    out.resize(s);
+    for (int i = 0; i < s; ++i)
+    {
+        out[i].v1 = in[i].v1 + t;
+        out[i].v2 = in[i].v2 + t;
+        out[i].v3 = in[i].v3 + t;
+    }
+}
+
+inline void MeshScale(std::vector<Triangle>& out, const std::vector<Triangle>& in, float scale)
+{
+    int s = in.size();
+    out.resize(s);
+    for (int i = 0; i < s; ++i)
+    {
+        out[i].v1 = in[i].v1 * scale;
+        out[i].v2 = in[i].v2 * scale;
+        out[i].v3 = in[i].v3 * scale;
+    }
+}
+
+} // namespace
 
 std::shared_ptr<std::vector<Triangle>> BlockMeshGenerator::VoxelToMesh()
 {
@@ -162,4 +276,55 @@ std::shared_ptr<std::vector<Triangle>> BlockMeshGenerator::VoxelToMesh()
     mesh.to_triangles(*triangles);
 
     return triangles;
+}
+
+void MarchingCubeMeshGenerator::Init()
+{
+    marchingCubes.resize((uint)MarchingCubeType::count);
+    LoadScene("resources/models/roundcubes/1.obj", marchingCubes[0]);
+    MeshScale(marchingCubes[0], marchingCubes[0], 0.5f);
+
+    MeshMirror(marchingCubes[1], marchingCubes[0], Axis::pX);
+    MeshMirror(marchingCubes[2], marchingCubes[0], Axis::pY);
+    MeshMirror(marchingCubes[3], marchingCubes[1], Axis::pY);
+
+    MeshMirror(marchingCubes[4], marchingCubes[0], Axis::pZ);
+    MeshMirror(marchingCubes[5], marchingCubes[1], Axis::pZ);
+    MeshMirror(marchingCubes[6], marchingCubes[2], Axis::pZ);
+    MeshMirror(marchingCubes[7], marchingCubes[3], Axis::pZ);
+}
+
+std::shared_ptr<std::vector<Triangle>> MarchingCubeMeshGenerator::VoxelToMesh()
+{
+    auto triangles = std::make_shared<std::vector<Triangle>>();
+
+    for (uint i = 0; i < voxels.kMapDim + 1; ++i)
+    {
+        for (uint j = 0; j < voxels.kMapDim + 1; ++j)
+        {
+            for (uint k = 0; k < voxels.kMapDimY + 1; ++k)
+            {
+                std::vector<uint> blocks = voxels.GetNeighborBlockAt2(i, k, j);
+
+                uint blockCount = 0;
+                for (int m = 0; m < 8; ++m)
+                    blockCount += isSolid(blocks[m]);
+
+                if (blockCount == 1)
+                {
+                    for (int m = 0; m < 8; ++m)
+                    {
+                        if (isSolid(blocks[m]))
+                        {
+                            std::vector<Triangle> currentMarchingCube;
+                            MeshTraslate(currentMarchingCube, marchingCubes[m], Float3(i, k, j));
+                            triangles->insert(triangles->end(), currentMarchingCube.begin(), currentMarchingCube.end());
+                        }
+                    }   
+                }
+            }
+        }
+    }
+
+	return triangles;
 }

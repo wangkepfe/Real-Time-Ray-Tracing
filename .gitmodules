@@ -16,3 +16,6 @@
 [submodule "ext/toml"]
 	path = ext/toml
 	url = https://github.com/ToruNiina/toml11
+[submodule "ext/imgui"]
+	path = ext/imgui
+	url = https://github.com/ocornut/imgui

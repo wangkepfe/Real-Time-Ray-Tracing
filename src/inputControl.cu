@@ -55,11 +55,9 @@ void RayTracer::keyboardUpdate(int key, int scancode, int action, int mods)
 
 void RayTracer::cursorPosUpdate(double xpos, double ypos)
 {
-    static bool firstTime = true;
-
-    if (firstTime)
+    if (cursorReset)
     {
-        firstTime = false;
+		cursorReset = false;
         inputControl.xpos = xpos;
         inputControl.ypos = ypos;
         return;

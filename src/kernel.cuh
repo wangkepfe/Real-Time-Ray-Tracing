@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <string>
 #include <fstream>
+#include <cassert>
 
 #include "helper_cuda.h"
 #include "linear_math.h"
@@ -23,6 +24,7 @@
 #include "bvhNode.cuh"
 #include "globalSettings.h"
 #include "cudaError.cuh"
+#include "settingParams.h"
 
 class VoxelsGenerator;
 
@@ -34,7 +36,7 @@ class VoxelsGenerator;
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
 #define DEBUG_FRAME -1
-#define DUMP_FRAME_NUM 100
+#define DUMP_FRAME_NUM -1
 #define DEBUG_BVH_TRAVERSE 0
 #define DEBUG_RAY_AABB_INTERSECT 0
 #define DEBUG_RAY_AABB_INTERSECT_DETAIL 0
@@ -49,7 +51,7 @@ class VoxelsGenerator;
 #define SKY_WIDTH 512
 #define SKY_HEIGHT 256
 #define SKY_SIZE SKY_WIDTH * SKY_HEIGHT
-#define SKY_SCAN_BLOCK_SIZE 1024
+#define SKY_SCAN_BLOCK_SIZE 512
 #define SKY_SCAN_BLOCK_COUNT SKY_SIZE / SKY_SCAN_BLOCK_SIZE
 
 // ---------------------- type define ----------------------
@@ -404,6 +406,9 @@ public:
 	void LoadCameraFromFile(const std::string &camFileName);
 
 	SurfObj GetBuffer2D(Buffer2DName name) { return buffer2DManager.buffers[(uint)name].buffer; }
+
+	int cursorReset = 1;
+	SkyParams skyParams = {};
 
 private:
 

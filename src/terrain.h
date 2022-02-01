@@ -15,7 +15,7 @@ public:
 
     void Generate(const Perlin& perlin, float scale, float baseY, float scaleY);
 
-    static const uint kBlockDim = 2;
+    static const uint kBlockDim = 1;
     static const uint kBlockDimY = kBlockDim;
 
     uint x, z;
@@ -32,6 +32,7 @@ public:
 
     uint GetBlockAt(uint x, uint y, uint z) const;
     std::vector<uint> GetNeighborBlockAt(uint x, uint y, uint z) const;
+    std::vector<uint> GetNeighborBlockAt2(uint x, uint y, uint z) const;
 
     float noiseScale = 1.0f;
     float meshScale = 0.5f;

@@ -32,6 +32,14 @@
 #include "kernel.cuh"
 #include "configLoader.h"
 
+// imgui
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
+#include "settingParams.h"
+#include "ui.h"
+
 // global
 GlobalSettings* g_settings;
 RayTracer* g_rayTracer;
@@ -177,17 +185,42 @@ WindowsSecurityAttributes::~WindowsSecurityAttributes() {
 //    alignas(16) mat4x4 proj;
 //};
 
+enum class AppMode {
+    Gameplay,
+    Menu,
+} g_appmode = {};
+
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+    {
+		if (g_appmode == AppMode::Menu)
+		{
+			glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+			g_appmode = AppMode::Gameplay;
+			g_rayTracer->cursorReset = 1;
+		}
+		else if (g_appmode == AppMode::Gameplay)
+		{
+			glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+			g_appmode = AppMode::Menu;
+		}
+	}
+
+    if (key == GLFW_KEY_Q && action == GLFW_PRESS)
+    {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
+    }
 
     g_rayTracer->keyboardUpdate(key, scancode, action, mods);
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos)
 {
-    g_rayTracer->cursorPosUpdate(xpos, ypos);
+	if (g_appmode == AppMode::Gameplay)
+	{
+		g_rayTracer->cursorPosUpdate(xpos, ypos);
+	}
 }
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
@@ -197,7 +230,19 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 {
-    g_rayTracer->mouseButtenUpdate(button, action, mods);
+	if (g_appmode == AppMode::Gameplay)
+	{
+		g_rayTracer->mouseButtenUpdate(button, action, mods);
+	}
+}
+
+static void check_vk_result(VkResult err)
+{
+    if (err == 0)
+        return;
+    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+    if (err < 0)
+        abort();
 }
 
 // main structure
@@ -211,6 +256,7 @@ public:
         initWindow();
         initVulkan();
         initCuda();
+        initImgui();
 
         g_rayTracer = new RayTracer(g_settings->width, g_settings->height);
         g_rayTracer->init(m_streams);
@@ -284,6 +330,7 @@ private:
 
     // renderpass
     VkRenderPass                       m_renderPass;
+    VkRenderPass                       m_imguiRenderPass;
 
     // pipeline layout
     VkPipelineLayout                   m_pipelineLayout;
@@ -296,6 +343,7 @@ private:
 
     // command buffers
     std::vector<VkCommandBuffer>       m_commandBuffers;
+    VkCommandBuffer                    m_imguiCommandBuffers;
 
     // semaphores, fences
     std::vector<VkSemaphore>           m_imageAvailableSemaphores;
@@ -333,6 +381,8 @@ private:
     VkSemaphore                        m_vkUpdateCudaSemaphore;
     cudaExternalSemaphore_t            m_cudaExtCudaUpdateVkSemaphore;
     cudaExternalSemaphore_t            m_cudaExtVkUpdateCudaSemaphore;
+
+    VkPipelineCache                    m_pipelineCache;
 
     // ----------------------------------------------------------------------------------- functions
 
@@ -382,6 +432,9 @@ private:
 		createDescriptorSetLayout();
         createGraphicsPipeline();
 
+        //
+        createPipelineCache();
+
         // frame buffers
         createFramebuffers();
 
@@ -406,7 +459,7 @@ private:
         // sync objects
         createSyncObjects();
         createSyncObjectsExt();
-     }
+    }
 
     // init cuda
     void initCuda() {
@@ -427,6 +480,98 @@ private:
         cudaVkImportSemaphore();
     }
 
+    void initImgui() 
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO(); (void)io;
+        ImGui::StyleColorsDark();
+        ImGui_ImplGlfw_InitForVulkan(m_window, true);
+        ImGui_ImplVulkan_InitInfo init_info = {};
+        init_info.Instance        = m_instance;
+        init_info.PhysicalDevice  = m_physicalDevice;
+        init_info.Device          = m_device;
+        init_info.QueueFamily     = findQueueFamilies(m_physicalDevice).graphicsFamily;
+        init_info.Queue           = m_graphicsQueue;
+        init_info.PipelineCache   = m_pipelineCache;
+        init_info.DescriptorPool  = m_descriptorPool;
+        init_info.Subpass         = 0;
+        init_info.MinImageCount   = 2;
+        init_info.ImageCount      = m_swapChainImages.size();
+        init_info.MSAASamples     = VK_SAMPLE_COUNT_1_BIT;
+        init_info.Allocator       = nullptr;
+        init_info.CheckVkResultFn = check_vk_result;
+        ImGui_ImplVulkan_Init(&init_info, m_imguiRenderPass);
+        // Upload Fonts
+        {
+            // Use any command queue
+            auto command_buffer = beginSingleTimeCommands();
+            ImGui_ImplVulkan_CreateFontsTexture(command_buffer);
+            endSingleTimeCommands(command_buffer);
+            ImGui_ImplVulkan_DestroyFontUploadObjects();
+        }
+    }
+
+    void updateImgui(std::vector<VkCommandBuffer>& commandBuffers, uint32_t imageIndex)
+    {
+        if (g_appmode == AppMode::Menu)
+        {
+            // Start the Dear ImGui frame
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+
+            // Window config
+            UpdateUI(m_window);
+
+            // Rendering
+            ImGui::Render();
+            ImDrawData* draw_data = ImGui::GetDrawData();
+        
+            // cmd buffer begin info
+            VkCommandBufferBeginInfo beginInfo = {};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+            vkResetCommandBuffer(m_imguiCommandBuffers, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+
+            // begin cmd buffer
+            if (vkBeginCommandBuffer(m_imguiCommandBuffers, &beginInfo) != VK_SUCCESS)
+            {
+                throw std::runtime_error("failed to begin recording command buffer!");
+            }
+
+            // render pass info
+            VkRenderPassBeginInfo renderPassInfo = {};
+            renderPassInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            renderPassInfo.renderPass        = m_imguiRenderPass;
+            renderPassInfo.framebuffer       = m_swapChainFramebuffers[imageIndex];
+            renderPassInfo.renderArea.offset = {0, 0};
+            renderPassInfo.renderArea.extent = m_swapChainExtent;
+
+            // clear color
+            VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 0.0f};
+            renderPassInfo.clearValueCount = 1;
+            renderPassInfo.pClearValues    = &clearColor;
+
+            // cmd: begin render pass
+            vkCmdBeginRenderPass(m_imguiCommandBuffers, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            // Record dear imgui primitives into command buffer
+            ImGui_ImplVulkan_RenderDrawData(draw_data, m_imguiCommandBuffers);
+
+            // cmd: end render pass
+            vkCmdEndRenderPass(m_imguiCommandBuffers);
+
+            // end cmd buffer
+            if (vkEndCommandBuffer(m_imguiCommandBuffers) != VK_SUCCESS)
+            {
+                throw std::runtime_error("failed to record command buffer!");
+            }
+
+            commandBuffers.push_back(m_imguiCommandBuffers);
+        }
+    }
+
     // main loop
     void mainLoop()
     {
@@ -440,8 +585,10 @@ private:
     #else
         while (!glfwWindowShouldClose(m_window))
         {
-           glfwPollEvents();
-           drawFrame();
+            glfwPollEvents();
+
+            
+            drawFrame();
         }
     #endif
 
@@ -458,11 +605,13 @@ private:
 
         // 3 command buffers
         vkFreeCommandBuffers(m_device, m_commandPool, static_cast<uint32_t>(m_commandBuffers.size()), m_commandBuffers.data());
+        vkFreeCommandBuffers(m_device, m_commandPool, 1, &m_imguiCommandBuffers);
 
         // pipeline, pipeline layout, render pass
         vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
         vkDestroyRenderPass(m_device, m_renderPass, nullptr);
+        vkDestroyRenderPass(m_device, m_imguiRenderPass, nullptr);
 
         // 3 image views
         for (auto imageView : m_swapChainImageViews) {
@@ -550,6 +699,16 @@ private:
         glfwTerminate();
 
         cudaDeviceReset();
+    }
+
+    void createPipelineCache()
+    {
+        VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
+        pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+        if (vkCreatePipelineCache(m_device, &pipelineCacheCreateInfo, nullptr, &m_pipelineCache))
+        {
+            throw std::runtime_error("failed to create pipeline cache!");
+        }
     }
 
     // create instance
@@ -803,10 +962,10 @@ private:
         colorAttachmentRef.attachment = 0;
         colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        VkSubpassDescription subpass = {};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &colorAttachmentRef;
+        VkSubpassDescription subpass[1] = {};
+        subpass[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass[0].colorAttachmentCount = 1;
+        subpass[0].pColorAttachments = &colorAttachmentRef;
 
         VkSubpassDependency dependency = {};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -821,11 +980,17 @@ private:
         renderPassInfo.attachmentCount = 1;
         renderPassInfo.pAttachments = &colorAttachment;
         renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
+        renderPassInfo.pSubpasses = subpass;
         renderPassInfo.dependencyCount = 1;
         renderPassInfo.pDependencies = &dependency;
 
         if (vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create render pass!");
+        }
+
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+
+        if (vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_imguiRenderPass) != VK_SUCCESS) {
             throw std::runtime_error("failed to create render pass!");
         }
     }
@@ -1004,6 +1169,13 @@ private:
             throw std::runtime_error("failed to allocate command buffers!");
         }
 
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(m_device, &allocInfo, &m_imguiCommandBuffers) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to allocate command buffers!");
+        }
+
         // for each cmd buffer
         for (size_t i = 0; i < m_commandBuffers.size(); i++)
         {
@@ -1156,6 +1328,11 @@ private:
             VK_NULL_HANDLE                            , // VkFence        fence,
             &imageIndex                              ); // uint32_t*      pImageIndex);
 
+        std::vector<VkCommandBuffer> commandBuffers = {};
+        commandBuffers.push_back(m_commandBuffers[imageIndex]);
+
+        updateImgui(commandBuffers, imageIndex);
+
         // cpu-gpu current image fence
         if (m_imagesInFlight[imageIndex] != VK_NULL_HANDLE)
         {
@@ -1186,8 +1363,8 @@ private:
         submitInfo.waitSemaphoreCount     = 2;
         submitInfo.pWaitSemaphores        = waitSemaphores;
         submitInfo.pWaitDstStageMask      = waitStages;
-        submitInfo.commandBufferCount     = 1;
-        submitInfo.pCommandBuffers        = &m_commandBuffers[imageIndex];
+        submitInfo.commandBufferCount     = commandBuffers.size();
+        submitInfo.pCommandBuffers        = commandBuffers.data();
         submitInfo.signalSemaphoreCount   = 2;
         submitInfo.pSignalSemaphores      = signalSemaphores;
 
@@ -1880,28 +2057,27 @@ private:
     // create descriptor pool, set size of pool here
     void createDescriptorPool()
     {
-        // size of pool = size of UBO + size of texture sampler
-        std::array<VkDescriptorPoolSize, 1> poolSizes = {};
-
-        //poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        //poolSizes[0].descriptorCount = static_cast<uint32_t>(m_swapChainImages.size());
-
-        poolSizes[0].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(m_swapChainImages.size());
-
-        // pool info
-        VkDescriptorPoolCreateInfo poolInfo = {};
-
-        poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-        poolInfo.pPoolSizes    = poolSizes.data();
-        poolInfo.maxSets       = static_cast<uint32_t>(m_swapChainImages.size());
-
-        // create descriptor pool
-        if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS)
+        VkDescriptorPoolSize pool_sizes[] =
         {
-            throw std::runtime_error("failed to create descriptor pool!");
-        }
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+        };
+        VkDescriptorPoolCreateInfo pool_info = {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        pool_info.maxSets = 1000 * IM_ARRAYSIZE(pool_sizes);
+        pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
+        pool_info.pPoolSizes = pool_sizes;
+        check_vk_result(vkCreateDescriptorPool(m_device, &pool_info, nullptr, &m_descriptorPool));
     }
 
     // create descriptor set layout (binding info)

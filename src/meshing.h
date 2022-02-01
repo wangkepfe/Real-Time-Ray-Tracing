@@ -38,11 +38,11 @@ public:
 class MarchingCubeMeshGenerator : public VoxelMeshGenerator
 {
 public:
-    MarchingCubeMeshGenerator(const MarchingCubeMeshGenerator& voxels) : VoxelMeshGenerator(voxels) {}
+    MarchingCubeMeshGenerator(const VoxelsGenerator& voxels) : VoxelMeshGenerator(voxels) { Init(); }
     virtual ~MarchingCubeMeshGenerator() {}    
 
-    virtual std::shared_ptr<std::vector<Triangle>> VoxelToMesh() override
-    {
-        return nullptr;
-    }
+    virtual std::shared_ptr<std::vector<Triangle>> VoxelToMesh() override;
+private:
+    void Init();
+    std::vector<std::vector<Triangle>> marchingCubes;
 };

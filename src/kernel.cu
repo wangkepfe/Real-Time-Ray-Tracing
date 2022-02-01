@@ -15,6 +15,7 @@
 #include "temporalDenoising.cuh"
 #include "reconstruction.cuh"
 #include <iomanip>
+#include "settingParams.h"
 
 #define USE_MIS 1
 #define USE_TEXTURE_0 0
@@ -490,7 +491,7 @@ void RayTracer::UpdateFrame()
     
     // sun dir
     const Float3 axis = normalize(Float3(0.0f, 0.0f, 1.0f));
-    const float angle = fmodf(clockTime * TWO_PI / 100.0f, TWO_PI);
+    const float angle = fmodf(skyParams.timeOfDay * TWO_PI, TWO_PI);
     sunDir            = rotate3f(axis, angle, Float3(0.0f, 1.0f, 0.0f).normalized()).normalized();
     cbo.sunDir        = sunDir;
 
@@ -532,7 +533,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     GpuErrorCheck(cudaMemset(tlasMorton, UINT_MAX, BatchSize * sizeof(uint)));
 
     // ------------------------------- Sky -------------------------------
-    Sky<<<dim3(SKY_WIDTH / 8, SKY_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyCdf, Int2(SKY_WIDTH, SKY_HEIGHT), sunDir);
+    Sky<<<dim3(SKY_WIDTH / 8, SKY_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyCdf, Int2(SKY_WIDTH, SKY_HEIGHT), sunDir, skyParams);
     // ScanSingleBlock <1024, 1, 4> <<<1, dim3(128, 1, 1), 1024 * sizeof(float)>>> (skyCdf, skyCdf);
     Scan(skyPdf, skyCdf, skyCdfScanTmp, SKY_SIZE, SKY_SCAN_BLOCK_SIZE, 1);
 

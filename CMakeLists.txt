@@ -6,6 +6,17 @@ file(GLOB mySRC
     "src/*.cpp"
     "src/*.cuh"
     "src/*.cu"
+    "ext/imgui/imconfig.h"
+    "ext/imgui/imgui.h"
+    "ext/imgui/imgui.cpp"
+    "ext/imgui/imgui_internal.h"
+    "ext/imgui/imgui_widgets.cpp"
+    "ext/imgui/imgui_tables.cpp"
+    "ext/imgui/imgui_draw.cpp"
+    "ext/imgui/backends/imgui_impl_glfw.cpp"
+    "ext/imgui/backends/imgui_impl_glfw.h"
+    "ext/imgui/backends/imgui_impl_vulkan.cpp"
+    "ext/imgui/backends/imgui_impl_vulkan.h"
     "ext/TinyTIFF/tinytiffreader.cpp"
     "ext/TinyTIFF/tinytiffreader.h"
     "ext/stb/stb_image.h")
@@ -54,6 +65,8 @@ target_link_libraries(meshProcesor assimp)
 target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/stb")
 target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/TinyTIFF")
 target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/toml")
+target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui")
+target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui/backends")
 
 # copy resource
 add_custom_target(copy_resources)

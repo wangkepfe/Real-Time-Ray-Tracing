@@ -1,8 +1,8 @@
 # Config file for the render engine
 
 [resolution]
-width  = 1920
-height = 1080
+width  = 2560
+height = 1440
 
 [file]
 inputMeshFileName     = "resources/models/high-res-monkey.bin"
