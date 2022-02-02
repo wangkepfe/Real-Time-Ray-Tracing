@@ -267,8 +267,6 @@ __global__ void Sky(SurfObj skyBuffer, float* skyCdf, Int2 size, Float3 sunDir, 
 	Float3 rayDir = EqualAreaMap(u, v);
 
 	// get sky color
-	const int numSkySample = 16;
-	const int numSkyLightSample = 8;
 	Float3 sunOrMoonDir = sunDir;
 	Float3 color = 0;
 
@@ -287,5 +285,5 @@ __global__ void Sky(SurfObj skyBuffer, float* skyCdf, Int2 size, Float3 sunDir, 
 
 	// sky cdf
 	int i = size.x * y + x;
-	skyCdf[i] = color.getmax();
+	skyCdf[i] = dot(color, Float3(0.3f, 0.6f, 0.1f));
 }

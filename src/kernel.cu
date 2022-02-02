@@ -168,20 +168,7 @@ __device__ inline void DiffuseSurfaceInteraction(
     float lightSamplePdf = 1;
     int lightIdx;
 
-    bool isLightSampled = rayState.rand.z < sampleLightProbablity;
-    float sampleLightFactor = sampleLightProbablity / 0.5f;
-    float sampleSurfaceFactor = (1.0f - sampleLightProbablity) / 0.5f;
-
-    if (isLightSampled)
-    {
-        bool isLightNotOccluded = SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf, lightIdx);
-
-        if (isLightNotOccluded == false)
-        {
-            rayState.isOccluded = true;
-            return;
-        }
-    }
+    SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf, lightIdx);
 
     // surface sample
     Float3 surfSampleDir;
@@ -201,14 +188,13 @@ __device__ inline void DiffuseSurfaceInteraction(
     {
         LambertianSample(surfaceDiffuseRand2, surfSampleDir, normal);
 
-        if (isDeltaLight == false)
+        // if (isDeltaLight == false)
         {
             surfaceBsdfOverPdf = LambertianBsdfOverPdf(albedo);
             surfaceSampleBsdf = LambertianBsdf(albedo);
             surfaceSamplePdf = LambertianPdf(surfSampleDir, normal);
         }
 
-        if (isLightSampled)
         {
             lightSampleSurfaceBsdfOverPdf = LambertianBsdfOverPdf(albedo);
             lightSampleSurfaceBsdf = LambertianBsdf(albedo);
@@ -221,12 +207,11 @@ __device__ inline void DiffuseSurfaceInteraction(
         Float3 F0 = mat.F0;
         float alpha = mat.alpha;
 
-        if (isDeltaLight == false)
+        // if (isDeltaLight == false)
         {
             MacrofacetReflectionSample(surfaceDiffuseRand2, surfaceDiffuseRand22, rayDir, surfSampleDir, normal, surfaceNormal, surfaceBsdfOverPdf, surfaceSampleBsdf, surfaceSamplePdf, F0, albedo, alpha);
         }
 
-        if (isLightSampled)
         {
             MacrofacetReflection(lightSampleSurfaceBsdfOverPdf, lightSampleSurfaceBsdf, lightSampleSurfacePdf, normal, -rayDir, lightSampleDir, F0, albedo, alpha);
         }
@@ -239,94 +224,102 @@ __device__ inline void DiffuseSurfaceInteraction(
     NAN_DETECTER(surfaceSamplePdf);
     NAN_DETECTER(lightSamplePdf);
 
-    if (isLightSampled)
-    {
+    
         // -------------------------------------- MIS balance heuristic ------------------------------------------
-        if (isDeltaLight)
-        {
-            // if a delta light (or say distant/directional light, typically sun light) is sampled,
-            // no surface sample is needed since the weight for surface is zero
-            GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
+        // if (isDeltaLight)
+        // {
+        //     // if a delta light (or say distant/directional light, typically sun light) is sampled,
+        //     // no surface sample is needed since the weight for surface is zero
+        //     GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
 
-            if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
+        //     if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
 
-            float finalPdf = 1.0f * sampleLightFactor;
-			beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
+        //     float finalPdf = 1.0f * sampleLightFactor;
+		// 	beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
 
-            rayState.dir = lightSampleDir;
+        //     rayState.dir = lightSampleDir;
 
-            rayState.lightIdx = lightIdx;
-            rayState.isShadowRay = true;
-        }
-        else
-        {
-            // The full equation for MIS is L = sum w_i * f_i / pdf_i
-            // which in this case, two samples, one from surface bsdf distribution, one from light distribution
-            //
-            // L = w_surf * bsdf(dir_surf) / surfaceSamplePdf(dir_surf) + w_light * bsdf(dir_light) / surfaceSamplePdf(dir_light)
-            // where w_surf = surfaceSamplePdf(dir_surf) / (surfaceSamplePdf(dir_surf) + lightSamplePdf)
-            //       w_light = surfaceSamplePdf(dir_light) / (surfaceSamplePdf(dir_light) + lightSamplePdf)
-            //
-            // Then it'll become
-            // L = bsdf(dir_surf) / (surfaceSamplePdf(dir_surf) + lightSamplePdf) +
-            //     bsdf(dir_light) / (surfaceSamplePdf(dir_light) + lightSamplePdf)
-            //
-            // My algorithm takes bsdf as value and misWeight*pdf as weight,
-            // using the weights to choose either sample light or surface.
-            // It achieves single ray sample per surface shader with no bias to MIS balance heuristic algorithm
+        //     rayState.lightIdx = lightIdx;
+        //     rayState.isShadowRay = true;
+        // }
+        // else
+        // {
 
-            float surfaceSampleWeight = surfaceSamplePdf / (surfaceSamplePdf + lightSamplePdf * lightSampleSurfacePdf);
-            float lightSampleWeight = 1.0f - surfaceSampleWeight;
+    float powerHeuristicSurface = (surfaceSamplePdf * surfaceSamplePdf) / (surfaceSamplePdf * surfaceSamplePdf + lightSamplePdf * lightSamplePdf);
 
-            float misWeight = surfaceSampleWeight / (lightSampleWeight + surfaceSampleWeight);
+    // DEBUG_PRINT(surfaceSamplePdf);
+    // DEBUG_PRINT(lightSamplePdf);
+    // DEBUG_PRINT(powerHeuristicSurface);
 
-            float misRand = rayState.rand.w;
-
-            if (misRand < misWeight)
-            {
-                GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
-
-                // choose surface scatter sample
-                float finalPdf = surfaceSamplePdf * sampleLightFactor;
-                beta =  surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
-
-                if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
-
-                rayState.dir = surfSampleDir;
-            }
-            else
-            {
-                GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
-
-                // choose light sample
-                float finalPdf = lightSamplePdf * sampleLightFactor;
-                beta =  lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
-
-                if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
-
-                rayState.dir = lightSampleDir;
-
-                rayState.lightIdx = lightIdx;
-                rayState.isShadowRay = true;
-            }
-        }
-    }
-    else
+    if (rayState.rand.w < powerHeuristicSurface)
     {
+        if (dot(rayState.normal, surfSampleDir) < 0)
+        {
+            rayState.isOccluded = true;
+            return;
+        }
+
+        // choose surface scatter sample
         GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
 
-        // if no light sample, sample surface only
-        float finalPdf = surfaceSamplePdf * sampleSurfaceFactor;
-        beta =  surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
+        float finalPdf = surfaceSamplePdf;
+        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
+        // beta *= powerHeuristicSurface * 2;
 
         if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
 
-        rayState.dir = surfSampleDir;
+        rayState.dir = surfSampleDir;  
+
+        // DEBUG_PRINT(finalPdf);
+        // DEBUG_PRINT(cosThetaWi);
+        // DEBUG_PRINT(surfaceSampleBsdf);
+        // DEBUG_PRINT(beta);
     }
+    else
+    {
+        // choose light sample
+        if (dot(rayState.normal, lightSampleDir) < 0)
+        {
+            rayState.isOccluded = true;
+            return;
+        }
+
+        GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
+
+        float finalPdf = lightSamplePdf;
+
+        beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
+        // beta *= (1.0f - powerHeuristicSurface) * 2;
+
+        if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
+
+        rayState.dir = lightSampleDir;
+
+        rayState.lightIdx = lightIdx;
+        rayState.isShadowRay = true;
+
+        // DEBUG_PRINT(finalPdf);
+        // DEBUG_PRINT(cosThetaWi);
+        // DEBUG_PRINT(lightSampleSurfaceBsdf);
+        // DEBUG_PRINT(beta);
+    }
+        // }
+
+    // {
+    //     GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
+
+    //     // if no light sample, sample surface only
+    //     float finalPdf = surfaceSamplePdf * sampleSurfaceFactor;
+    //     beta =  surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
+
+    //     if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
+
+    //     rayState.dir = surfSampleDir;
+    // }
 
     NAN_DETECTER(beta);
 
-    rayState.dir = dot(rayState.normal, rayState.dir) < 0 ? normalize(reflect3f(rayState.dir, rayState.normal)) : rayState.dir;
+    rayState.dir = rayState.dir;
     rayState.orig = rayState.pos + rayState.offset * rayState.normal;
 }
 
@@ -533,7 +526,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     GpuErrorCheck(cudaMemset(tlasMorton, UINT_MAX, BatchSize * sizeof(uint)));
 
     // ------------------------------- Sky -------------------------------
-    Sky<<<dim3(SKY_WIDTH / 8, SKY_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyCdf, Int2(SKY_WIDTH, SKY_HEIGHT), sunDir, skyParams);
+    Sky<<<dim3(SKY_WIDTH / 8, SKY_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyPdf, Int2(SKY_WIDTH, SKY_HEIGHT), sunDir, skyParams);
     // ScanSingleBlock <1024, 1, 4> <<<1, dim3(128, 1, 1), 1024 * sizeof(float)>>> (skyCdf, skyCdf);
     Scan(skyPdf, skyCdf, skyCdfScanTmp, SKY_SIZE, SKY_SCAN_BLOCK_SIZE, 1);
 

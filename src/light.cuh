@@ -6,7 +6,7 @@
 
 #define TOTAL_LIGHT_MAX_COUNT 8
 
-__device__ __inline__ bool SampleLight(
+__device__ __inline__ void SampleLight(
     ConstBuffer&            cbo,
     RayState&               rayState,
     SceneMaterial           sceneMaterial,
@@ -110,7 +110,12 @@ __device__ __inline__ bool SampleLight(
         mid = left;
 
         int sampledSkyIdx = mid + 1;
+        // DEBUG_PRINT(mid);
+        // DEBUG_PRINT(skyCdf[mid + 1]);
+        // DEBUG_PRINT(skyCdf[mid]);
+        // DEBUG_PRINT(maxSkyCdf);
         float sampledSkyPdf = (skyCdf[mid + 1] - skyCdf[mid]) / maxSkyCdf; // choose 1 from 1024 tiles
+        // DEBUG_PRINT(sampledSkyPdf);
         sampledSkyPdf = sampledSkyPdf * SKY_SIZE / TWO_PI; // each tile has area 2Pi / 1024, pdf = 1/area = 1024 / 2Pi
 
         // DEBUG_PRINT(sampledSkyIdx);
@@ -120,7 +125,7 @@ __device__ __inline__ bool SampleLight(
         float u = ((sampledSkyIdx % SKY_WIDTH) + 0.5f) / SKY_WIDTH;
         float v = ((sampledSkyIdx / SKY_WIDTH) + 0.5f) / SKY_HEIGHT;
 
-        // (u);
+        // DEBUG_PRINT(u);
         // DEBUG_PRINT(v);
 
         // hemisphere projection
@@ -130,18 +135,10 @@ __device__ __inline__ bool SampleLight(
         Float3 rayDir(r * cosf(phi), z, r * sinf(phi));
 
         // DEBUG_PRINT(rayDir);
+        lightSampleDir = rayDir;
+        lightSamplePdf = sampledSkyPdf * lightChoosePdf;
 
-        if (dot(rayDir, normal) > 0)
-        {
-            lightSampleDir = rayDir;
-		    lightSamplePdf = sampledSkyPdf * lightChoosePdf;
-
-            lightIdx = ENV_LIGHT_ID;
-        }
-        else
-        {
-            return false;
-        }
+        lightIdx = ENV_LIGHT_ID;
 	}
 #if RENDER_SPHERE_LIGHT
 	else
@@ -176,6 +173,4 @@ __device__ __inline__ bool SampleLight(
 	}
 #endif
     //DEBUG_PRINT(lightSampleDir);
-
-	return true;
 }
