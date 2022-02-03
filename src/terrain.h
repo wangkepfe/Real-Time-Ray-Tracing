@@ -15,8 +15,8 @@ public:
 
     void Generate(const Perlin& perlin, float scale, float baseY, float scaleY);
 
-    static const uint kBlockDim = 1;
-    static const uint kBlockDimY = kBlockDim;
+    static const uint kBlockDim = 2;
+    static const uint kBlockDimY = 2;
 
     uint x, z;
     uint blocks[kBlockDimY][kBlockDim][kBlockDim] = {}; // y x z, horizontal slices

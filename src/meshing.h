@@ -44,5 +44,7 @@ public:
     virtual std::shared_ptr<std::vector<Triangle>> VoxelToMesh() override;
 private:
     void Init();
+
+    std::vector<std::vector<std::vector<int>>> idx;
     std::vector<std::vector<Triangle>> marchingCubes;
 };
