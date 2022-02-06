@@ -407,8 +407,13 @@ public:
 
 	SurfObj GetBuffer2D(Buffer2DName name) { return buffer2DManager.buffers[(uint)name].buffer; }
 
+	const Camera& GetCamera() { return cbo.camera; }
+	uint GetTriangleCount() { return triCountPadded; }
+
+	// UI render settings
 	int cursorReset = 1;
 	SkyParams skyParams = {};
+	RenderPassSettings renderPassSettings = {};
 
 private:
 
@@ -455,7 +460,7 @@ private:
 	Sphere*                     d_sphereLights;
 	#endif
 	AABB*                       d_sceneAabbs;
-	
+
 	// materials
 	SurfaceMaterial*            d_surfaceMaterials;
 	SceneMaterial               d_sceneMaterial;
@@ -544,6 +549,7 @@ private:
 	// debug
 	uchar4*                     dumpFrameBuffer;
 
+	// Voxels
 	VoxelsGenerator*           pVoxelsGenerator;
 };
 

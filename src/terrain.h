@@ -15,8 +15,8 @@ public:
 
     void Generate(const Perlin& perlin, float scale, float baseY, float scaleY);
 
-    static const uint kBlockDim = 2;
-    static const uint kBlockDimY = 2;
+    static const uint kBlockDim = 16;
+    static const uint kBlockDimY = 16;
 
     uint x, z;
     uint blocks[kBlockDimY][kBlockDim][kBlockDim] = {}; // y x z, horizontal slices
@@ -34,10 +34,10 @@ public:
     std::vector<uint> GetNeighborBlockAt(uint x, uint y, uint z) const;
     std::vector<uint> GetNeighborBlockAt2(uint x, uint y, uint z) const;
 
-    float noiseScale = 1.0f;
+    float noiseScale = 2.0f;
     float meshScale = 0.5f;
-    float baseY = Chunk::kBlockDimY / 2;
-    float scaleY = Chunk::kBlockDimY / 2;
+    float baseY = Chunk::kBlockDimY / 2.0f;
+    float scaleY = Chunk::kBlockDimY / 2.0f;
 
     static const uint kChunkDim = 1;
     static const uint kMapDim = kChunkDim * Chunk::kBlockDim;

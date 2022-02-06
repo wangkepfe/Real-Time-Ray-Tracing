@@ -4,37 +4,44 @@
 
 void Chunk::Generate(const Perlin& perlin, float noiseScale, float baseY, float scaleY)
 {
-    // for (uint i = 0; i < kBlockDim; ++i)
-    // {
-    //     for (uint j = 0; j < kBlockDim; ++j)
-    //     {
-    //         float nx = (float)(x * kBlockDim + i);
-	// 		float nz = (float)(z * kBlockDim + j);
+    for (uint i = 0; i < kBlockDim; ++i)
+    {
+        for (uint j = 0; j < kBlockDim; ++j)
+        {
+            float nx = (float)(x * kBlockDim + i);
+			float nz = (float)(z * kBlockDim + j);
 
-    //         nx *= noiseScale / (float)kBlockDim;
-    //         nz *= noiseScale / (float)kBlockDim;
+            nx *= noiseScale / (float)kBlockDim;
+            nz *= noiseScale / (float)kBlockDim;
 
-    //         float noiseVal = perlin.noise3D(nx, nz, 0.8f);
-    //         noiseVal -= 0.5f;
-    //         noiseVal = baseY + noiseVal * scaleY;
+            float noiseVal = perlin.noise3D(nx, nz, 0.5f);
+            noiseVal -= 0.5f;
+            noiseVal *= 1.5f;
+            noiseVal = baseY + noiseVal * scaleY;
 
-    //         for (uint k = 0; k < kBlockDimY; ++k)
-    //         {   
-    //             if (k < noiseVal)
-    //             {
-    //                 blocks[k][i][j] = 1;
-    //             }
-    //             else
-    //             {
-    //                 break;
-    //             }
-    //         }
-    //     }
-    // }
+            for (uint k = 0; k < kBlockDimY; ++k)
+            {
+                if (k < noiseVal)
+                {
+                    blocks[k][i][j] = 1;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+    }
 
-    blocks[0][0][0] = 1;
-    blocks[0][0][1] = 1;
-    blocks[0][1][0] = 1;
+    // blocks[1][0][0] = 0;
+    // blocks[1][1][0] = 1;
+    // blocks[1][0][1] = 1;
+    // blocks[1][1][1] = 1;
+
+    // blocks[2][0][0] = 1;
+    // blocks[2][0][1] = 1;
+    // blocks[2][1][0] = 1;
+    // blocks[2][1][1] = 0;
 }
 
 void VoxelsGenerator::Generate()
@@ -96,7 +103,7 @@ std::vector<uint> VoxelsGenerator::GetNeighborBlockAt(uint x, uint y, uint z) co
     }
 
     // x-
-    if (x == 0 && cx == 0) 
+    if (x == 0 && cx == 0)
     {
         result.push_back(0xFFFF);
     }
@@ -124,7 +131,7 @@ std::vector<uint> VoxelsGenerator::GetNeighborBlockAt(uint x, uint y, uint z) co
     }
 
     // z-
-    if (z == 0 && cz == 0) 
+    if (z == 0 && cz == 0)
     {
         result.push_back(0xFFFF);
     }

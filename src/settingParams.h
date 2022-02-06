@@ -1,8 +1,12 @@
 #pragma once
 
+#include <vector>
+#include <utility>
+#include <string>
+
 struct Float3;
 
-enum class MiePhaseFunctionType 
+enum class MiePhaseFunctionType
 {
 	HenyeyGreenstein,
 	Mie,
@@ -39,7 +43,39 @@ struct SkyParams
 	float g = 0.76;
 	float aerosolThickness = 1200.0f;
 	MiePhaseFunctionType miePhaseFuncType = MiePhaseFunctionType::Mie;
-	
+
 	// other
 	int customData = 0;
+};
+
+struct RenderPassSettings
+{
+	std::vector<std::pair<bool*, std::string>> GetValueList()
+	{
+		return {
+			{ &enableDenoiseReconstruct , "Enable Denoise Reconstruct"  },
+			{ &enableTemporalDenoising  , "Enable Temporal Denoising"   },
+			{ &enableLocalSpatialFilter , "Enable Local SpatialFilter " },
+			{ &enableNoiseLevelVisualize, "Enable Noise Level Visualize"},
+			{ &enableWideSpatialFilter  , "Enable Wide Spatial Filter"  },
+			{ &enableTemporalDenoising2 , "Enable Temporal Denoising 2" },
+			{ &enablePostProcess        , "Enable Post Process"         },
+			{ &enableBloomEffect        , "Enable Bloom Effect"         },
+			{ &enableLensFlare          , "Enable Lens Flare"           },
+			{ &enableToneMapping        , "Enable Tone Mapping"         },
+			{ &enableSharpening         , "Enable Sharpening"           }
+		};
+	}
+
+	bool enableDenoiseReconstruct  = false;
+	bool enableTemporalDenoising   = true;
+	bool enableLocalSpatialFilter  = true;
+	bool enableNoiseLevelVisualize = false;
+	bool enableWideSpatialFilter   = true;
+	bool enableTemporalDenoising2  = true;
+	bool enablePostProcess         = true;
+	bool enableBloomEffect         = false;
+	bool enableLensFlare           = false;
+	bool enableToneMapping         = true;
+	bool enableSharpening          = false;
 };

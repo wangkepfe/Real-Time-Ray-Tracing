@@ -12,7 +12,7 @@
 #define RAY_TRIANGLE_COORDINATE_TRANSFORM 0
 
 #define RAY_TRIANGLE_CULLING 0
-#define PRE_CALU_TRIANGLE_COORD_TRANS_OPT 0
+#define PRE_CALU_TRIANGLE_COORD_TRANS_OPT 1
 
 // ------------------------------ Sphere Ray Intersect ------------------------------------
 // ray/sphere intersection. returns distance, RayMax if no intersection.

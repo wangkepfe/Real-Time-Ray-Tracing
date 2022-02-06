@@ -45,12 +45,12 @@ void LoadSceneRecursive(std::vector<Triangle>& h_triangles, const aiScene* scene
 			Triangle triangle(VecTypeConv(v1), VecTypeConv(v2), VecTypeConv(v3));
 
 			// set normals
-			// if (mesh->HasNormals())
-			// {
-			// 	triangle.n1 = VecTypeConv(mesh->mNormals[face.mIndices[0]]);
-			// 	triangle.n2 = VecTypeConv(mesh->mNormals[face.mIndices[1]]);
-			// 	triangle.n3 = VecTypeConv(mesh->mNormals[face.mIndices[2]]);
-			// }
+			if (mesh->HasNormals())
+			{
+				triangle.n1 = VecTypeConv(mesh->mNormals[face.mIndices[0]]);
+				triangle.n2 = VecTypeConv(mesh->mNormals[face.mIndices[1]]);
+				triangle.n3 = VecTypeConv(mesh->mNormals[face.mIndices[2]]);
+			}
 
 			// push into list
 			if (h_triangles.size() < MAX_TRIANGLE_COUNT_ALLOWED)

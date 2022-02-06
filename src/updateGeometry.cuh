@@ -86,24 +86,24 @@ __global__ void UpdateSceneGeometry(
 	{
 		mytriangle[i] = constTriangles[idx[i]];
 
-		if (applyTransform)
-		{
-			Float3 v1 = mytriangle[i].v1;
-			Float3 v2 = mytriangle[i].v2;
-			Float3 v3 = mytriangle[i].v3;
+		// if (applyTransform)
+		// {
+		// 	Float3 v1 = mytriangle[i].v1;
+		// 	Float3 v2 = mytriangle[i].v2;
+		// 	Float3 v3 = mytriangle[i].v3;
 
-			v1.y += 1.2f;
-			v2.y += 1.2f;
-			v3.y += 1.2f;
+		// 	v1.y += 1.2f;
+		// 	v2.y += 1.2f;
+		// 	v3.y += 1.2f;
 
-			Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
+		// 	Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
 
-			v1 = rotMat * v1;
-			v2 = rotMat * v2;
-			v3 = rotMat * v3;
+		// 	v1 = rotMat * v1;
+		// 	v2 = rotMat * v2;
+		// 	v3 = rotMat * v3;
 
-			mytriangle[i] = Triangle(v1, v2, v3);
-		}
+		// 	mytriangle[i] = Triangle(v1, v2, v3);
+		// }
 
 	#if RAY_TRIANGLE_COORDINATE_TRANSFORM
 		PreCalcTriangleCoordTrans(mytriangle[i]);
@@ -148,7 +148,7 @@ __global__ void UpdateSceneGeometry(
 	}
 
 	// ------------------------------------ reduce across threads for scene bounding box ------------------------------------
-	
+
 
 	// thread id: tid
 	uint tid = threadIdx.x;

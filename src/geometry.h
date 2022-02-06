@@ -46,6 +46,11 @@ struct __align__(16) Triangle
 	Float3 v2; float w2;
 	Float3 v3; float w3;
 	Float3 v4; float w4;
+
+	Float3 n1; float u1;
+	Float3 n2; float u2;
+	Float3 n3; float u3;
+	Float3 n4; float u4;
 };
 
 struct __align__(16) AABBCompact

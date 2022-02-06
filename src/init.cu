@@ -312,7 +312,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)& d_sphereLights     , numSphereLights *  sizeof(Float4)));
 	#endif
 
-	
+
 	GpuErrorCheck(cudaMemcpy(d_surfaceMaterials , materials    , numMaterials *    sizeof(SurfaceMaterial), cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_sceneAabbs       , sceneAabbs   , numAabbs *        sizeof(AABB)           , cudaMemcpyHostToDevice));
 	GpuErrorCheck(cudaMemcpy(d_materialsIdx     , materialsIdx , numObjects *      sizeof(int)            , cudaMemcpyHostToDevice));

@@ -240,7 +240,6 @@ __device__ inline void RaySceneIntersect(
 
 					#if USE_INTERPOLATED_FAKE_NORMAL
 					fakeNormal = normalize(tri.n1 * (1.0f - uv.x - uv.y) + tri.n2 * uv.x + tri.n3 * uv.y);
-					fakeNormal = dot(intersectNormal, fakeNormal) < 0 ? intersectNormal : fakeNormal;
 					#endif
 
 					rayOffset       = errorT + errorP;
@@ -548,6 +547,9 @@ __device__ inline void RaySceneIntersect(
 		intersectPoint  = GetRayPlaneIntersectPoint(plane, ray, t, errorP);
 		intersectNormal = plane.xyz;
 		rayOffset       = errorT + errorP;
+		#if USE_INTERPOLATED_FAKE_NORMAL
+		fakeNormal = intersectNormal;
+		#endif
 	}
 
 #endif
@@ -561,12 +563,22 @@ __device__ inline void RaySceneIntersect(
 		normalDotRayDir = -normalDotRayDir;
 	}
 
+	#if USE_INTERPOLATED_FAKE_NORMAL
+	if (dot(fakeNormal, intersectNormal) < 0)
+	{
+		fakeNormal = -fakeNormal;
+	}
+	#endif
+
 	rayState.hit = (t < RayMax);
 	rayState.depth = t;
 
 	if (rayState.hit == false)
 	{
 		rayState.normal = Float3(0, -1, 0);
+		#if USE_INTERPOLATED_FAKE_NORMAL
+		fakeNormal = Float3(0, -1, 0);
+		#endif
 	}
 
 	UpdateMaterial(cbo, rayState, sceneMaterial, sceneGeometry);

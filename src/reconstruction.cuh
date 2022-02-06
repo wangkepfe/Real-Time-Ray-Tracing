@@ -112,7 +112,7 @@ __global__ void SpatialReconstruction5x5(
 	{
 		int xoffset = i % 5;
 		int yoffset = i / 5;
-#elif 1
+#else
     #pragma unroll
     for (int i = 0; i < SAMPLE_KERNEL_SAMPLE_PER_FRAME; i += 1)
 	{

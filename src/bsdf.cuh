@@ -19,6 +19,8 @@ __device__ __forceinline__ void LocalizeSample(
 	else
 		w = Float3(0, 1, 0);
 
+	// u = normalize(cross(n, w));
+	// v = normalize(cross(n, u));
 	u = cross(n, w);
 	v = cross(n, u);
 }
