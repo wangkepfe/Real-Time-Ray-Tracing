@@ -2,7 +2,7 @@
 
 #include <cuda_runtime.h>
 #include "geometry.cuh"
-#include "debug_util.cuh"
+#include "debugUtil.h"
 #include "sampler.cuh"
 #include "water.cuh"
 #include "star.cuh"
@@ -145,7 +145,7 @@ inline __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3&
 
 		Float3 extinctionCoeffRayleigh = scatteringCoeffRayleigh;
 
-		Float3 totalTransmittance = exp3f(-(extinctionCoeffRayleigh * (opticalDepthRayleigh + opticalDepthLightRayleigh) + 
+		Float3 totalTransmittance = exp3f(-(extinctionCoeffRayleigh * (opticalDepthRayleigh + opticalDepthLightRayleigh) +
 		                            		extinctionCoeffMie * (opticalDepthMie + opticalDepthLightMie)));
 
 		Float3 scatteringCoeffIntegralRayleigh = expHeightDeltaRayleigh * scatteringCoeffRayleigh;
@@ -153,7 +153,7 @@ inline __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3&
 
 		sumR += scatteringCoeffIntegralRayleigh * totalTransmittance;
 		sumM += scatteringCoeffIntegralfMie * totalTransmittance;
-		
+
 		marchPos += marchStep;
 	}
 
@@ -171,7 +171,7 @@ inline __device__ Float3 GetEnvIncidentLight(const Float3& raydir, const Float3&
 		phaseMie = MiePhaseFunc(mu, g);
 	}
 
-	Float3 result = sunPower * (sumR * phaseRayleigh + 
+	Float3 result = sunPower * (sumR * phaseRayleigh +
 	                            sumM * phaseMie);
 
 	// if (t2 == RayMax && dot(eyeRay.dir, sunDir) > 0.99996f)
@@ -193,7 +193,7 @@ inline __device__ Float3 EqualRectMap(float u, float v)
 	float x = cos(theta) * cos(phi);
 	float y = sin(phi);
 	float z = sin(theta) * cos(phi);
-	
+
 	return Float3(x, y, z);
 }
 
@@ -237,7 +237,7 @@ inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool i
 
 	float u = atan2f(-rayDirOrRefl.z, -rayDirOrRefl.x) / TWO_PI + 0.5f;
 	float v = abs(rayDirOrRefl.y);
-	
+
 #if 0 // tex read sky
 	float4 texRead = tex2D<float4>(skyTex, u, v);
 	Float3 color = Float3(texRead.x , texRead.y, texRead.z);

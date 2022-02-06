@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include "linear_math.h"
+#include "linearMath.h"
 
 #define SAFE_COSINE_EPSI 1e-5f
 

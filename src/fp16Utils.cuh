@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cuda_fp16.h"
-#include "linear_math.h"
+#include "linearMath.h"
 
 struct Half3
 {

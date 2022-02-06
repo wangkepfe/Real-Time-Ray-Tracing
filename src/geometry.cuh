@@ -1,9 +1,9 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include "linear_math.h"
+#include "linearMath.h"
 #include "geometry.h"
-#include "debug_util.cuh"
+#include "debugUtil.h"
 #include "precision.cuh"
 
 #define RayMax 10e10f

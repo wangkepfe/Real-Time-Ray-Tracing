@@ -15,9 +15,10 @@
 #include <string>
 #include <fstream>
 #include <cassert>
+#include <iomanip>
 
 #include "helper_cuda.h"
-#include "linear_math.h"
+#include "linearMath.h"
 #include "geometry.h"
 #include "timer.h"
 #include "blueNoiseRandGen.h"

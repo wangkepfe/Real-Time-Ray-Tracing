@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cuda_runtime.h"
-#include "linear_math.h"
+#include "linearMath.h"
 #include "bvhNode.cuh"
 
 // LCP Longest Common Prefix
@@ -209,7 +209,7 @@ __global__ void BuildLBVH (
 			// Save parent node index
 			idx[j] = i;
 
-			
+
 			// If the node has one leaf
 			if (bvhNodes[i].isLeftLeaf)
 			{

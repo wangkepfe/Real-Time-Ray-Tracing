@@ -1,8 +1,9 @@
 #pragma once
 
 #include "kernel.cuh"
-#include "debug_util.cuh"
+#include "debugUtil.h"
 #include "bsdf.cuh"
+#include "sky.cuh"
 
 #define TOTAL_LIGHT_MAX_COUNT 8
 
@@ -77,7 +78,7 @@ __device__ __inline__ void SampleLight(
     //         return false;
     //     }
 	// }
-    // else 
+    // else
     if (sampledIdx == envLightIdx)
 	{
         float maxSkyCdf = skyCdf[SKY_SIZE - 1];
@@ -173,4 +174,42 @@ __device__ __inline__ void SampleLight(
 	}
 #endif
     //DEBUG_PRINT(lightSampleDir);
+}
+
+__device__ inline Float3 GetLightSource(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SurfObj skyBuffer)
+{
+    // check for termination and hit light
+    if (rayState.hitLight == false || rayState.isOccluded == true) { return 0; }
+
+    Float3 lightDir = rayState.dir;
+    Float3 L0 = Float3(0);
+
+    // Different light source type
+    if (rayState.matType == MAT_SKY)
+    {
+        // env light
+        //Float3 envLightColor = EnvLight(lightDir, cbo.sunDir, cbo.clockTime, rayState.isDiffuseRay);
+        //Float3 envLightColor = Float3(0.8f);
+        // if (cbo.sunDir.y > 0.0f && dot(lightDir, cbo.sunDir) > 0.99999f)
+        // {
+        //     L0 = Float3(1.0f, 1.0f, 0.9f);
+        // }
+        // else if (cbo.sunDir.y < 0.0f && dot(lightDir, -cbo.sunDir) > 0.9999f)
+        // {
+        //     L0 = Float3(0.9f, 0.95f, 1.0f) * 0.1f;
+        // }
+        // else
+        {
+            Float3 envLightColor = EnvLight2(lightDir, cbo.clockTime, rayState.isDiffuseRay, skyBuffer, Float2(rayState.rand.x, rayState.rand.y));
+            L0 = envLightColor;
+        }
+    }
+    else if (rayState.matType == EMISSIVE)
+    {
+        // local light
+        SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
+        L0 = mat.albedo;
+    }
+
+    return L0;
 }

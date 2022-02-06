@@ -4,7 +4,7 @@
 #include <memory>
 #include <string>
 
-#include "linear_math.h"
+#include "linearMath.h"
 #include "geometry.h"
 
 class VoxelsGenerator;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cuda_runtime.h"
-#include "linear_math.h"
+#include "linearMath.h"
 
 template<typename T, uint size>
 __device__ __forceinline__ void SimdInclusiveScan(T& v, uint laneId)

@@ -3,6 +3,7 @@
 #include "kernel.cuh"
 #include "sampler.cuh"
 #include "bsdf.cuh"
+#include "raygen.cuh"
 
 extern __constant__ float cGaussian5x5[25];
 

@@ -2,7 +2,7 @@
 
 #include <cuda_runtime.h>
 #include "geometry.cuh"
-#include "debug_util.cuh"
+#include "debugUtil.h"
 #include "sampler.cuh"
 #include "water.cuh"
 

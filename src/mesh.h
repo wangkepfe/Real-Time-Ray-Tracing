@@ -7,7 +7,7 @@
 #include <variant>
 #include <vector>
 
-#include "linear_math.h"
+#include "linearMath.h"
 
 struct Triangle;
 

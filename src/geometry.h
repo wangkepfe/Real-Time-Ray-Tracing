@@ -1,6 +1,6 @@
 #pragma once
 
-#include "linear_math.h"
+#include "linearMath.h"
 
 struct  __align__(16) Sphere
 {

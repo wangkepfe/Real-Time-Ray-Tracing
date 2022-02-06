@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cuda_runtime.h"
-#include "linear_math.h"
+#include "linearMath.h"
 #include "geometry.cuh"
 #include <assert.h>
 #include "precision.cuh"

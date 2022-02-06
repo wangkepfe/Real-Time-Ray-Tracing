@@ -3,7 +3,7 @@
 #include <vector>
 #include <unordered_set>
 #include <memory>
-#include "linear_math.h"
+#include "linearMath.h"
 #include "geometry.h"
 #include "perlin.h"
 
