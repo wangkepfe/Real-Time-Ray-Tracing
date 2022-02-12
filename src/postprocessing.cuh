@@ -713,38 +713,3 @@ __global__ void BicubicScale(
 
 	Store2DHalf4(Float4(sampledColor, 1.0f), outputResColor, idx);
 }
-
-__global__ void CopyToOutput(
-	SurfObj* renderTarget,
-	SurfObj  outputResColor,
-	BlueNoiseRandGenerator randGen,
-	ConstBuffer            cbo,
-	Int2     outSize)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= outSize.x || idx.y >= outSize.y) return;
-
-	Float3 sampledColor = Load2DHalf4(outputResColor, idx).xyz;
-
-	 // setup rand gen
-    randGen.idx       = idx;
-    int sampleNum     = 1;
-    int sampleIdx     = 0;
-    randGen.sampleIdx = cbo.frameNum * sampleNum + sampleIdx;
-    Float4 blueNoise  = randGen.Rand4(0);
-
-	Float3 jitter = blueNoise.xyz / 256 - 1 / 512;
-
-	sampledColor = clamp3f(sampledColor + jitter, Float3(0), Float3(1) - MachineEpsilon());
-
-	surf2Dwrite(make_uchar4(sampledColor.x * 256,
-							sampledColor.y * 256,
-							sampledColor.z * 256,
-							1.0f),
-		        renderTarget[0],
-				idx.x * 4,
-				idx.y);
-}

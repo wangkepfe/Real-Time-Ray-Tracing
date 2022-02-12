@@ -424,6 +424,7 @@ private:
 	void BuildBvhLevel1();
 	void BuildBvhLevel2();
 	void TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim);
+	void PostProcessing(Int2 bufferDim, Int2 outputDim);
 
 	// resolution
 	const int                   screenWidth;
