@@ -309,9 +309,6 @@ enum Buffer2DName
 	NoiseLevelBuffer,              // noise level
 	NoiseLevelBuffer16x16,
 
-	IndirectLightColorBuffer,      // indirect light color L1
-	IndirectLightDirectionBuffer,  // indirect light direction Wi_1
-
 	SkyBuffer,                     // sky
 
 	Buffer2DCount,

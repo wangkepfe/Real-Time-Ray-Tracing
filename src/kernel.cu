@@ -155,24 +155,7 @@ void RayTracer::draw(SurfObj* renderTarget)
         skyCdf,
         GetBuffer2D(MotionVectorBuffer),
         GetBuffer2D(NoiseLevelBuffer),
-        GetBuffer2D(IndirectLightColorBuffer),
-        GetBuffer2D(IndirectLightDirectionBuffer),
         bufferDim);
-
-    // ------------------------------- Reconstruct -------------------------------
-    if (renderPassSettings.enableDenoiseReconstruct)
-    {
-        SpatialReconstruction5x5<<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
-            GetBuffer2D(RenderColorBuffer),
-            GetBuffer2D(NormalBuffer),
-            GetBuffer2D(DepthBuffer),
-            GetBuffer2D(IndirectLightColorBuffer),
-            GetBuffer2D(IndirectLightDirectionBuffer),
-            d_sceneMaterial,
-            d_randGen,
-            cbo,
-            bufferDim);
-    }
 
     // update history camera
     cbo.historyCamera.Setup(cbo.camera);

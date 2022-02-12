@@ -449,9 +449,6 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 		{ NoiseLevelBuffer              , { FORMAT_HALF   , BUFFER_2D_8x8_GRID_DIM      } },
 		{ NoiseLevelBuffer16x16         , { FORMAT_HALF   , BUFFER_2D_16x16_GRID_DIM    } },
 
-		{ IndirectLightColorBuffer      , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
-		{ IndirectLightDirectionBuffer  , { FORMAT_HALF4  , BUFFER_2D_RENDER_DIM    } },
-
 		{ SkyBuffer                     , { FORMAT_FLOAT4 , BUFFER_2D_SKY_DIM       } },
 	};
 

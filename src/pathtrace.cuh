@@ -20,8 +20,6 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           float*                 skyCdf,
                           SurfObj                motionVectorBuffer,
                           SurfObj                noiseLevelBuffer,
-                          SurfObj                indirectLightColorBuffer,
-                          SurfObj                indirectLightDirectionBuffer,
                           Int2                   renderSize)
 {
     // index
@@ -106,12 +104,9 @@ __global__ void PathTrace(ConstBuffer            cbo,
     NAN_DETECTER(outputNormal);
     NAN_DETECTER(outputDepth);
     NAN_DETECTER(motionVector);
-    NAN_DETECTER(L1);
-    NAN_DETECTER(indirectLightDir);
+
     Store2DHalf3Ushort1( { L2 , materialMask } , colorBuffer, idx);
     Store2DHalf4(Float4(outputNormal, 0), normalBuffer, idx);
     Store2DHalf1(outputDepth, depthBuffer, idx);
     Store2DHalf2(motionVector, motionVectorBuffer, idx);
-    Store2DHalf4(Float4(L1, 0), indirectLightColorBuffer, idx);
-    Store2DHalf4(Float4(indirectLightDir, 0), indirectLightDirectionBuffer, idx);
 }

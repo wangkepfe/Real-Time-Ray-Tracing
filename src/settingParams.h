@@ -28,7 +28,6 @@ struct RenderPassSettings
 	std::vector<std::pair<bool*, std::string>> GetValueList()
 	{
 		return {
-			{ &enableDenoiseReconstruct , "Enable Denoise Reconstruct"  },
 			{ &enableTemporalDenoising  , "Enable Temporal Denoising"   },
 			{ &enableLocalSpatialFilter , "Enable Local SpatialFilter " },
 			{ &enableNoiseLevelVisualize, "Enable Noise Level Visualize"},
@@ -45,7 +44,6 @@ struct RenderPassSettings
 		};
 	}
 
-	bool enableDenoiseReconstruct  = false;
 	bool enableTemporalDenoising   = true;
 	bool enableLocalSpatialFilter  = true;
 	bool enableNoiseLevelVisualize = false;
