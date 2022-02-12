@@ -3,6 +3,9 @@
 
 #include <cuda_runtime.h>
 #include "sampler.cuh"
+#include "geometry.cuh"
+#include "precision.cuh"
+#include "settingParams.h"
 
 #define USE_CATMULL_ROM_SAMPLER 0
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
@@ -119,7 +122,7 @@ __global__ void Histogram2(
 	if (idx.x >= size.x || idx.y >= size.y) return;
 
 	Float3 color = Load2DHalf4(InBuffer, idx).xyz;
-	float luminance = color.getmax();//dot(color, Float3(0.3, 0.6, 0.1));
+	float luminance = dot(color, Float3(0.3, 0.6, 0.1));
 	float logLuminance = log2f(luminance) * 0.1 + 0.75;
 	uint fBucket = (uint)rintf(clampf(logLuminance, 0.0, 1.0) * 63 * 0.99999);
 	atomicInc(&histogram[fBucket], size.x * size.y);
@@ -576,14 +579,14 @@ __global__ void LensFlarePred(SurfObj depthBuffer, Float2 sunPos, Int2 sunUv, Su
 //------------------------------------- Tone mapping ---------------------------------------
 //----------------------------------------------------------------------------------------------
 
-__device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x)
+__device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x, PostProcessParams params)
 {
-	const float A = 0.15;
-	const float B = 0.50;
-	const float C = 0.10;
-	const float D = 0.20;
-	const float E = 0.02;
-	const float F = 0.30;
+	const float A = params.A;
+	const float B = params.B;
+	const float C = params.C;
+	const float D = params.D;
+	const float E = params.E;
+	const float F = params.F;
 
 	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
@@ -591,7 +594,8 @@ __device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x)
 __global__ void ToneMapping(
 	SurfObj   colorBuffer,
 	Int2      size,
-	float*    exposure)
+	float*    exposure,
+	PostProcessParams params)
 {
 	Int2 idx;
 	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -599,18 +603,19 @@ __global__ void ToneMapping(
 
 	if (idx.x >= size.x || idx.y >= size.y) return;
 
-	const float W = 11.2;
+	const float W = params.W;
 
 	Float3 texColor = Load2DHalf4(colorBuffer, idx).xyz;
 	texColor *= exposure[0];
 
 	float ExposureBias = 2.0f;
-	Float3 curr = Uncharted2Tonemap(ExposureBias * texColor);
+	Float3 curr = Uncharted2Tonemap(ExposureBias * texColor, params);
 
-	Float3 whiteScale = 1.0f/Uncharted2Tonemap(W);
+	Float3 whiteScale = 1.0f/Uncharted2Tonemap(W, params);
 	Float3 color = curr * whiteScale;
 
-	Float3 retColor = clamp3f(pow3f(color, 1.0f / 2.2f), Float3(0), Float3(1));
+	// Gamma correction
+	Float3 retColor = clamp3f(pow3f(color, 1.0f / params.gamma), Float3(0), Float3(1));
 
 	Store2DHalf4(Float4(retColor, 1.0), colorBuffer, idx);
 }

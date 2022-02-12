@@ -26,49 +26,68 @@ void UpdateUI(GLFWwindow* window)
 
     if (ImGui::CollapsingHeader("Sky", ImGuiTreeNodeFlags_None))
     {
-        if (ImGui::CollapsingHeader("Observer", ImGuiTreeNodeFlags_None))
-        {
-            ImGui::SliderFloat("Latitude", &g_rayTracer->skyParams.latitude, -90.0f, 90.0f);
-            ImGui::SliderFloat("Longtitude", &g_rayTracer->skyParams.longtitude, -180.0f, 180.0f);
-            ImGui::SliderFloat("Elevation", &g_rayTracer->skyParams.elevation, 0.0f, 2000.0f);
-            ImGui::SliderInt("Month", &g_rayTracer->skyParams.month, 1, 12);
-            ImGui::SliderInt("Day", &g_rayTracer->skyParams.day, 1, 31);
-            ImGui::SliderFloat("Time of day", &g_rayTracer->skyParams.timeOfDay, 0.0f, 1.0f);
-        }
+        if (ImGui::SliderFloat("Time of day", &g_rayTracer->skyParams.timeOfDay, 0.0f, 1.0f))
+            g_rayTracer->skyParams.needRegenerate = true;
 
-        if (ImGui::CollapsingHeader("Quality", ImGuiTreeNodeFlags_None))
-        {
-            ImGui::SliderInt("Samples", &g_rayTracer->skyParams.numSamples, 1, 64);
-            ImGui::SliderInt("Light Samples", &g_rayTracer->skyParams.numLightRaySamples, 1, 64);
-        }
+        if (ImGui::SliderFloat("Sun Axis Angle", &g_rayTracer->skyParams.sunAxisAngle, 0.0f, 90.0f))
+            g_rayTracer->skyParams.needRegenerate = true;
 
-        if (ImGui::CollapsingHeader("Sun", ImGuiTreeNodeFlags_None))
-        {
-            ImGui::SliderFloat("Sun power", &g_rayTracer->skyParams.sunPower, 0.0f, 40.0f);
-        }
-
-        if (ImGui::CollapsingHeader("Earth", ImGuiTreeNodeFlags_None))
-        {
-            ImGui::SliderFloat("Earth radius (km)", &g_rayTracer->skyParams.earthRadius, 0.0f, 10000.0f);
-            ImGui::SliderFloat("Atmosphere height (km)", &g_rayTracer->skyParams.atmosphereHeight, 0.0f, 1000.0f);
-        }
-
-        if (ImGui::CollapsingHeader("Rayleigh", ImGuiTreeNodeFlags_None))
-        {
-            ImGui::SliderFloat("Atmosphere thickness", &g_rayTracer->skyParams.atmosphereThickness, 0.0f, 40000.0f);
-            ImGui::SliderFloat3("Rayleigh mean free path (km)", g_rayTracer->skyParams.mfpKmRayleigh._v, 0.0f, 1000.0f);
-        }
-
-        if (ImGui::CollapsingHeader("Mie", ImGuiTreeNodeFlags_None))
-        {
-            ImGui::SliderFloat("Aerosol thickness", &g_rayTracer->skyParams.aerosolThickness, 0.0f, 10000.0f);
-            ImGui::SliderFloat3("Mie mean free path (km)", g_rayTracer->skyParams.mfpKmMie._v, 0.0f, 1000.0f);
-            ImGui::SliderFloat3("Mie albedo", g_rayTracer->skyParams.albedoMie._v, 0.0f, 1.0f);
-            ImGui::SliderFloat("g", &g_rayTracer->skyParams.g, 0.0f, 1.0f);
-            const char* items[] = { "Henyey-Greenstein", "Mie" };
-            ImGui::Combo("Phase function", (int*)&g_rayTracer->skyParams.miePhaseFuncType, items, IM_ARRAYSIZE(items));
-        }
+        if (ImGui::InputFloat("Sky brightness", &g_rayTracer->skyParams.skyScalar, 0.01f, 1.0f, "%.3f"))
+            g_rayTracer->skyParams.needRegenerate = true;
     }
+
+    if (ImGui::CollapsingHeader("Tone Mapping", ImGuiTreeNodeFlags_None))
+    {
+        auto list = g_rayTracer->postProcessParams.GetValueList();
+        for (auto& item : list)
+            ImGui::SliderFloat(std::get<1>(item).c_str(), std::get<0>(item), std::get<2>(item), std::get<3>(item), "%.2f", std::get<4>(item) ? ImGuiSliderFlags_Logarithmic : ImGuiSliderFlags_None);
+    }
+
+    // if (ImGui::CollapsingHeader("Sky2", ImGuiTreeNodeFlags_None))
+    // {
+    //     if (ImGui::CollapsingHeader("Observer", ImGuiTreeNodeFlags_None))
+    //     {
+    //         ImGui::SliderFloat("Latitude", &g_rayTracer->skyParams.latitude, -90.0f, 90.0f);
+    //         ImGui::SliderFloat("Longtitude", &g_rayTracer->skyParams.longtitude, -180.0f, 180.0f);
+    //         ImGui::SliderFloat("Elevation", &g_rayTracer->skyParams.elevation, 0.0f, 2000.0f);
+    //         ImGui::SliderInt("Month", &g_rayTracer->skyParams.month, 1, 12);
+    //         ImGui::SliderInt("Day", &g_rayTracer->skyParams.day, 1, 31);
+    //         ImGui::SliderFloat("Time of day", &g_rayTracer->skyParams.timeOfDay, 0.0f, 1.0f);
+    //     }
+
+    //     if (ImGui::CollapsingHeader("Quality", ImGuiTreeNodeFlags_None))
+    //     {
+    //         ImGui::SliderInt("Samples", &g_rayTracer->skyParams.numSamples, 1, 64);
+    //         ImGui::SliderInt("Light Samples", &g_rayTracer->skyParams.numLightRaySamples, 1, 64);
+    //     }
+
+    //     if (ImGui::CollapsingHeader("Sun", ImGuiTreeNodeFlags_None))
+    //     {
+    //         ImGui::SliderFloat("Sun power", &g_rayTracer->skyParams.sunPower, 0.0f, 40.0f);
+    //     }
+
+    //     if (ImGui::CollapsingHeader("Earth", ImGuiTreeNodeFlags_None))
+    //     {
+    //         ImGui::SliderFloat("Earth radius (km)", &g_rayTracer->skyParams.earthRadius, 0.0f, 10000.0f);
+    //         ImGui::SliderFloat("Atmosphere height (km)", &g_rayTracer->skyParams.atmosphereHeight, 0.0f, 1000.0f);
+    //     }
+
+    //     if (ImGui::CollapsingHeader("Rayleigh", ImGuiTreeNodeFlags_None))
+    //     {
+    //         ImGui::SliderFloat("Atmosphere thickness", &g_rayTracer->skyParams.atmosphereThickness, 0.0f, 40000.0f);
+    //         ImGui::SliderFloat3("Rayleigh mean free path (km)", g_rayTracer->skyParams.mfpKmRayleigh._v, 0.0f, 1000.0f);
+    //     }
+
+    //     if (ImGui::CollapsingHeader("Mie", ImGuiTreeNodeFlags_None))
+    //     {
+    //         ImGui::SliderFloat("Aerosol thickness", &g_rayTracer->skyParams.aerosolThickness, 0.0f, 10000.0f);
+    //         ImGui::SliderFloat("Mie mean free path (km)", &g_rayTracer->skyParams.mfpKmMie, 0.0f, 1000.0f);
+    //         ImGui::SliderFloat("Mie albedo", &g_rayTracer->skyParams.albedoMie, 0.0f, 1.0f);
+    //         ImGui::SliderFloat("g", &g_rayTracer->skyParams.g, 0.0f, 1.0f);
+    //         const char* items[] = { "Henyey-Greenstein", "Mie" };
+    //         ImGui::Combo("Phase function", (int*)&g_rayTracer->skyParams.miePhaseFuncType, items, IM_ARRAYSIZE(items));
+    //     }
+    // }
 
     if (ImGui::Button("Exit"))
         glfwSetWindowShouldClose(window, GLFW_TRUE);

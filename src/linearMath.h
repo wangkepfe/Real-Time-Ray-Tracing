@@ -235,9 +235,9 @@ struct Float3
 	__forceinline__ __host__ __device__ Float3  normalized() const               { float norm = sqrtf(x*x + y*y + z*z); return Float3(x / norm, y / norm, z / norm); }
 };
 
-struct Float3Hasher 
+struct Float3Hasher
 {
-	unsigned long long operator() (const Float3& v) const 
+	unsigned long long operator() (const Float3& v) const
 	{
 		union FloatToSizeT
 		{
@@ -245,7 +245,7 @@ struct Float3Hasher
 			float a;
 			unsigned long long b;
 		};
-		
+
 		unsigned long long h = 17;
 		h = (h * 37) ^ FloatToSizeT(v.x).b;
 		h = (h * 37) ^ FloatToSizeT(v.y).b;
@@ -404,6 +404,10 @@ struct Mat3
 	};
 	__forceinline__ __host__ __device__ Mat3() { for (int i = 0; i < 9; ++i) _v[i] = 0; }
 	__forceinline__ __host__ __device__ Mat3(const Float3& v0, const Float3& v1, const Float3& v2) : v0{v0}, v1{v1}, v2{v2} {}
+
+	// column-major matrix construction
+	__forceinline__ __host__ __device__ Mat3(float m00, float m01, float m02, float m10, float m11, float m12, float m20, float m21, float m22)
+	: m00{m00}, m01{m01}, m02{m02}, m10{m10}, m11{m11}, m12{m12}, m20{m20}, m21{m21}, m22{m22} {}
 
 	__forceinline__ __host__ __device__ Float3&       operator[](int i)       { return _v3[i]; }
 	__forceinline__ __host__ __device__ const Float3& operator[](int i) const { return _v3[i]; }

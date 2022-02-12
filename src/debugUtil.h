@@ -22,7 +22,7 @@
 
 static const std::string logDir = "C:/Ultimate-Realism-Renderer/log/";
 
-__device__ bool IsPixelAt(float u, float v)
+__device__ inline bool IsPixelAt(float u, float v)
 {
 	int centerx = gridDim.x * blockDim.x * u;
 	int centery = gridDim.y * blockDim.y * v;
@@ -33,14 +33,14 @@ __device__ bool IsPixelAt(float u, float v)
 	return (x == centerx) && (y == centery);
 }
 
-__device__ bool IsCenterBlock()
+__device__ inline bool IsCenterBlock()
 {
 	int x = gridDim.x * 0.5;
 	int y = gridDim.y * 0.5;
 	return (blockIdx.x == x) && (blockIdx.y == y);
 }
 
-__device__ bool IsFirstBlock()
+__device__ inline bool IsFirstBlock()
 {
 	int x = 1;
 	int y = 0;
@@ -53,22 +53,22 @@ struct BVHNode;
 
 namespace std
 {
-	ostream& operator<<(ostream& os, const Float3& vec)
+	inline ostream& operator<<(ostream& os, const Float3& vec)
 	{
 		return os << vec.x << "," << vec.y << "," << vec.z << ",";
 	}
 
-	ostream& operator<<(ostream& os, const Triangle& triangle)
+	inline ostream& operator<<(ostream& os, const Triangle& triangle)
 	{
 		return os << triangle.v1 << triangle.v2 << triangle.v3;
 	}
 
-	ostream& operator<<(ostream& os, const AABB& aabb)
+	inline ostream& operator<<(ostream& os, const AABB& aabb)
 	{
 		return os << aabb.max << aabb.min;
 	}
 
-	ostream& operator<<(ostream& os, const BVHNode& bvhNode)
+	inline ostream& operator<<(ostream& os, const BVHNode& bvhNode)
 	{
 		return os << bvhNode.aabb.GetLeftAABB() << bvhNode.aabb.GetRightAABB()
 		          << bvhNode.idxLeft << ","
@@ -78,7 +78,7 @@ namespace std
 	}
 };
 
-void writeToPPM(const std::string& filename, int width, int height, uchar4* devicePtr)
+inline void writeToPPM(const std::string& filename, int width, int height, uchar4* devicePtr)
 {
 	uchar4* hostPtr = new uchar4[width * height];
 	assert(hostPtr != nullptr);
@@ -106,7 +106,7 @@ void writeToPPM(const std::string& filename, int width, int height, uchar4* devi
 }
 
 template<typename T>
-__host__ void DebugPrintFile(const std::string& filename, T* devicePtr, uint arraySize)
+inline void DebugPrintFile(const std::string& filename, T* devicePtr, uint arraySize)
 {
 	T* hostPtr = new T[arraySize];
 	assert(hostPtr != nullptr);
@@ -131,34 +131,18 @@ __host__ void DebugPrintFile(const std::string& filename, T* devicePtr, uint arr
 	delete hostPtr;
 }
 
-__device__ void Print(const char* name) { printf("%s\n", name); }
-__device__ void Print(const char* name, const int& n) { printf("%s = %d\n", name, n); }
-__device__ void Print(const char* name, const bool& n) { printf("%s = %s\n", name, n ? "true" : "false"); }
-__device__ void Print(const char* name, const uint& n) { printf("%s = %d\n", name, n); }
-__device__ void Print(const char* name, const Int2& n) { printf("%s = (%d, %d)\n", name, n.x, n.y); }
-__device__ void Print(const char* name, const uint3& n) { printf("%s = (%d, %d, %d)\n", name, n.x, n.y, n.z); }
-__device__ void Print(const char* name, const float& n) { printf("%s = %f\n", name, n); }
-__device__ void Print(const char* name, const Float2& f3) { printf("%s = (%f, %f)\n", name, f3[0], f3[1]); }
-__device__ void Print(const char* name, const Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }
-__device__ void Print(const char* name, const Float4& f4) { printf("%s = (%f, %f, %f, %f)\n", name, f4[0], f4[1], f4[2], f4[3]); }
+__device__ inline void Print(const char* name) { printf("%s\n", name); }
+__device__ inline void Print(const char* name, const int& n) { printf("%s = %d\n", name, n); }
+__device__ inline void Print(const char* name, const bool& n) { printf("%s = %s\n", name, n ? "true" : "false"); }
+__device__ inline void Print(const char* name, const uint& n) { printf("%s = %d\n", name, n); }
+__device__ inline void Print(const char* name, const Int2& n) { printf("%s = (%d, %d)\n", name, n.x, n.y); }
+__device__ inline void Print(const char* name, const uint3& n) { printf("%s = (%d, %d, %d)\n", name, n.x, n.y, n.z); }
+__device__ inline void Print(const char* name, const float& n) { printf("%s = %f\n", name, n); }
+__device__ inline void Print(const char* name, const Float2& f3) { printf("%s = (%f, %f)\n", name, f3[0], f3[1]); }
+__device__ inline void Print(const char* name, const Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }
+__device__ inline void Print(const char* name, const Float4& f4) { printf("%s = (%f, %f, %f, %f)\n", name, f4[0], f4[1], f4[2], f4[3]); }
 
-__global__ void CopyFrameBuffer(
-	uchar4*  dumpFrameBuffer,
-	SurfObj* renderTarget,
-	Int2     outSize)
-{
-	Int2 idx;
-	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
-	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (idx.x >= outSize.x || idx.y >= outSize.y) return;
-
-	uchar4 val = surf2Dread<uchar4>(renderTarget[0], idx.x * 4 * sizeof(uchar1), idx.y, cudaBoundaryModeClamp);
-
-	dumpFrameBuffer[idx.x + idx.y * outSize.x] = val;
-}
-
-__device__ void NanDetecter(const char* name1, const char* name2, float& v)
+__device__ inline void NanDetecter(const char* name1, const char* name2, float& v)
 {
 	if (isnan(v))
     {
@@ -169,7 +153,7 @@ __device__ void NanDetecter(const char* name1, const char* name2, float& v)
     }
 }
 
-__device__ void NanDetecter(const char* name1, const char* name2, Float2& v2)
+__device__ inline void NanDetecter(const char* name1, const char* name2, Float2& v2)
 {
 	if (isnan(v2.x) || isnan(v2.y))
     {
@@ -180,7 +164,7 @@ __device__ void NanDetecter(const char* name1, const char* name2, Float2& v2)
     }
 }
 
-__device__ void NanDetecter(const char* name1, const char* name2, Float3& v3)
+__device__ inline void NanDetecter(const char* name1, const char* name2, Float3& v3)
 {
 	if (isnan(v3.x) || isnan(v3.y) || isnan(v3.z))
     {

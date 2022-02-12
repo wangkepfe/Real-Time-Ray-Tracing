@@ -3,6 +3,7 @@
 #include <vector>
 #include <utility>
 #include <string>
+#include <tuple>
 
 struct Float3;
 
@@ -14,38 +15,12 @@ enum class MiePhaseFunctionType
 
 struct SkyParams
 {
-	// Observer
-	float latitude = 37.774929f;
-	float longtitude = -122.419418f;
-	float elevation = 16.0f;
-	int month = 1;
-	int day = 25;
-	float timeOfDay = 0.22f;
+	bool needRegenerate = true;
 
-	// Quality
-	int numSamples = 32;
-	int numLightRaySamples = 16;
-
-	// Sun
-	float sunPower = 20.0f;
-
-	// Earth
-	float earthRadius = 6360.0f;
-	float atmosphereHeight = 60.0f;
-
-	// Rayleigh
-	Float3 mfpKmRayleigh = Float3(181.818f, 76.923f, 44.642f);
-	float atmosphereThickness = 8000.0f;
-
-	// Mie
-	Float3 mfpKmMie = Float3(43.478f);
-	Float3 albedoMie = Float3(0.91f);
-	float g = 0.76;
-	float aerosolThickness = 1200.0f;
-	MiePhaseFunctionType miePhaseFuncType = MiePhaseFunctionType::Mie;
-
-	// other
-	int customData = 0;
+	float timeOfDay = 0.25f;
+	float sunAxisAngle = 45.0f;
+	float skyScalar = 0.01f;
+	float groundAlbedo = 0.5f;
 };
 
 struct RenderPassSettings
@@ -60,6 +35,9 @@ struct RenderPassSettings
 			{ &enableWideSpatialFilter  , "Enable Wide Spatial Filter"  },
 			{ &enableTemporalDenoising2 , "Enable Temporal Denoising 2" },
 			{ &enablePostProcess        , "Enable Post Process"         },
+			{ &enableDownScalePasses    , "Enable Down Scale Passes"    },
+			{ &enableHistogram          , "Enable Histogram"            },
+			{ &enableAutoExposure       , "Enable Auto Exposure"        },
 			{ &enableBloomEffect        , "Enable Bloom Effect"         },
 			{ &enableLensFlare          , "Enable Lens Flare"           },
 			{ &enableToneMapping        , "Enable Tone Mapping"         },
@@ -74,8 +52,43 @@ struct RenderPassSettings
 	bool enableWideSpatialFilter   = true;
 	bool enableTemporalDenoising2  = true;
 	bool enablePostProcess         = true;
+	bool enableDownScalePasses     = true;
+	bool enableHistogram           = true;
+	bool enableAutoExposure        = true;
 	bool enableBloomEffect         = false;
 	bool enableLensFlare           = false;
 	bool enableToneMapping         = true;
 	bool enableSharpening          = false;
+};
+
+struct PostProcessParams
+{
+	std::vector<std::tuple<float*, std::string, float, float, bool>> GetValueList()
+	{
+		return {
+			{ &exposure, "Exposure", 0.01f, 100.0f, true},
+
+			{ &A, "Tonemap A", 0.0f,  1.0f  , false},
+			{ &B, "Tonemap B", 0.0f,  1.0f  , false},
+			{ &C, "Tonemap C", 0.0f,  1.0f  , false},
+			{ &D, "Tonemap D", 0.0f,  1.0f  , false},
+			{ &E, "Tonemap E", 0.0f,  1.0f  , false},
+			{ &F, "Tonemap F", 0.0f,  1.0f  , false},
+			{ &W, "Tonemap W", 0.01f, 100.0f, true },
+
+			{ &gamma, "Gamma", 1.0f, 5.0f, false }
+		};
+	}
+
+	float exposure = 1.0f;
+
+	float A = 0.15f;
+	float B = 0.50f;
+	float C = 0.10f;
+	float D = 0.20f;
+	float E = 0.02f;
+	float F = 0.30f;
+	float W = 11.2f;
+
+	float gamma = 2.2f;
 };

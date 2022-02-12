@@ -415,12 +415,15 @@ public:
 	int cursorReset = 1;
 	SkyParams skyParams = {};
 	RenderPassSettings renderPassSettings = {};
+	PostProcessParams postProcessParams = {};
 
 private:
 
 	void CameraSetup(Camera& camera);
 	void UpdateFrame();
 	void InputControlUpdate();
+	void BuildBvhLevel1();
+	void BuildBvhLevel2();
 
 	// resolution
 	const int                   screenWidth;
