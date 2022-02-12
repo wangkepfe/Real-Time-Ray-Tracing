@@ -223,5 +223,4 @@ void RayTracer::draw(SurfObj* renderTarget)
         GpuErrorCheck(cudaDeviceSynchronize());
 	    GpuErrorCheck(cudaPeekAtLastError());
     }
-
 }
