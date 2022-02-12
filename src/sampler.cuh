@@ -290,7 +290,7 @@ __forceinline__ __device__ Float3 Load2DFloat4ToFloat3ForSky(SurfObj tex, Int2 u
 
 typedef Float3 (*SampleFunc)(SurfObj, Int2, Int2);
 
-__device__ Float3 SampleBicubicCatmullRom(
+inline __device__ Float3 SampleBicubicCatmullRom(
     SurfObj tex,
     SampleFunc sampleFunc,
     const Float2&       uv,
@@ -343,7 +343,7 @@ __device__ Float3 SampleBicubicCatmullRom(
     return OutColor;
 }
 
-__device__ Float3 SampleBicubicSmoothStep(
+inline __device__ Float3 SampleBicubicSmoothStep(
     SurfObj tex,
     SampleFunc sampleFunc,
     const Float2&       uv,

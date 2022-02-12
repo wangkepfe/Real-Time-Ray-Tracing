@@ -6,8 +6,6 @@
 #include "debugUtil.h"
 #include "precision.cuh"
 
-#define RayMax 10e10f
-
 #define RAY_TRIANGLE_MOLLER_TRUMBORE 1
 #define RAY_TRIANGLE_COORDINATE_TRANSFORM 0
 

@@ -55,6 +55,8 @@ class VoxelsGenerator;
 #define SKY_SCAN_BLOCK_SIZE 512
 #define SKY_SCAN_BLOCK_COUNT SKY_SIZE / SKY_SCAN_BLOCK_SIZE
 
+#define RayMax 10e10f
+
 // ---------------------- type define ----------------------
 #define RandState curandStateScrambledSobol32_t
 #define RandInitVec curandDirectionVectors32_t
@@ -421,6 +423,7 @@ private:
 	void InputControlUpdate();
 	void BuildBvhLevel1();
 	void BuildBvhLevel2();
+	void TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim);
 
 	// resolution
 	const int                   screenWidth;
