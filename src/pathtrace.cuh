@@ -81,20 +81,20 @@ __global__ void PathTrace(ConstBuffer            cbo,
     motionVector += Float2(0.5f);
 
     // glossy only
-    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][0]);
-    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+    GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][0]);
+    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
-    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][1]);
-    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+    GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][1]);
+    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // glossy + diffuse
-    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][2]);
-    // DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
-    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+    GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][2]);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
+    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
-    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][3]);
-    // DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
-    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+    GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][3]);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
+    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // Light
     Float3 L0 = GetLightSource(cbo, rayState, sceneMaterial, skyBuffer, randNum[0]);

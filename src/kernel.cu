@@ -81,20 +81,22 @@ void RayTracer::UpdateFrame()
         historyRenderWidth = renderWidth;
         historyRenderHeight = renderHeight;
 
-        if (deltaTime > 1000.0f / (g_settings->targetFps - 1.0f) && renderWidth > minRenderWidth && renderHeight > minRenderHeight)
-        {
-            renderWidth -= 16;
-            renderHeight -= 9;
-            cbo.camera.resolution = Float2(renderWidth, renderHeight);
-            cbo.camera.update();
+        float targetFrameTimeHigh = 1000.0f / (g_settings->targetFps - 2);
+		float targetFrameTimeLow = 1000.0f / (g_settings->targetFps + 2);
+
+        if (targetFrameTimeHigh < deltaTime || targetFrameTimeLow > deltaTime) {
+            float ratio = (1000.0f / g_settings->targetFps) / deltaTime;
+            ratio = sqrtf(ratio);
+            renderWidth *= ratio;
         }
-        else if (deltaTime < 1000.0f / (g_settings->targetFps + 1.0f) && renderWidth < maxRenderWidth && renderHeight < maxRenderHeight)
-        {
-            renderWidth += 16;
-            renderHeight += 9;
-            cbo.camera.resolution = Float2(renderWidth, renderHeight);
-            cbo.camera.update();
-        }
+
+        // Safe resolution
+        renderWidth = renderWidth + ((renderWidth % 16 < 8) ? (- renderWidth % 16) : (16 - renderWidth % 16));
+        renderWidth = clampi(renderWidth, minRenderWidth, maxRenderWidth);
+        renderHeight = (renderWidth / 16) * 9;
+
+        cbo.camera.resolution = Float2(renderWidth, renderHeight);
+        cbo.camera.update();
 
         static float timerCounter = 0.0f;
 

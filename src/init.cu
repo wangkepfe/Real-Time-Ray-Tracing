@@ -168,6 +168,13 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	//-------------------------------------------------------------------------------
 
+	cbo.bvhBatchSize = BatchSize;
+	cbo.bvhNodesSize = triCountPadded;
+	cbo.trianglesSize = triCountPadded;
+	cbo.tlasBvhNodesSize = batchCount;
+
+	//-------------------------------------------------------------------------------
+
 	// AABB
 	int numAabbs = 2;
 	sceneAabbs = new AABB[numAabbs];
@@ -249,8 +256,6 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 
 	// constant buffer
 	cbo.frameNum = 0;
-	cbo.bvhDebugLevel = -1;
-	cbo.bvhBatchSize = BatchSize;
 
 	// launch param
 	blockDim = dim3(8, 8, 1);
@@ -350,6 +355,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	d_sceneMaterial.materials       = d_surfaceMaterials;
 	d_sceneMaterial.materialsIdx    = d_materialsIdx;
 	d_sceneMaterial.numMaterials    = numMaterials;
+	d_sceneMaterial.numMaterialsIdx = numObjects;
 
 	d_sceneGeometry.triangles       = triangles;
 	d_sceneGeometry.bvhNodes        = bvhNodes;

@@ -45,11 +45,6 @@ void RayTracer::keyboardUpdate(int key, int scancode, int action, int mods)
         if (key == GLFW_KEY_X) { if (action == GLFW_PRESS) inputControl.moveX = 1; else if (action == GLFW_RELEASE) inputControl.moveX = 0; }
 
 		if (key == GLFW_KEY_LEFT_SHIFT) { if (action == GLFW_PRESS) inputControl.moveSpeed = 0.001f; else if (action == GLFW_RELEASE) inputControl.moveSpeed = 0.01f;}
-
-        // bvh debug
-        if (key == GLFW_KEY_J && action == GLFW_PRESS) { cbo.bvhDebugLevel++; }
-        if (key == GLFW_KEY_K && action == GLFW_PRESS) { cbo.bvhDebugLevel--; cbo.bvhDebugLevel = max(cbo.bvhDebugLevel, -1); }
-        if (key == GLFW_KEY_L && action == GLFW_PRESS) { cbo.bvhDebugLevel = -1; }
     }
 }
 

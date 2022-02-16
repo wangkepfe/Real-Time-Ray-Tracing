@@ -196,22 +196,8 @@ __device__ inline Float3 GetLightSource(ConstBuffer& cbo, RayState& rayState, Sc
     // Different light source type
     if (rayState.matType == MAT_SKY)
     {
-        // env light
-        //Float3 envLightColor = EnvLight(lightDir, cbo.sunDir, cbo.clockTime, rayState.isDiffuseRay);
-        //Float3 envLightColor = Float3(0.8f);
-        // if (cbo.sunDir.y > 0.0f && dot(lightDir, cbo.sunDir) > 0.99999f)
-        // {
-        //     L0 = Float3(1.0f, 1.0f, 0.9f);
-        // }
-        // else if (cbo.sunDir.y < 0.0f && dot(lightDir, -cbo.sunDir) > 0.9999f)
-        // {
-        //     L0 = Float3(0.9f, 0.95f, 1.0f) * 0.1f;
-        // }
-        // else
-        {
-            Float3 envLightColor = EnvLight2(lightDir, cbo.clockTime, rayState.isDiffuseRay, skyBuffer, Float2(randNum.x, randNum.y));
-            L0 = envLightColor;
-        }
+        Float3 envLightColor = EnvLight2(lightDir, cbo.clockTime, rayState.isDiffuseRay, skyBuffer, Float2(randNum.x, randNum.y));
+        L0 = envLightColor;
     }
     else if (rayState.matType == EMISSIVE)
     {

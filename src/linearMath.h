@@ -422,6 +422,7 @@ __forceinline__ __host__ __device__ float  mix1f(float v1, float v2, float a)   
 __forceinline__ __host__ __device__ Float3 minf3f(const float a, const Float3 & v)             { return Float3(v.x < a ? v.x : a, v.y < a ? v.y : a, v.y < a ? v.y : a); }
 __forceinline__ __host__ __device__ void   swap(float& v1, float& v2)                          { float tmp = v1; v1 = v2; v2 = tmp; }
 __forceinline__ __host__ __device__ void   swap(Float3 & v1, Float3 & v2)                      { Float3 tmp = v1; v1 = v2; v2 = tmp; }
+__forceinline__ __host__ __device__ int    clampi(int a, int lo = 0, int hi = 1)               { return a < lo ? lo : a > hi ? hi : a; }
 __forceinline__ __host__ __device__ float  clampf(float a, float lo = 0.0f, float hi = 1.0f)   { return a < lo ? lo : a > hi ? hi : a; }
 __forceinline__ __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo = Float3(0.0f), Float3 hi = Float3(1.0f)){ return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
 __forceinline__ __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)     { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }

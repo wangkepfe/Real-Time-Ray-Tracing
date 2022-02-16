@@ -25,6 +25,11 @@ struct  __align__(16) AABB
 	__host__ __device__ static AABB CreateCenterEdge(const Float3& center, float edgeLength) { return AABB(center + Float3(edgeLength / 2.0f), center - Float3(edgeLength / 2.0f)); }
 };
 
+__host__ __device__ inline void Print(const char* name, const AABB& aabb)
+{
+	printf("%s = AABB { min=(%f, %f, %f), max=(%f, %f, %f) }\n", name, aabb.min[0], aabb.min[1], aabb.min[2], aabb.max[0], aabb.max[1], aabb.max[2]);
+}
+
 struct  __align__(16) Ray
 {
 	Float3 orig;
@@ -107,3 +112,10 @@ struct __align__(16) AABBCompact
 	float box2maxZ;
 	float box2minZ;
 };
+
+__host__ __device__ inline void Print(const char* name, const AABBCompact& aabb)
+{
+	printf("%s = AABBCompact { left AABB min=(%f, %f, %f), max=(%f, %f, %f); right AABB min=(%f, %f, %f), max=(%f, %f, %f) }\n",
+	name, aabb.GetLeftAABB().min[0], aabb.GetLeftAABB().min[1], aabb.GetLeftAABB().min[2], aabb.GetLeftAABB().max[0], aabb.GetLeftAABB().max[1], aabb.GetLeftAABB().max[2]
+	, aabb.GetRightAABB().min[0], aabb.GetRightAABB().min[1], aabb.GetRightAABB().min[2], aabb.GetRightAABB().max[0], aabb.GetRightAABB().max[1], aabb.GetRightAABB().max[2]);
+}

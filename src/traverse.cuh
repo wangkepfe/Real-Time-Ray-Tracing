@@ -3,6 +3,7 @@
 #include "kernel.cuh"
 #include "geometry.cuh"
 #include "bvhNode.cuh"
+#include "traverse.h"
 
 // update material info after intersect
 __device__ inline void UpdateMaterial(
@@ -11,21 +12,7 @@ __device__ inline void UpdateMaterial(
 	const SceneMaterial& sceneMaterial,
 	const SceneGeometry& sceneGeometry)
 {
-	// special case for floor, will be removed
-	if (rayState.objectIdx == PLANE_OBJECT_IDX)
-	{
-		rayState.matId = 6;
-	}
-	else
-	{
-		// get mat id
-		rayState.matId = sceneMaterial.materialsIdx[rayState.objectIdx];
-	}
-
-	// get mat
-	SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
-
-	// finish mat type
+	// material type
 	if (rayState.hit == false)
 	{
 		rayState.matType = MAT_SKY;
@@ -33,10 +20,17 @@ __device__ inline void UpdateMaterial(
 	}
 	else
 	{
+		rayState.matId = SAFE_LOAD(sceneMaterial.materialsIdx, rayState.objectIdx, sceneMaterial.numMaterialsIdx, 6);
+
+		if (rayState.objectIdx == PLANE_OBJECT_IDX) // special case for floor, will be removed
+		{
+			rayState.matId = 6;
+		}
+
+		SurfaceMaterial mat = SAFE_LOAD(sceneMaterial.materials, rayState.matId, sceneMaterial.numMaterials, SurfaceMaterial{});
 		rayState.matType = mat.type;
 	}
 
-	// hit light
 	// shadow ray
 	if (rayState.isShadowRay)
 	{
@@ -50,9 +44,8 @@ __device__ inline void UpdateMaterial(
 			rayState.isOccluded = true;
 		}
 	}
-	else
+	else // non-shadow ray
 	{
-		// non-shadow ray
 		rayState.hitLight = rayState.matType == EMISSIVE || rayState.matType == MAT_SKY;
 	}
 
@@ -94,8 +87,6 @@ __device__ inline void RaySceneIntersect(
 
 	// init t with max distance
 	float t         = RayMax;
-	float t1;
-	float t2;
 
 	// init ray state
 	objectIdx       = -1;
@@ -107,383 +98,25 @@ __device__ inline void RaySceneIntersect(
 	float errorP = 1e-7f;
 	float errorT = 1e-7f;
 
-#if RAY_TRAVERSE_BVH
-	Triangle* triangles = sceneGeometry.triangles;
-	BVHNode* bvhNodes = sceneGeometry.bvhNodes;
-	BVHNode* tlasBvhNodes = sceneGeometry.tlasBvhNodes;
-
-	// BVH traversal
-	static const int maxBvhTraverseLoop = 1024;
-	static const int stackSize = 16;
-
-	bool intersect1, intersect2, isClosestIntersect1;
-
-	// stack
-	union BvhNodeStackNode
-	{
-		struct
-		{
-			uint idx : 15;
-			uint blasOffset : 15;
-			uint isBlas : 1;
-			uint isLeaf : 1;
-			float t;
-		};
-		uint uint32All[2];
-	};
-
-	struct BvhNodeStack
-	{
-		#if DEBUG_BVH_TRAVERSE
-		__device__ BvhNodeStack()
-		{
-			stackTop = -1;
-			for (int i = 0; i < stackSize; ++i)
-			{
-				data[i].uint32All[0] = 0;
-				data[i].uint32All[1] = 0;
-			}
-		}
-		#endif
-
-		__device__ BvhNodeStackNode& operator[](int idx) { return data[idx]; }
-
-		__device__ void push(BvhNodeStackNode node)
-		{
-			++stackTop;
-			data[stackTop] = node;
-		}
-
-		__device__ BvhNodeStackNode pop()
-		{
-			BvhNodeStackNode node = data[stackTop];
-			--stackTop;
-			return node;
-		}
-
-		__device__ void push(int _idx, int _blasOffset, int _isBlas, int _isLeaf, float _t)
-		{
-			++stackTop;
-			data[stackTop].idx = _idx;
-			data[stackTop].blasOffset = _blasOffset;
-			data[stackTop].isBlas = _isBlas;
-			data[stackTop].isLeaf = _isLeaf;
-			data[stackTop].t = _t;
-		}
-
-		__device__ void pop(int& _idx, int& _blasOffset, int& _isBlas, int& _isLeaf, float& _t)
-		{
-			_idx = data[stackTop].idx;
-			_blasOffset = data[stackTop].blasOffset;
-			_isBlas = data[stackTop].isBlas;
-			_isLeaf = data[stackTop].isLeaf;
-			_t = data[stackTop].t;
-			--stackTop;
-		}
-
-		__device__ bool isEmpty() { return stackTop < 0; }
-
-		int stackTop = -1;
-		BvhNodeStackNode data[stackSize];
-	};
-
-	BvhNodeStack bvhNodeStack;
-
-	BvhNodeStackNode curr;
-	curr.idx = 0;
-	curr.blasOffset = 0;
-	curr.isBlas = 0;
-	curr.isLeaf = 0;
-
-	for (int i = 0; i < maxBvhTraverseLoop; ++i)
-	{
-		#if DEBUG_BVH_TRAVERSE
-		DEBUG_PRINT(i);
-		DEBUG_PRINT(bvhNodeStack.stackTop);
-		DEBUG_PRINT(curr.idx);
-		DEBUG_PRINT(curr.blasOffset);
-		DEBUG_PRINT(curr.isLeaf);
-		DEBUG_PRINT(curr.isBlas);
-		if (IS_DEBUG_PIXEL())
-		{
-			printf("bvhNodeStack.idx[] =    {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].idx, bvhNodeStack[1].idx, bvhNodeStack[2].idx, bvhNodeStack[3].idx);
-			printf("bvhNodeStack.isBlas[] = {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].isBlas, bvhNodeStack[1].isBlas, bvhNodeStack[2].isBlas, bvhNodeStack[3].isBlas);
-			printf("bvhNodeStack.isLeaf[] = {%d, %d, %d, %d, ...}\n", bvhNodeStack[0].isLeaf, bvhNodeStack[1].isLeaf, bvhNodeStack[2].isLeaf, bvhNodeStack[3].isLeaf);
-		}
-		#endif
-
-		if (curr.isLeaf)
-		{
-			if (curr.isBlas)
-			{
-				int loadIdx = curr.blasOffset * cbo.bvhBatchSize + curr.idx;
-				Triangle tri = triangles[loadIdx];
-
-				// triangle test
-				float t_temp = RayTriangleIntersect(ray, tri, t, uv.x, uv.y, errorT);
-
-				// hit
-				if (t_temp < t)
-				{
-					t               = t_temp;
-					objectIdx       = loadIdx;
-
-					#if RAY_TRIANGLE_MOLLER_TRUMBORE
-					intersectNormal = cross(tri.v2 - tri.v1, tri.v3 - tri.v1).normalize();
-					intersectPoint = GetRayPlaneIntersectPoint(Float4(intersectNormal, -dot(intersectNormal, tri.v1)), ray, t, errorP);
-					#endif
-
-					#if RAY_TRIANGLE_COORDINATE_TRANSFORM
-					intersectNormal = normalize(cross(tri.v2, tri.v3));
-					intersectPoint  = GetRayPlaneIntersectPoint(Float4(intersectNormal, -dot(intersectNormal, tri.v4)), ray, t, errorP);
-					#endif
-
-					#if USE_INTERPOLATED_FAKE_NORMAL
-					fakeNormal = normalize(tri.n1 * (1.0f - uv.x - uv.y) + tri.n2 * uv.x + tri.n3 * uv.y);
-					#endif
-
-					rayOffset       = errorT + errorP;
-
-					#if DEBUG_BVH_TRAVERSE
-					DEBUG_PRINT(objectIdx);
-					DEBUG_PRINT(tri.v1);
-					DEBUG_PRINT(tri.v2);
-					DEBUG_PRINT(tri.v3);
-					DEBUG_PRINT(ray.orig);
-					DEBUG_PRINT(ray.dir);
-					DEBUG_PRINT(intersectNormal);
-					DEBUG_PRINT(intersectPoint);
-					DEBUG_PRINT(t);
-					DEBUG_PRINT(rayOffset);
-					DEBUG_PRINT_BAR
-					#endif
-				}
-				else
-				{
-					#if DEBUG_BVH_TRAVERSE
-					DEBUG_PRINT_STRING("Tested a triangle but no intersection!");
-					DEBUG_PRINT(loadIdx)
-					DEBUG_PRINT(t_temp)
-					DEBUG_PRINT(t)
-					DEBUG_PRINT_BAR
-					#endif
-				}
-
-				bool finished = false;
-				do
-				{
-					// if stack is empty, finished
-					if (bvhNodeStack.isEmpty())
-					{
-						#if DEBUG_BVH_TRAVERSE
-						DEBUG_PRINT_STRING("Stack empty, quit");
-						DEBUG_PRINT(objectIdx);
-						DEBUG_PRINT_BAR
-						#endif
-
-						finished = true;
-						break;
-					}
-
-					// if not, go fetch one in stack
-					curr = bvhNodeStack.pop();
-				} while (curr.t > t); // if the one in stack is further than the closest hit, continue
-
-				if (finished)
-					break;
-			}
-			else
-			{
-				curr.isLeaf = 0;
-				curr.isBlas = 1;
-				curr.blasOffset = curr.idx;
-				curr.idx = 0;
-
-				#if DEBUG_BVH_TRAVERSE
-				DEBUG_PRINT_STRING("Go into BLAS");
-				DEBUG_PRINT_BAR
-				#endif
-			}
-		}
-		else
-		{
-			BVHNode currNode;
-			if (curr.isBlas)
-			{
-				int loadIdx = curr.blasOffset * cbo.bvhBatchSize + curr.idx;
-				currNode = bvhNodes[loadIdx];
-
-				#if DEBUG_BVH_TRAVERSE
-				DEBUG_PRINT_STRING("Load BVH node from BLAS");
-				DEBUG_PRINT(loadIdx);
-				#endif
-			}
-			else
-			{
-				currNode = tlasBvhNodes[curr.idx];
-
-				#if DEBUG_BVH_TRAVERSE
-				DEBUG_PRINT_STRING("Load BVH node from TLAS");
-				DEBUG_PRINT(curr.idx);
-				#endif
-			}
-
-			// test two aabb
-			RayAabbPairIntersect(invRayDir, ray.orig, currNode.aabb, intersect1, intersect2, t1, t2);
-
-			#if DEBUG_BVH_TRAVERSE
-			DEBUG_PRINT(currNode.idxLeft);
-			DEBUG_PRINT(currNode.idxRight);
-			DEBUG_PRINT(currNode.isLeftLeaf);
-			DEBUG_PRINT(currNode.isRightLeaf);
-			#endif
-
-			if (!intersect1 && !intersect2) // no hit for both sides
-			{
-				bool finished = false;
-				do
-				{
-					// if stack is empty, finished
-					if (bvhNodeStack.isEmpty())
-					{
-						#if DEBUG_BVH_TRAVERSE
-						DEBUG_PRINT_STRING("Stack empty, quit");
-						DEBUG_PRINT_BAR
-						#endif
-
-						finished = true;
-						break;
-					}
-
-					// if not, go fetch one in stack
-					curr = bvhNodeStack.pop();
-				} while (curr.t > t); // if the one in stack is further than the closest hit, continue
-
-				if (finished)
-					break;
-			}
-			else if (intersect1 && !intersect2) // left hit
-			{
-				curr.idx = currNode.idxLeft;
-				curr.isLeaf = currNode.isLeftLeaf;
-
-				#if DEBUG_BVH_TRAVERSE
-				if (i == cbo.bvhDebugLevel)
-				{
-					AABB testAabb = currNode.aabb.GetLeftAABB();
-					float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
-					if (t_temp < t)
-					{
-						t               = t_temp;
-						objectIdx       = curr.idx;
-						GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
-						rayOffset       = errorT + errorP;
-						DEBUG_PRINT(t);
-					}
-					break;
-				}
-				#endif
-			}
-			else if (!intersect1 && intersect2) // right hit
-			{
-				curr.idx = currNode.idxRight;
-				curr.isLeaf = currNode.isRightLeaf;
-
-				#if DEBUG_BVH_TRAVERSE
-				if (i == cbo.bvhDebugLevel)
-				{
-					AABB testAabb = currNode.aabb.GetRightAABB();
-					float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
-					if (t_temp < t)
-					{
-						t               = t_temp;
-						objectIdx       = curr.idx;
-						GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
-						rayOffset       = errorT + errorP;
-						DEBUG_PRINT(t);
-					}
-					break;
-				}
-				#endif
-			}
-			else // both hit
-			{
-				int idx1, idx2;
-				bool isLeaf1, isLeaf2;
-				float tt1, tt2;
-
-				if (t1 < t2)
-				{
-					// left is closer. go left next, push right to stack
-					idx2    = currNode.idxRight;
-					isLeaf2 = currNode.isRightLeaf;
-					idx1    = currNode.idxLeft;
-					isLeaf1 = currNode.isLeftLeaf;
-
-					tt1 = t1;
-					tt2 = t2;
-
-					#if DEBUG_BVH_TRAVERSE
-					if (i == cbo.bvhDebugLevel)
-					{
-						AABB testAabb = currNode.aabb.GetLeftAABB();
-						float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
-						if (t_temp < t)
-						{
-							t               = t_temp;
-							objectIdx       = curr.idx;
-							GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
-							rayOffset       = errorT + errorP;
-							DEBUG_PRINT(t);
-						}
-						break;
-					}
-					#endif
-				}
-				else
-				{
-					// right is closer. go right next, push left to stack
-					idx2    = currNode.idxLeft;
-					isLeaf2 = currNode.isLeftLeaf;
-					idx1    = currNode.idxRight;
-					isLeaf1 = currNode.isRightLeaf;
-
-					tt1 = t2;
-					tt2 = t1;
-
-					#if DEBUG_BVH_TRAVERSE
-					if (i == cbo.bvhDebugLevel)
-					{
-						AABB testAabb = currNode.aabb.GetRightAABB();
-						float t_temp = AabbRayIntersect(testAabb.min, testAabb.max, ray.orig, invRayDir, invRayDir * ray.orig, errorT);
-						if (t_temp < t)
-						{
-							t               = t_temp;
-							objectIdx       = curr.idx;
-							GetAabbRayIntersectPointNormal(testAabb, ray, t, intersectPoint, intersectNormal, errorP);
-							rayOffset       = errorT + errorP;
-							DEBUG_PRINT(t);
-						}
-						break;
-					}
-					#endif
-				}
-
-				// push
-				bvhNodeStack.push(idx2, curr.blasOffset, curr.isBlas, isLeaf2, t2);
-
-				curr.idx = idx1;
-				curr.isLeaf = isLeaf1;
-
-				#if DEBUG_BVH_TRAVERSE
-				DEBUG_PRINT(bvhNodeStack.stackTop);
-				DEBUG_PRINT(idx2);
-				DEBUG_PRINT(idx1);
-				#endif
-			}
-		}
-	}
-#endif
+	TraverseBvh(
+		sceneGeometry.triangles,
+		sceneGeometry.bvhNodes,
+		sceneGeometry.tlasBvhNodes,
+		cbo.bvhBatchSize,
+		ray,
+		invRayDir,
+		errorP,
+		errorT,
+		t,
+		uv,
+		objectIdx,
+		intersectNormal,
+		fakeNormal,
+		intersectPoint,
+		rayOffset,
+		cbo.bvhNodesSize,
+		cbo.tlasBvhNodesSize,
+		cbo.trianglesSize);
 
 #if RAY_TRAVERSE_SPHERES
 	// ----------------------- spheres ---------------------------

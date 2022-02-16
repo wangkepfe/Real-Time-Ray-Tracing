@@ -28,6 +28,7 @@
 #include "globalSettings.h"
 #include "cudaError.cuh"
 #include "settingParams.h"
+#include "debugUtil.h"
 
 class VoxelsGenerator;
 
@@ -36,9 +37,9 @@ class VoxelsGenerator;
 #define SUN_LIGHT_ID 8888
 #define DEFAULT_LIGHT_ID 7777
 
-#define USE_INTERPOLATED_FAKE_NORMAL 0
+#define USE_INTERPOLATED_FAKE_NORMAL 1
 
-#define DEBUG_FRAME 1
+#define DEBUG_FRAME -1
 #define DUMP_FRAME_NUM -1
 #define DEBUG_BVH_TRAVERSE 0
 #define DEBUG_RAY_AABB_INTERSECT 0
@@ -215,6 +216,7 @@ struct __align__(16) SceneMaterial
 	SurfaceMaterial* materials;
 	int*             materialsIdx;
 	int              numMaterials;
+	int              numMaterialsIdx;
 
 	#if RENDER_SPHERE_LIGHT
 	Sphere*          sphereLights;
@@ -232,9 +234,11 @@ struct __align__(16) ConstBuffer
 	float         clockTime;
 
 	int           frameNum;
-	int           bvhDebugLevel;
 
 	int           bvhBatchSize;
+	int           bvhNodesSize;
+	int trianglesSize;
+	int tlasBvhNodesSize;
 };
 
 struct __align__(16) RayState

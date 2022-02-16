@@ -5,7 +5,7 @@
 // ------------------------------ Machine Epsilon -----------------------------------------------
 // The smallest number that is larger than one minus one. ULP (unit in the last place) of 1
 // ----------------------------------------------------------------------------------------------
-__device__ __inline__ constexpr float MachineEpsilon()
+__host__ __device__ __inline__ constexpr float MachineEpsilon()
 {
 	typedef union {
 		float f32;
@@ -21,7 +21,7 @@ __device__ __inline__ constexpr float MachineEpsilon()
 // ------------------------------ Error Gamma -------------------------------------------------------
 // return 32bit floating point arithmatic calculation error upper bound, n is number of calculation
 // --------------------------------------------------------------------------------------------------
-__device__ __inline__ constexpr float ErrGamma(int n)
+__host__ __device__ __inline__ constexpr float ErrGamma(int n)
 {
 	return (n * MachineEpsilon()) / (1.0f - n * MachineEpsilon());
 }

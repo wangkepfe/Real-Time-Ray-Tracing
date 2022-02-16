@@ -249,7 +249,7 @@ __device__ __inline__ float RayPlaneIntersect( // N dot P = w
 // --------------------------- Get Ray Plane Intersect Point -------------------------
 //	Get plane, Ray Intersect reprojected Point
 // -----------------------------------------------------------------------------------
-__device__ __inline__ Float3 GetRayPlaneIntersectPoint(
+__host__ __device__ inline Float3 GetRayPlaneIntersectPoint(
 	const Float4& plane,
 	const Ray&    ray,
 	float         t,
@@ -264,7 +264,7 @@ __device__ __inline__ Float3 GetRayPlaneIntersectPoint(
 // ------------------------------ Moller Trumbore ----------------------------------------------------
 // Ray Triangle intersection without pre-transformation
 // --------------------------------------------------------------------------------------------------
-__device__ __forceinline__ bool MollerTrumbore(const Float3 &orig, const Float3 &dir, const Float3 &v0, const Float3 &v1, const Float3 &v2, float &t, float &u, float &v)
+__host__ __device__ inline bool MollerTrumbore(const Float3 &orig, const Float3 &dir, const Float3 &v0, const Float3 &v1, const Float3 &v2, float &t, float &u, float &v)
 {
 	Float3 v0v1 = v1 - v0;
 	Float3 v0v2 = v2 - v0;
@@ -388,7 +388,7 @@ __device__ __forceinline__ void PreCalcTriangleCoordTrans(Triangle& triangle)
 #endif
 }
 
-__device__ __forceinline__ float RayTriangleIntersect(Ray ray, Triangle triangle, float tCurr, float& u, float& v, float& e)
+__host__ __device__ inline float RayTriangleIntersect(Ray ray, Triangle triangle, float tCurr, float& u, float& v, float& e)
 {
 	float t;
 #if RAY_TRIANGLE_MOLLER_TRUMBORE
@@ -405,7 +405,7 @@ __device__ __forceinline__ float RayTriangleIntersect(Ray ray, Triangle triangle
 #endif
 }
 
-__device__ __forceinline__ bool RayAABBIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABB& aabb, float& tmin, float& tmax) {
+__host__ __device__ inline  bool RayAABBIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABB& aabb, float& tmin, float& tmax) {
 
 	Float3 t0s = (aabb.min - rayOrig) * invRayDir;
   	Float3 t1s = (aabb.max - rayOrig) * invRayDir;
@@ -433,7 +433,7 @@ __device__ __forceinline__ bool RayAABBIntersect(const Float3& invRayDir, const 
 	return result;
 }
 
-__device__ __forceinline__ void RayAabbPairIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABBCompact& aabbpair, bool& intersect1, bool& intersect2, float& t1, float& t2)
+__host__ __device__ inline void RayAabbPairIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABBCompact& aabbpair, bool& intersect1, bool& intersect2, float& t1, float& t2)
 {
 	AABB aabbLeft = aabbpair.GetLeftAABB();
 	AABB aabbRight = aabbpair.GetRightAABB();

@@ -16,8 +16,6 @@
 #define DEBUG_PRINT(__THING__) if(IS_DEBUG_PIXEL()) { Print(#__THING__, __THING__); }
 #define DEBUG_PRINT_STRING(__STRING__) if(IS_DEBUG_PIXEL()) { Print(__STRING__); }
 #define DEBUG_PRINT_BAR if(IS_DEBUG_PIXEL()) { Print("------------------------------"); }
-#define NAN_DETECTER(__THING__) NanDetecter(__FUNCTION__,#__THING__, __THING__);
-
 #define DEBUG_CUDA() GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
 
 static const std::string logDir = "C:/Ultimate-Realism-Renderer/log/";
@@ -131,46 +129,56 @@ inline void DebugPrintFile(const std::string& filename, T* devicePtr, uint array
 	delete hostPtr;
 }
 
-__device__ inline void Print(const char* name) { printf("%s\n", name); }
-__device__ inline void Print(const char* name, const int& n) { printf("%s = %d\n", name, n); }
-__device__ inline void Print(const char* name, const bool& n) { printf("%s = %s\n", name, n ? "true" : "false"); }
-__device__ inline void Print(const char* name, const uint& n) { printf("%s = %d\n", name, n); }
-__device__ inline void Print(const char* name, const Int2& n) { printf("%s = (%d, %d)\n", name, n.x, n.y); }
-__device__ inline void Print(const char* name, const uint3& n) { printf("%s = (%d, %d, %d)\n", name, n.x, n.y, n.z); }
-__device__ inline void Print(const char* name, const float& n) { printf("%s = %f\n", name, n); }
-__device__ inline void Print(const char* name, const Float2& f3) { printf("%s = (%f, %f)\n", name, f3[0], f3[1]); }
-__device__ inline void Print(const char* name, const Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }
-__device__ inline void Print(const char* name, const Float4& f4) { printf("%s = (%f, %f, %f, %f)\n", name, f4[0], f4[1], f4[2], f4[3]); }
+__host__ __device__ inline void Print(const char* name) { printf("%s\n", name); }
+__host__ __device__ inline void Print(const char* name, const char* str) { printf("%s: %s\n", name, str); }
+__host__ __device__ inline void Print(const char* name, const int& n) { printf("%s = %d\n", name, n); }
+__host__ __device__ inline void Print(const char* name, const bool& n) { printf("%s = %s\n", name, n ? "true" : "false"); }
+__host__ __device__ inline void Print(const char* name, const uint& n) { printf("%s = %d\n", name, n); }
+__host__ __device__ inline void Print(const char* name, const Int2& n) { printf("%s = (%d, %d)\n", name, n.x, n.y); }
+__host__ __device__ inline void Print(const char* name, const uint3& n) { printf("%s = (%d, %d, %d)\n", name, n.x, n.y, n.z); }
+__host__ __device__ inline void Print(const char* name, const float& n) { printf("%s = %f\n", name, n); }
+__host__ __device__ inline void Print(const char* name, const Float2& f3) { printf("%s = (%f, %f)\n", name, f3[0], f3[1]); }
+__host__ __device__ inline void Print(const char* name, const Float3& f3) { printf("%s = (%f, %f, %f)\n", name, f3[0], f3[1], f3[2]); }
+__host__ __device__ inline void Print(const char* name, const Float4& f4) { printf("%s = (%f, %f, %f, %f)\n", name, f4[0], f4[1], f4[2], f4[3]); }
 
-__device__ inline void NanDetecter(const char* name1, const char* name2, float& v)
+#define NAN_DETECTER(__VALUE__) NanDetecter(__FILE__,__LINE__,#__VALUE__,__VALUE__);
+
+__device__ inline bool isnan(const Float2& value) { return isnan(value.x) || isnan(value.y); }
+__device__ inline bool isnan(const Float3& value) { return isnan(value.x) || isnan(value.y) || isnan(value.z); }
+__device__ inline bool isnan(const Float4& value) { return isnan(value.x) || isnan(value.y) || isnan(value.z) || isnan(value.w); }
+
+template<typename T>
+__device__ inline void NanDetecter(const char* file, int line, const char* valueName, T& value)
 {
-	if (isnan(v))
+	if (isnan(value))
     {
 		int x = blockIdx.x * blockDim.x + threadIdx.x;
 		int y = blockIdx.y * blockDim.y + threadIdx.y;
-        //printf("%s::%s: Nan found at (%d, %d)!\n", name1, name2, x, y);
-		v = 0;
+        printf("%s:%d:%s:(%d,%d): Nan found! \n", file, line, valueName, x, y);
+		value = T{};
     }
 }
 
-__device__ inline void NanDetecter(const char* name1, const char* name2, Float2& v2)
+#define TEST_WITHIN_BOUND(__ARRAY__,__INDEX__,__SIZE__) TestWithinBound(__FILE__,__LINE__,#__ARRAY__, __INDEX__, __SIZE__);
+#define SAFE_LOAD(__ARRAY__,__INDEX__,__SIZE__,__DEFAULT__) SafeLoad(__FILE__,__LINE__,#__ARRAY__,__ARRAY__,__INDEX__,__SIZE__,__DEFAULT__);
+
+inline __host__ __device__ bool TestWithinBound(const char* file, int line, const char* arrayName, int idx, int maxSize)
 {
-	if (isnan(v2.x) || isnan(v2.y))
-    {
+	bool res = (idx >= 0) && (idx < maxSize);
+	if (!res) {
 		int x = blockIdx.x * blockDim.x + threadIdx.x;
 		int y = blockIdx.y * blockDim.y + threadIdx.y;
-        //printf("%s::%s: Nan found at (%d, %d)!\n", name1, name2, x, y);
-		v2 = 0;
-    }
+		printf("%s:%d:%s:(%d,%d): out of bound!\n", file, line, arrayName, x, y);
+	}
+	return res;
 }
 
-__device__ inline void NanDetecter(const char* name1, const char* name2, Float3& v3)
+template<typename T>
+inline __host__ __device__ T SafeLoad(const char* file, int line, const char* arrayName, const T* array, int idx, int maxSize, const T& defaultValue)
 {
-	if (isnan(v3.x) || isnan(v3.y) || isnan(v3.z))
-    {
-		int x = blockIdx.x * blockDim.x + threadIdx.x;
-		int y = blockIdx.y * blockDim.y + threadIdx.y;
-        //printf("%s::%s: Nan found at (%d, %d)!\n", name1, name2, x, y);
-		v3 = 0;
-    }
+	if (TestWithinBound(file, line, arrayName, idx, maxSize)) {
+		return array[idx];
+	} else {
+		return defaultValue;
+	}
 }
