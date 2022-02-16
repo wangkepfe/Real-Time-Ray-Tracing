@@ -45,7 +45,6 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
     //
     // Done!
 
-
     UInt2 noiseLevel16x16Dim(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16));
     if (renderPassSettings.enableTemporalDenoising)
     {
@@ -70,6 +69,7 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
                 GetBuffer2D(HistoryDepthBuffer),
                 GetBuffer2D(MotionVectorBuffer),
                 GetBuffer2D(NoiseLevelBuffer),
+                denoisingParams,
                 bufferDim, historyDim);
         }
     }
@@ -82,6 +82,7 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
             GetBuffer2D(NormalBuffer),
             GetBuffer2D(DepthBuffer),
             GetBuffer2D(NoiseLevelBuffer16x16),
+            denoisingParams,
             bufferDim);
     }
 
@@ -119,6 +120,7 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
             GetBuffer2D(NormalBuffer),
             GetBuffer2D(DepthBuffer),
             GetBuffer2D(NoiseLevelBuffer16x16),
+            denoisingParams,
             bufferDim);
 
         SpatialFilterGlobal5x5<6><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
@@ -127,6 +129,7 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
             GetBuffer2D(NormalBuffer),
             GetBuffer2D(DepthBuffer),
             GetBuffer2D(NoiseLevelBuffer16x16),
+            denoisingParams,
             bufferDim);
 
         SpatialFilterGlobal5x5<12><<<dim3(divRoundUp(renderWidth, 16), divRoundUp(renderHeight, 16), 1), dim3(16, 16, 1)>>>(
@@ -135,6 +138,7 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
             GetBuffer2D(NormalBuffer),
             GetBuffer2D(DepthBuffer),
             GetBuffer2D(NoiseLevelBuffer16x16),
+            denoisingParams,
             bufferDim);
     }
 

@@ -17,6 +17,8 @@
 #include <cassert>
 #include <iomanip>
 
+#define OPTIMIZED_BLUE_NOISE_SPP 4
+
 #include "helper_cuda.h"
 #include "linearMath.h"
 #include "geometry.h"
@@ -36,7 +38,7 @@ class VoxelsGenerator;
 
 #define USE_INTERPOLATED_FAKE_NORMAL 0
 
-#define DEBUG_FRAME -1
+#define DEBUG_FRAME 1
 #define DUMP_FRAME_NUM -1
 #define DEBUG_BVH_TRAVERSE 0
 #define DEBUG_RAY_AABB_INTERSECT 0
@@ -49,11 +51,17 @@ class VoxelsGenerator;
 #define MAX_TRIANGLE_COUNT_ALLOWED 1024 * 1024
 #define MIN_TRIANGLE_COUNT_ALLOWED 2
 
-#define SKY_WIDTH 512
-#define SKY_HEIGHT 256
+#define SKY_WIDTH 1024
+#define SKY_HEIGHT 512
 #define SKY_SIZE SKY_WIDTH * SKY_HEIGHT
-#define SKY_SCAN_BLOCK_SIZE 512
+#define SKY_SCAN_BLOCK_SIZE 1024
 #define SKY_SCAN_BLOCK_COUNT SKY_SIZE / SKY_SCAN_BLOCK_SIZE
+
+#define SUN_WIDTH 128
+#define SUN_HEIGHT 128
+#define SUN_SIZE SUN_WIDTH * SUN_HEIGHT
+#define SUN_SCAN_BLOCK_SIZE 128
+#define SUN_SCAN_BLOCK_COUNT SUN_SIZE / SUN_SCAN_BLOCK_SIZE
 
 #define RayMax 10e10f
 
@@ -268,8 +276,6 @@ struct __align__(16) RayState
 	int        objectIdx;
 	bool       isHitProcessed;
 
-	Float4     rand;
-
 	bool       isOccluded;
 	bool       isShadowRay;
 	float      cosWi;
@@ -312,6 +318,7 @@ enum Buffer2DName
 	NoiseLevelBuffer16x16,
 
 	SkyBuffer,                     // sky
+	SunBuffer,
 
 	Buffer2DCount,
 };
@@ -335,6 +342,7 @@ enum Buffer2DDim
 	BUFFER_2D_8x8_GRID_DIM,
 	BUFFER_2D_16x16_GRID_DIM,
 	BUFFER_2D_SKY_DIM,
+	BUFFER_2D_SUN_DIM,
 	Buffer2DDimCount,
 };
 
@@ -415,6 +423,7 @@ public:
 	SkyParams skyParams = {};
 	RenderPassSettings renderPassSettings = {};
 	PostProcessParams postProcessParams = {};
+	DenoisingParams denoisingParams = {};
 
 private:
 
@@ -487,6 +496,10 @@ private:
 	float*                      skyPdf;
 	float*                      skyCdf;
 	float*                      skyCdfScanTmp;
+
+	float*                      sunPdf;
+	float*                      sunCdf;
+	float*                      sunCdfScanTmp;
 
 	// buffer
 	float*                      d_exposure;

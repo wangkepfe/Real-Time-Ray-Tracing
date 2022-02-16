@@ -44,15 +44,20 @@ __global__ void PathTrace(ConstBuffer            cbo,
     rayState.normal         = Float3(0, -1, 0);
 
     // setup rand gen
+    Float4 randNum[4];
     randGen.idx       = idx;
-    int sampleNum     = 1;
-    int sampleIdx     = 0;
-    randGen.sampleIdx = cbo.frameNum * sampleNum + sampleIdx;
-    rayState.rand     = randGen.Rand4(0);
+    randGen.sampleIdx = cbo.frameNum * 4 + 0;
+    randNum[0] = randGen.Rand4(0);
+    randGen.sampleIdx = cbo.frameNum * 4 + 1;
+    randNum[1] = randGen.Rand4(0);
+    randGen.sampleIdx = cbo.frameNum * 4 + 2;
+    randNum[2] = randGen.Rand4(0);
+    randGen.sampleIdx = cbo.frameNum * 4 + 3;
+    randNum[3] = randGen.Rand4(0);
 
     // generate ray
     Float2 sampleUv;
-    GenerateRay(rayState.orig, rayState.dir, sampleUv, cbo.camera, idx, Float2(rayState.rand.x, rayState.rand.y), Float2(rayState.rand.x, rayState.rand.y));
+    GenerateRay(rayState.orig, rayState.dir, sampleUv, cbo.camera, idx, Float2(randNum[0][0], randNum[0][1]), Float2(randNum[0][2], randNum[0][3]));
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     #if USE_INTERPOLATED_FAKE_NORMAL
@@ -76,25 +81,23 @@ __global__ void PathTrace(ConstBuffer            cbo,
     motionVector += Float2(0.5f);
 
     // glossy only
-    GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
-    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][0]);
+    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
-    GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
-    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
-
-    Float3 indirectLightDir;
+    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][1]);
+    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // glossy + diffuse
-    GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta1, &indirectLightDir);
-    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][2]);
+    // DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
+    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
-    GlossySurfaceInteraction(cbo, rayState, sceneMaterial);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta0);
-    RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
+    // GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][3]);
+    // DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
+    // RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // Light
-    Float3 L0 = GetLightSource(cbo, rayState, sceneMaterial, skyBuffer);
+    Float3 L0 = GetLightSource(cbo, rayState, sceneMaterial, skyBuffer, randNum[0]);
     NAN_DETECTER(L0);
     Float3 L1 = L0 * rayState.beta0;
     Float3 L2 = L1 * rayState.beta1;

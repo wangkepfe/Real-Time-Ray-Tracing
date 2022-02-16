@@ -3,9 +3,17 @@
 #include "kernel.cuh"
 #include "debugUtil.h"
 #include "bsdf.cuh"
-#include "sky.cuh"
 
 #define TOTAL_LIGHT_MAX_COUNT 8
+
+inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool isDiffuseRay, SurfObj skyBuffer, Float2 blueNoise)
+{
+	Float2 jitterSize = Float2(1.0f) / Float2(SKY_WIDTH, SKY_HEIGHT);
+	Float2 jitter = (blueNoise * jitterSize - jitterSize * 0.5f);
+
+	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DFloat4ToFloat3ForSky, EqualAreaMap(raydir), Int2(SKY_WIDTH, SKY_HEIGHT));
+	return color;
+}
 
 __device__ __inline__ void SampleLight(
     ConstBuffer&            cbo,
@@ -15,7 +23,8 @@ __device__ __inline__ void SampleLight(
     float&                  lightSamplePdf,
     float&                  isDeltaLight,
     float*                  skyCdf,
-    int&                    lightIdx)
+    int&                    lightIdx,
+    Float4&                 randNum)
 {
 #if RENDERI_SPHERE_LIGHT
 	const int numSphereLight = sceneMaterial.numSphereLights;
@@ -53,13 +62,13 @@ __device__ __inline__ void SampleLight(
     //indexRemap[idx++] = i++; // sun/moon light
 
 	// choose light
-    float chooseLightRand = rayState.rand.x;
+    float chooseLightRand = randNum[0];
 	int sampledValue = (int)floorf(chooseLightRand * idx);
 	sampledIdx = indexRemap[sampledValue];
 	lightChoosePdf = 1.0f;// / (float)idx;
 
 	// sample
-	Float2 lightSampleRand2(rayState.rand.z, rayState.rand.w);
+	Float2 lightSampleRand2(randNum[1], randNum[2]);
 
     //DEBUG_PRINT(sampledIdx);
 
@@ -176,7 +185,7 @@ __device__ __inline__ void SampleLight(
     //DEBUG_PRINT(lightSampleDir);
 }
 
-__device__ inline Float3 GetLightSource(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SurfObj skyBuffer)
+__device__ inline Float3 GetLightSource(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, SurfObj skyBuffer, Float4& randNum)
 {
     // check for termination and hit light
     if (rayState.hitLight == false || rayState.isOccluded == true) { return 0; }
@@ -200,7 +209,7 @@ __device__ inline Float3 GetLightSource(ConstBuffer& cbo, RayState& rayState, Sc
         // }
         // else
         {
-            Float3 envLightColor = EnvLight2(lightDir, cbo.clockTime, rayState.isDiffuseRay, skyBuffer, Float2(rayState.rand.x, rayState.rand.y));
+            Float3 envLightColor = EnvLight2(lightDir, cbo.clockTime, rayState.isDiffuseRay, skyBuffer, Float2(randNum.x, randNum.y));
             L0 = envLightColor;
         }
     }

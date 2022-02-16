@@ -41,27 +41,42 @@ struct BlueNoiseRandGeneratorHost
 	{
 		cudaMalloc((void**)& sobol_256spp_256d, 256 * 256 * sizeof(unsigned char));
 		cudaMalloc((void**)& scramblingTile, 128 * 128 * 8 * sizeof(unsigned char));
+
+		#if OPTIMIZED_BLUE_NOISE_SPP != 1
 		cudaMalloc((void**)& rankingTile, 128 * 128 * 8 * sizeof(unsigned char));
+		#endif
 
 		cudaMemcpy(sobol_256spp_256d, h_sobol_256spp_256d, 256 * 256 * sizeof(unsigned char), cudaMemcpyHostToDevice);
 		cudaMemcpy(scramblingTile, h_scramblingTile, 128 * 128 * 8 * sizeof(unsigned char), cudaMemcpyHostToDevice);
+
+		#if OPTIMIZED_BLUE_NOISE_SPP != 1
 		cudaMemcpy(rankingTile, h_rankingTile, 128 * 128 * 8 * sizeof(unsigned char), cudaMemcpyHostToDevice);
+		#endif
 	}
 
 	void clear()
 	{
 		cudaFree(sobol_256spp_256d);
 		cudaFree(scramblingTile);
+
+		#if OPTIMIZED_BLUE_NOISE_SPP != 1
 		cudaFree(rankingTile);
+		#endif
 	}
 
 	static unsigned char h_sobol_256spp_256d[];
 	static unsigned char h_scramblingTile[];
+
+	#if OPTIMIZED_BLUE_NOISE_SPP != 1
 	static unsigned char h_rankingTile[];
+	#endif
 
 	unsigned char* sobol_256spp_256d;
 	unsigned char* scramblingTile;
+
+	#if OPTIMIZED_BLUE_NOISE_SPP != 1
 	unsigned char* rankingTile;
+	#endif
 };
 
 struct BlueNoiseRandGenerator
@@ -72,7 +87,9 @@ struct BlueNoiseRandGenerator
 	__host__ BlueNoiseRandGenerator(const BlueNoiseRandGeneratorHost& randGen)
 		: sobol_256spp_256d{ randGen.sobol_256spp_256d },
 		  scramblingTile{ randGen.scramblingTile },
+		  #if OPTIMIZED_BLUE_NOISE_SPP != 1
 		  rankingTile{ randGen.rankingTile },
+		  #endif
 		  idx{ 0 },
 		  sampleIdx{ 0 } {}
 
@@ -80,7 +97,9 @@ struct BlueNoiseRandGenerator
 	__host__ __device__ BlueNoiseRandGenerator(const BlueNoiseRandGenerator& randGen)
 		: sobol_256spp_256d{ randGen.sobol_256spp_256d },
 		  scramblingTile{ randGen.scramblingTile },
+		  #if OPTIMIZED_BLUE_NOISE_SPP != 1
 		  rankingTile{ randGen.rankingTile },
+		  #endif
 		  idx{ randGen.idx },
 		  sampleIdx{ randGen.sampleIdx } {}
 
@@ -112,7 +131,11 @@ struct BlueNoiseRandGenerator
 		sampleIndex = sampleIndex & 255;
 
 		// xor index based on optimized ranking
+		#if OPTIMIZED_BLUE_NOISE_SPP != 1
 		int rankedSampleIndex = sampleIndex ^ rankingTile[sampleDimension + (pixel_i + pixel_j*128)*8];
+		#else
+		int rankedSampleIndex = sampleIndex;
+		#endif
 
 		// fetch value in sequence
 		int value = sobol_256spp_256d[sampleDimension + rankedSampleIndex*256];
@@ -124,14 +147,16 @@ struct BlueNoiseRandGenerator
 		float v = (value + 0.5f) / 256.0f;
 
 		// for comparison
-		//float v = WangHashItoF(sampleIndex * 128 * 128 * 8 + (pixel_i + pixel_j * 128) * 8 + sampleDimension);
+		// v = WangHashItoF(sampleIndex * 128 * 128 * 8 + (pixel_i + pixel_j * 128) * 8 + sampleDimension);
 
 		return v;
 	}
 
 	unsigned char* sobol_256spp_256d;
 	unsigned char* scramblingTile;
+	#if OPTIMIZED_BLUE_NOISE_SPP != 1
 	unsigned char* rankingTile;
+	#endif
 
 	Int2 idx;
 	int sampleIdx;

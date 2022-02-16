@@ -62,7 +62,7 @@ __device__ inline void UpdateMaterial(
 
 #define RAY_TRAVERSE_SPHERES 0
 #define RAY_TRAVERSE_AABBS 0
-#define RAY_TRAVERSE_PLANE 1
+#define RAY_TRAVERSE_PLANE 0
 #define RAY_TRAVERSE_BVH 1
 
 // ray traverse, return true if hit

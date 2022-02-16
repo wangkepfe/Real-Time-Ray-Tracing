@@ -29,6 +29,58 @@ template<typename T>
 __forceinline__ __host__ __device__
 T min(const T& a, const T& b) { return a < b ? a : b; }
 
+inline __host__ __device__ float FMA(float a, float b, float c) {
+	return fma(a, b, c);
+}
+
+// https://pharr.org/matt/blog/2019/11/03/difference-of-floats
+// Difference of products, avoiding catastrophic cancellation
+inline __host__ __device__ float dop(float a, float b, float c, float d) {
+    float cd = c * d;
+    float err = FMA(-c, d, cd);
+    float dop = FMA(a, b, -cd);
+    return dop + err;
+}
+
+// Sum of products
+inline __host__ __device__ float sop(float a, float b, float c, float d) {
+    float cd = c * d;
+    float err = FMA(c, d, -cd);
+    float dop = FMA(a, b, cd);
+    return dop + err;
+}
+
+struct CompensatedFloat {
+  public:
+    // CompensatedFloat Public Methods
+    __host__ __device__ CompensatedFloat(float v, float err = 0) : v(v), err(err) {}
+    __host__ __device__ explicit operator float() const { return v + err; }
+
+    float v, err;
+};
+
+inline __host__ __device__ CompensatedFloat TwoProd(float a, float b) {
+    float ab = a * b;
+    return {ab, FMA(a, b, -ab)};
+}
+
+inline __host__ __device__ CompensatedFloat TwoSum(float a, float b) {
+    float s = a + b, delta = s - a;
+    return {s, (a - (s - delta)) + (b - delta)};
+}
+
+inline __host__ __device__ CompensatedFloat InnerProduct(float a, float b) {
+    return TwoProd(a, b);
+}
+
+template <typename... T>
+inline __host__ __device__ CompensatedFloat InnerProduct(float a, float b, T... terms) {
+    CompensatedFloat ab = TwoProd(a, b);
+    CompensatedFloat tp = InnerProduct(terms...);
+    CompensatedFloat sum = TwoSum(ab.v, tp.v);
+    return {sum.v, ab.err + (tp.err + sum.err)};
+}
+
 struct Float2
 {
 	union {
@@ -358,7 +410,8 @@ __forceinline__ __host__ __device__ Float3 sqrt3f(const Float3& v)              
 __forceinline__ __host__ __device__ Float3 rsqrt3f(const Float3& v)                            { return Float3(1.0f / sqrtf(v.x), 1.0f / sqrtf(v.y), 1.0f / sqrtf(v.z)); }
 __forceinline__ __host__ __device__ Float3 min3f(const Float3 & v1, const Float3 & v2)         { return Float3(min(v1.x, v2.x), min(v1.y, v2.y), min(v1.z, v2.z)); }
 __forceinline__ __host__ __device__ Float3 max3f(const Float3 & v1, const Float3 & v2)         { return Float3(max(v1.x, v2.x), max(v1.y, v2.y), max(v1.z, v2.z)); }
-__forceinline__ __host__ __device__ Float3 cross(const Float3 & v1, const Float3 & v2)         { return Float3(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x); }
+//__forceinline__ __host__ __device__ Float3 cross(const Float3 & v1, const Float3 & v2)         { return Float3(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x); }
+__forceinline__ __host__ __device__ Float3 cross(const Float3 & v1, const Float3 & v2)         { return Float3(dop(v1.y, v2.z, v1.z, v2.y), dop(v1.z, v2.x, v1.x, v2.z), dop(v1.x, v2.y, v1.y, v2.x)); }
 __forceinline__ __host__ __device__ Float3 powf(const Float3 & v1, const Float3 & v2)          { return Float3(powf(v1.x, v2.x), powf(v1.y, v2.y), powf(v1.z, v2.z)); }
 __forceinline__ __host__ __device__ Float3 exp3f(const Float3 & v)                             { return Float3(expf(v.x), expf(v.y), expf(v.z)); }
 __forceinline__ __host__ __device__ Float3 pow3f(const Float3& v, float a)                     { return Float3(powf(v.x, a), powf(v.y, a), powf(v.z, a)); }
@@ -416,7 +469,12 @@ struct Mat3
 };
 
 // column major multiply
-__forceinline__ __host__ __device__ Float3 operator*(const Mat3& m, const Float3& v) { return v.x * m.v0 +  v.y * m.v1 +  v.z * m.v2; }
+__forceinline__ __host__ __device__ Float3 operator*(const Mat3& m, const Float3& v) {
+	// return Float3((float)InnerProduct(m.m00, v[0], m.m01, v[1], m.m02, v[2]),
+	//               (float)InnerProduct(m.m10, v[0], m.m11, v[1], m.m12, v[2]),
+	// 			  (float)InnerProduct(m.m20, v[0], m.m21, v[1], m.m22, v[2]));
+	return m.v0 * v.x + m.v1 * v.y + m.v2 * v.z;
+}
 
 // Rotation matrix
 __forceinline__ __host__ __device__ Mat3 RotationMatrixX(float a) { return { Float3(1, 0, 0), Float3(0, cosf(a), sinf(a)), Float3(0, -sinf(a), cosf(a)) }; }
@@ -526,3 +584,19 @@ __forceinline__ __host__ __device__ Float3 rotationBetween3f(const Float3& p, co
 __forceinline__ __host__ __device__ float SafeDivide(float a, float b) { float eps = 1e-20f; return a / ((fabsf(b) > eps) ? b : copysignf(eps, b)); };
 __forceinline__ __host__ __device__ Float3 SafeDivide3f1f(const Float3& a, float b) { return Float3(SafeDivide(a.x, b), SafeDivide(a.y, b), SafeDivide(a.z, b)); };
 __forceinline__ __host__ __device__ Float3 SafeDivide3f(const Float3& a, const Float3& b) { return Float3(SafeDivide(a.x, b.x), SafeDivide(a.y, b.y), SafeDivide(a.z, b.z)); };
+
+__device__ __forceinline__ void LocalizeSample(
+	const Float3& n,
+	Float3& u,
+	Float3& v)
+{
+	Float3 w;
+
+	if (abs(n.y) > 0.707f)
+		w = Float3(0, 0, 1);
+	else
+		w = Float3(0, 1, 0);
+
+	u = cross(n, w);
+	v = cross(n, u);
+}

@@ -8,7 +8,7 @@
 #define USE_TEXTURE_0 0
 #define USE_TEXTURE_1 0
 
-__device__ inline void GlossySurfaceInteraction(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial)
+__device__ inline void GlossySurfaceInteraction(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, float randNum)
 {
     // check for termination and hit light
     if (rayState.hitLight == true || rayState.isDiffuse == true || rayState.isOccluded == true) { return; }
@@ -26,7 +26,7 @@ __device__ inline void GlossySurfaceInteraction(ConstBuffer& cbo, RayState& rayS
         // glass
         Float3 nextRayDir;
         float rayOffset = rayState.offset;
-        float surfaceRand = rayState.rand.x;
+        float surfaceRand = randNum;
         PerfectReflectionRefraction(1.0, 1.33, rayState.isRayIntoSurface, rayState.normal, rayState.normalDotRayDir, surfaceRand, rayState.dir, nextRayDir, rayOffset);
         rayState.dir = nextRayDir;
         rayState.orig = rayState.pos + rayOffset * rayState.normal;
@@ -41,7 +41,8 @@ __device__ inline void DiffuseSurfaceInteraction(
     float* skyCdf,
     float sampleLightProbablity,
     Float3& beta,
-	Float3* indirectLightDir = nullptr)
+	Float4& randNum,
+    Float4& randNum2)
 {
     // check for termination and hit light
     if (rayState.hitLight == true || rayState.isDiffuse == false || rayState.isOccluded == true) { return; }
@@ -115,7 +116,7 @@ __device__ inline void DiffuseSurfaceInteraction(
     float lightSamplePdf = 1;
     int lightIdx;
 
-    SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf, lightIdx);
+    SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf, lightIdx, randNum2);
 
     // surface sample
     Float3 surfSampleDir;
@@ -128,8 +129,8 @@ __device__ inline void DiffuseSurfaceInteraction(
     Float3 lightSampleSurfaceBsdf;
     float lightSampleSurfacePdf = 0;
 
-    Float2 surfaceDiffuseRand2 (rayState.rand.x, rayState.rand.y);
-    Float2 surfaceDiffuseRand22 (rayState.rand.z, rayState.rand.w);
+    Float2 surfaceDiffuseRand2 (randNum.x, randNum.y);
+    Float2 surfaceDiffuseRand22 (randNum.z, randNum.w);
 
     if (rayState.matType == LAMBERTIAN_DIFFUSE)
     {
@@ -178,7 +179,7 @@ __device__ inline void DiffuseSurfaceInteraction(
     // DEBUG_PRINT(lightSamplePdf);
     // DEBUG_PRINT(powerHeuristicSurface);
 
-    if (rayState.rand.w < powerHeuristicSurface)
+    if (randNum.w < powerHeuristicSurface)
     {
         if (dot(rayState.normal, surfSampleDir) < 0)
         {
@@ -191,8 +192,6 @@ __device__ inline void DiffuseSurfaceInteraction(
 
         float finalPdf = surfaceSamplePdf;
         beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
-
-        if (indirectLightDir != nullptr) { *indirectLightDir = surfSampleDir; }
 
         rayState.dir = surfSampleDir;
 
@@ -215,8 +214,6 @@ __device__ inline void DiffuseSurfaceInteraction(
         float finalPdf = lightSamplePdf;
 
         beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
-
-        if (indirectLightDir != nullptr) { *indirectLightDir = lightSampleDir; }
 
         rayState.dir = lightSampleDir;
 

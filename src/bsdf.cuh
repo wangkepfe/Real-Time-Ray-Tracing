@@ -2,28 +2,9 @@
 
 #include <cuda_runtime.h>
 #include "linearMath.h"
+#include "debugUtil.h"
 
 #define SAFE_COSINE_EPSI 1e-5f
-
-__device__ __forceinline__ void LocalizeSample(
-	const Float3& n,
-	Float3& u,
-	Float3& v)
-{
-	Float3 w;
-
-	if (abs(n.y) > 0.707)
-		w = Float3(1, 0, 0);
-	else if (abs(n.z) > 0.707)
-		w = Float3(1, 0, 0);
-	else
-		w = Float3(0, 1, 0);
-
-	// u = normalize(cross(n, w));
-	// v = normalize(cross(n, u));
-	u = cross(n, w);
-	v = cross(n, u);
-}
 
 __device__ __forceinline__ Float2 ConcentricSampleDisk(Float2 u) {
 	// Map uniform random numbers to [-1, 1]
@@ -58,7 +39,7 @@ __device__ __forceinline__ Float2 UniformSampleDisk(Float2 u) {
     return Float2(r * cosf(theta), r * sinf(theta));
 }
 
-#define DISK_SAMPLE_CONCENTRIC 1
+#define DISK_SAMPLE_CONCENTRIC 0
 #define DISK_SAMPLE_UNIFORM !DISK_SAMPLE_CONCENTRIC
 
 __device__ __forceinline__ Float3 CosineSampleHemisphere(Float2 u)
@@ -88,15 +69,33 @@ __device__ __forceinline__ Float3 CosineSampleHemisphere(Float2 u, const Float3&
 __device__ __forceinline__ void LambertianSample(
 	Float2         randNum,
 	Float3&        wo,
-	const Float3&  n)
+	Float3&  n)
 {
 	Float3 s = CosineSampleHemisphere(randNum);
+
+	// DEBUG_PRINT(s);
+	// float theta = acos(dot(s, Float3(0, 1, 0))) / M_PI * 180.0f;
+	// float gamma = acos(dot(cross(s, Float3(0, 1, 0)), Float3(1, 0, 0))) / M_PI * 180.0f;
+	// DEBUG_PRINT(theta);
+	// DEBUG_PRINT(gamma);
 
 	Float3 u, v;
 	LocalizeSample(n, u, v);
 
 	wo = s.x * u + s.z * v + s.y * n;
 	wo.normalize();
+
+	// DEBUG_PRINT(n);
+	// DEBUG_PRINT(u);
+	// DEBUG_PRINT(v);
+
+	// DEBUG_PRINT(n.norm());
+	// DEBUG_PRINT(u.norm());
+	// DEBUG_PRINT(v.norm());
+
+	// DEBUG_PRINT(dot(n, u));
+	// DEBUG_PRINT(dot(n, v));
+	// DEBUG_PRINT(dot(u, v));
 }
 
 __device__ __forceinline__ Float3 LambertianBsdf(const Float3& albedo) { return albedo / M_PI; }

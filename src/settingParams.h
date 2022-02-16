@@ -20,7 +20,8 @@ struct SkyParams
 	float timeOfDay = 0.25f;
 	float sunAxisAngle = 45.0f;
 	float skyScalar = 0.01f;
-	float groundAlbedo = 0.5f;
+	float sunScalar = 1.0f;
+	float sunAngle = 2.0f;
 };
 
 struct RenderPassSettings
@@ -89,4 +90,20 @@ struct PostProcessParams
 	float W = 11.2f;
 
 	float gamma = 2.2f;
+};
+
+struct DenoisingParams
+{
+	std::vector<std::pair<float*, std::string>> GetValueList()
+	{
+		return {
+			{ &sigma_normal  , "sigma_normal" },
+			{ &sigma_depth   , "sigma_depth" },
+			{ &sigma_material, "sigma_material" }
+		};
+	}
+
+	float sigma_normal   = 128.0f;
+	float sigma_depth    = 0.1f;
+	float sigma_material = 128.0f;
 };

@@ -197,7 +197,7 @@ void MarchingCubeMeshGenerator::InitMarchingCube(const MarchingCube& marchingCub
     std::vector<uint> meshIdx(transList.size());
     meshIdx[0] = PointsToIdx(marchingCube.points);
 
-    int subdivisionLevel = 0;
+    int subdivisionLevel = 2;
 
     std::string filename = "resources/models/roundcubes/" + std::to_string(subdivisionLevel) + "/" + marchingCube.filename;
 

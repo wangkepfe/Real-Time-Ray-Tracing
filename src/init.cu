@@ -289,6 +289,15 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	GpuErrorCheck(cudaMalloc((void**)&skyCdfScanTmp, SKY_SCAN_BLOCK_COUNT * sizeof(float)));
 	GpuErrorCheck(cudaMemset(skyCdfScanTmp, 0, SKY_SCAN_BLOCK_COUNT * sizeof(float)));
 
+	GpuErrorCheck(cudaMalloc((void**)&sunCdf, SUN_SIZE * sizeof(float)));
+	GpuErrorCheck(cudaMemset(sunCdf, 0, SUN_SIZE * sizeof(float)));
+
+	GpuErrorCheck(cudaMalloc((void**)&sunPdf, SUN_SIZE * sizeof(float)));
+	GpuErrorCheck(cudaMemset(sunPdf, 0, SUN_SIZE * sizeof(float)));
+
+	GpuErrorCheck(cudaMalloc((void**)&sunCdfScanTmp, SUN_SCAN_BLOCK_COUNT * sizeof(float)));
+	GpuErrorCheck(cudaMemset(sunCdfScanTmp, 0, SUN_SCAN_BLOCK_COUNT * sizeof(float)));
+
 	// exposure
 	GpuErrorCheck(cudaMalloc((void**)& d_exposure, 4 * sizeof(float)));
 	float initExposureLum[4] = { 1.0f, 1.0f, 1.0f, 1.0f }; // (exposureValue, historyAverageLuminance, historyBrightThresholdLuminance, unused)
@@ -424,6 +433,7 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	dim[BUFFER_2D_8x8_GRID_DIM]   = UInt2(divRoundUp(renderWidth, 8u), divRoundUp(renderHeight, 8u));
 	dim[BUFFER_2D_16x16_GRID_DIM] = UInt2(divRoundUp(renderWidth, 16u), divRoundUp(renderHeight, 16u));
 	dim[BUFFER_2D_SKY_DIM]        = UInt2(SKY_WIDTH, SKY_HEIGHT);
+	dim[BUFFER_2D_SUN_DIM]        = UInt2(SUN_WIDTH, SUN_HEIGHT);
 
 	// ------------------------- Mapping --------------------------
 
@@ -450,6 +460,7 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 		{ NoiseLevelBuffer16x16         , { FORMAT_HALF   , BUFFER_2D_16x16_GRID_DIM    } },
 
 		{ SkyBuffer                     , { FORMAT_FLOAT4 , BUFFER_2D_SKY_DIM       } },
+		{ SunBuffer                     , { FORMAT_FLOAT4 , BUFFER_2D_SKY_DIM       } },
 	};
 
 	// -------------------------- Init buffer -------------------------
@@ -501,6 +512,9 @@ void RayTracer::cleanup()
 	cudaFree(skyCdf);
 	cudaFree(skyPdf);
 	cudaFree(skyCdfScanTmp);
+	cudaFree(sunCdf);
+	cudaFree(sunPdf);
+	cudaFree(sunCdfScanTmp);
 
 	// --------------------- free other gpu buffer ----------------------------
 	// exposure and histogram

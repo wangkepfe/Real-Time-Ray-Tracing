@@ -34,6 +34,9 @@ void UpdateUI(GLFWwindow* window)
 
         if (ImGui::InputFloat("Sky brightness", &g_rayTracer->skyParams.skyScalar, 0.01f, 1.0f, "%.3f"))
             g_rayTracer->skyParams.needRegenerate = true;
+
+        if (ImGui::InputFloat("Sun brightness", &g_rayTracer->skyParams.sunScalar, 0.01f, 1.0f, "%.3f"))
+            g_rayTracer->skyParams.needRegenerate = true;
     }
 
     if (ImGui::CollapsingHeader("Tone Mapping", ImGuiTreeNodeFlags_None))
@@ -41,6 +44,13 @@ void UpdateUI(GLFWwindow* window)
         auto list = g_rayTracer->postProcessParams.GetValueList();
         for (auto& item : list)
             ImGui::SliderFloat(std::get<1>(item).c_str(), std::get<0>(item), std::get<2>(item), std::get<3>(item), "%.2f", std::get<4>(item) ? ImGuiSliderFlags_Logarithmic : ImGuiSliderFlags_None);
+    }
+
+    if (ImGui::CollapsingHeader("Temporal Denoising", ImGuiTreeNodeFlags_None))
+    {
+        auto list = g_rayTracer->denoisingParams.GetValueList();
+        for (auto& item : list)
+            ImGui::InputFloat(item.second.c_str(), item.first);
     }
 
     // if (ImGui::CollapsingHeader("Sky2", ImGuiTreeNodeFlags_None))

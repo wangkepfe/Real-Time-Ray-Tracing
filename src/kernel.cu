@@ -152,22 +152,30 @@ void RayTracer::draw(SurfObj* renderTarget)
     GpuErrorCheck(cudaMemset(morton, UINT_MAX, triCountPadded * sizeof(uint)));
     GpuErrorCheck(cudaMemset(tlasMorton, UINT_MAX, BatchSize * sizeof(uint)));
 
+    GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
+
     // ------------------------------- Sky -------------------------------
     if (cbo.frameNum == 1)
     {
-        UploadSkyConstantBuffer();
+        // InitSkyConstantBuffer();
     }
     if (skyParams.needRegenerate)
     {
+        UpdateSkyState(sunDir);
+
         Sky<<<dim3(SKY_WIDTH / 8, SKY_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyPdf, Int2(SKY_WIDTH, SKY_HEIGHT), sunDir, skyParams);
         Scan(skyPdf, skyCdf, skyCdfScanTmp, SKY_SIZE, SKY_SCAN_BLOCK_SIZE, 1);
 
         skyParams.needRegenerate = false;
     }
 
+    GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
+
     // ------------------------------- BVH -------------------------------
     BuildBvhLevel1();
     BuildBvhLevel2();
+
+    GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
 
     // ------------------------------- Path Tracing -------------------------------
     PathTrace<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
@@ -185,14 +193,20 @@ void RayTracer::draw(SurfObj* renderTarget)
         GetBuffer2D(NoiseLevelBuffer),
         bufferDim);
 
+    GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
+
     // update history camera
     cbo.historyCamera.Setup(cbo.camera);
 
     // ------------------------------- Temporal Spatial Denoising -------------------------------
     TemporalSpatialDenoising(bufferDim, historyDim);
 
+    GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
+
     // ------------------------------- post processing -------------------------------
     PostProcessing(bufferDim, outputDim);
+
+    GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
 
     // Output
     CopyToOutput<<<scaleGridDim, scaleBlockDim>>>(
@@ -218,7 +232,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     }
     #endif
 
-    if (0)
+    if (1)
     {
         GpuErrorCheck(cudaDeviceSynchronize());
 	    GpuErrorCheck(cudaPeekAtLastError());

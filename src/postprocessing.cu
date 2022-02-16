@@ -4,12 +4,14 @@
 
 void RayTracer::PostProcessing(Int2 bufferDim, Int2 outputDim)
 {
+    #if USE_PRECALCULATED_GAUSSIAN == 0
     if (cbo.frameNum == 1)
     {
         CalculateGaussian3x3();
         CalculateGaussian5x5();
         CalculateGaussian7x7();
     }
+    #endif
 
     if (renderPassSettings.enablePostProcess)
     {

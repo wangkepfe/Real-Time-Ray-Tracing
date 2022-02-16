@@ -2,12 +2,9 @@
 
 #include "kernel.cuh"
 #include "sampler.cuh"
+#include "gaussian.cuh"
 
 #define NOISE_THRESHOLD 3
-
-extern __constant__ float cGaussian3x3[9];
-extern __constant__ float cGaussian5x5[25];
-extern __constant__ float cGaussian7x7[49];
 
 __device__ __forceinline__ Float3 RgbToYcocg(const Float3& rgb)
 {
@@ -155,6 +152,7 @@ __global__ void SpatialFilter5x5(
 	SurfObj normalBuffer,
 	SurfObj depthBuffer,
 	SurfObj noiseLevelBuffer16,
+	DenoisingParams params,
 	Int2    size)
 {
 	int x = threadIdx.x + blockIdx.x * 16;
@@ -220,10 +218,6 @@ __global__ void SpatialFilter5x5(
 	if (depthValue >= RayMax) return;
 
 	// -------------------------------- atrous filter --------------------------------
-	const float sigma_normal   = 128.0f;
-	const float sigma_depth    = 4.0f;
-	const float sigma_material = 128.0f;
-
 	Float3 sumOfColor = 0;
 	float sumOfWeight = 0;
 
@@ -244,17 +238,17 @@ __global__ void SpatialFilter5x5(
 		float weight = 1.0f;
 
 		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0f), sigma_normal);
+		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.sigma_normal);
 
 		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / sigma_depth;
+		float deltaDepth = (depthValue - depth) / params.sigma_depth;
 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / sigma_material : 1.0f;
+		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
 
 		// gaussian filter weight
-		weight      *= cGaussian5x5[xoffset + yoffset * 5];
+		weight      *= GetGaussian5x5(xoffset + yoffset * 5);
 
 		// accumulate
 		sumOfColor  += color * weight;
@@ -304,6 +298,7 @@ __global__ void SpatialFilter7x7(
 	SurfObj normalBuffer,
 	SurfObj depthBuffer,
 	SurfObj noiseLevelBuffer16,
+	DenoisingParams params,
 	Int2    size)
 {
 	int x = threadIdx.x + blockIdx.x * 16;
@@ -393,10 +388,6 @@ __global__ void SpatialFilter7x7(
 	if (depthValue >= RayMax) return;
 
 	// -------------------------------- atrous filter --------------------------------
-	const float sigma_normal   = 128.0f;
-	const float sigma_depth    = 4.0f;
-	const float sigma_material = 128.0f;
-
 	Float3 sumOfColor = 0;
 	float sumOfWeight = 0;
 
@@ -440,17 +431,17 @@ __global__ void SpatialFilter7x7(
 		float weight = 1.0f;
 
 		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0001f), sigma_normal);
+		weight      *= powf(max(dot(normalValue, normal), 0.0001f), params.sigma_normal);
 
 		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / sigma_depth;
+		float deltaDepth = (depthValue - depth) / params.sigma_depth;
 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / sigma_material : 1.0f;
+		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
 
 		// gaussian filter weight
-		weight      *= cGaussian7x7[xoffset + yoffset * kernelDim];
+		weight      *= GetGaussian7x7(xoffset + yoffset * kernelDim);
 
 		// accumulate
 		sumOfColor  += color * weight;
@@ -485,6 +476,7 @@ __global__ void SpatialFilterGlobal5x5(
 	SurfObj normalBuffer,
 	SurfObj depthBuffer,
 	SurfObj noiseLevelBuffer,
+	DenoisingParams params,
 	Int2    size)
 {
 	float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
@@ -515,9 +507,6 @@ __global__ void SpatialFilterGlobal5x5(
 
 	if (depthValue >= 10e9f) return;
 
-	const float sigma_normal   = 128.0f;
-	const float sigma_depth    = 4.0f;
-	const float sigma_material = 128.0f;
 	Float3 sumOfColor = 0;
 	float sumOfWeight = 0;
 
@@ -551,17 +540,17 @@ __global__ void SpatialFilterGlobal5x5(
 		float weight = 1.0f;
 
 		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0f), sigma_normal);
+		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.sigma_normal);
 
 		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / sigma_depth;
+		float deltaDepth = (depthValue - depth) / params.sigma_depth;
 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / sigma_material : 1.0f;
+		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
 
 		// gaussian filter weight
-		weight      *= cGaussian5x5[i + j * 5];
+		weight      *= GetGaussian5x5(i + j * 5);
 
 		if (isnan(color.x) || isnan(color.y) || isnan(color.z))
 		{
@@ -605,6 +594,7 @@ __global__ void TemporalFilter(
 	SurfObj   depthHistoryBuffer,
     SurfObj   motionVectorBuffer,
 	SurfObj   noiseLevelBuffer,
+	DenoisingParams params,
 	Int2      size,
 	Int2      historySize)
 {
@@ -694,10 +684,6 @@ __global__ void TemporalFilter(
 
 	if (depthValue >= RayMax) return;
 
-	const float sigma_normal   = 128.0f;
-	const float sigma_depth    = 4.0f;
-	const float sigma_material = 128.0f;
-
 	Float3 neighbourMax = RgbToYcocg(colorValue);
 	Float3 neighbourMin = RgbToYcocg(colorValue);
 
@@ -738,27 +724,27 @@ __global__ void TemporalFilter(
 		float weight = 1.0f;
 
 		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0f), sigma_normal);
+		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.sigma_normal);
 
 		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / sigma_depth;
+		float deltaDepth = (depthValue - depth) / params.sigma_depth;
 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / sigma_material : 1.0f;
+		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
 
 		// gaussian filter weight
 		if (kernelDim == 3)
 		{
-			weight *= cGaussian3x3[xoffset + yoffset * kernelDim];
+			weight *= GetGaussian3x3(xoffset + yoffset * kernelDim);
 		}
 		else if (kernelDim == 5)
 		{
-			weight *= cGaussian5x5[xoffset + yoffset * kernelDim];
+			weight *= GetGaussian5x5(xoffset + yoffset * kernelDim);
 		}
 		else if (kernelDim == 7)
 		{
-			weight *= cGaussian7x7[xoffset + yoffset * kernelDim];
+			weight *= GetGaussian7x7(xoffset + yoffset * kernelDim);
 		}
 
 		// accumulate
