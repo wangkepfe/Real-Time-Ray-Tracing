@@ -39,6 +39,7 @@ __device__ inline void DiffuseSurfaceInteraction(
     SceneMaterial sceneMaterial,
     SceneTextures textures,
     float* skyCdf,
+    float* sunCdf,
     float sampleLightProbablity,
     Float3& beta,
 	Float4& randNum,
@@ -116,7 +117,7 @@ __device__ inline void DiffuseSurfaceInteraction(
     float lightSamplePdf = 1;
     int lightIdx;
 
-    SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf, lightIdx, randNum2);
+    SampleLight(cbo, rayState, sceneMaterial, lightSampleDir, lightSamplePdf, isDeltaLight, skyCdf, sunCdf, lightIdx, randNum2);
 
     // surface sample
     Float3 surfSampleDir;

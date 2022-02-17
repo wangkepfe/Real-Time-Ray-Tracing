@@ -55,20 +55,20 @@ __forceinline__ __device__ void Store2D (
 // byte    4     4     4     4
 // data  float float float float
 
-__forceinline__ __device__ Float4 Load2D_float4 (
-	SurfObj tex,
-	Int2    uv)
-{
-    float4 ret = surf2Dread<float4>(tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
-	return Float4(ret.x, ret.y, ret.z, ret.w);
-}
-
-__forceinline__ __device__ void Store2D_float4 (
+__forceinline__ __device__ void Store2DFloat4 (
     Float4  val,
 	SurfObj tex,
 	Int2    uv)
 {
     surf2Dwrite(make_float4(val.x, val.y, val.z, val.w), tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
+}
+
+__forceinline__ __device__ Float4 Load2DFloat4(
+	SurfObj tex,
+	Int2    uv)
+{
+    float4 ret = surf2Dread<float4>(tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
+	return Float4(ret.x, ret.y, ret.z, ret.w);
 }
 
 __forceinline__ __device__ Float4 Load2DFloat4ForSky (
@@ -286,6 +286,7 @@ __forceinline__ __device__ void Store2D_uchar1(int val, SurfObj tex, Int2 uv)
 __forceinline__ __device__ Float3 Load2DHalf3Ushort1Float3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf3Ushort1(tex, uv).xyz; }
 __forceinline__ __device__ Float3 Load2DHalf4ToFloat3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf4(tex, uv).xyz; }
 __forceinline__ __device__ Float3 Load2DHalf4ToFloat3ForSky(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf4ForSky(tex, uv, size).xyz; }
+__forceinline__ __device__ Float3 Load2DFloat4ToFloat3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DFloat4(tex, uv).xyz; }
 __forceinline__ __device__ Float3 Load2DFloat4ToFloat3ForSky(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DFloat4ForSky(tex, uv, size).xyz; }
 
 typedef Float3 (*SampleFunc)(SurfObj, Int2, Int2);

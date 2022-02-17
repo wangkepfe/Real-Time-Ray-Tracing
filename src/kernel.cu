@@ -159,14 +159,24 @@ void RayTracer::draw(SurfObj* renderTarget)
     // ------------------------------- Sky -------------------------------
     if (cbo.frameNum == 1)
     {
-        // InitSkyConstantBuffer();
+        InitSkyConstantBuffer();
     }
     if (skyParams.needRegenerate)
     {
+        skyParams.sunScalar = max(skyParams.sunScalar, 0.00001f);
+        skyParams.skyScalar = max(skyParams.skyScalar, 0.00001f);
+        skyParams.sunAngle = max(skyParams.sunAngle, 0.51f);
+
         UpdateSkyState(sunDir);
 
         Sky<<<dim3(SKY_WIDTH / 8, SKY_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SkyBuffer), skyPdf, Int2(SKY_WIDTH, SKY_HEIGHT), sunDir, skyParams);
         Scan(skyPdf, skyCdf, skyCdfScanTmp, SKY_SIZE, SKY_SCAN_BLOCK_SIZE, 1);
+
+        SkySun<<<dim3(SUN_WIDTH / 8, SUN_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SunBuffer), sunPdf, Int2(SUN_WIDTH, SUN_HEIGHT), sunDir, skyParams);
+        Scan(sunPdf, sunCdf, sunCdfScanTmp, SUN_SIZE, SUN_SCAN_BLOCK_SIZE, 1);
+
+        cbo.sunAngleCosThetaMax = cosf(skyParams.sunAngle * M_PI / 180.0f / 2.0f);
+        cbo.sampleSkyVsSun = skyParams.sampleSkyVsSun;
 
         skyParams.needRegenerate = false;
     }
@@ -191,6 +201,8 @@ void RayTracer::draw(SurfObj* renderTarget)
         sceneTextures,
         GetBuffer2D(SkyBuffer),
         skyCdf,
+        GetBuffer2D(SunBuffer),
+        sunCdf,
         GetBuffer2D(MotionVectorBuffer),
         GetBuffer2D(NoiseLevelBuffer),
         bufferDim);

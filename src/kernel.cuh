@@ -237,8 +237,11 @@ struct __align__(16) ConstBuffer
 
 	int           bvhBatchSize;
 	int           bvhNodesSize;
-	int trianglesSize;
-	int tlasBvhNodesSize;
+	int           trianglesSize;
+	int           tlasBvhNodesSize;
+
+	float         sunAngleCosThetaMax;
+	float         sampleSkyVsSun;
 };
 
 struct __align__(16) RayState

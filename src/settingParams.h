@@ -13,15 +13,33 @@ enum class MiePhaseFunctionType
 	Mie,
 };
 
+enum class UiWidgetType
+{
+	Scalar, Input,
+};
+
 struct SkyParams
 {
+	std::vector<std::tuple<float*, std::string, UiWidgetType, float, float, bool>> GetValueList()
+	{
+		return {
+			{ &timeOfDay      , "Time of Day"           , UiWidgetType::Scalar, 0.0f , 1.0f , false },
+			{ &sunAxisAngle   , "Sun Axis Angle"        , UiWidgetType::Scalar, 0.0f , 90.0f, false },
+			{ &skyScalar      , "Sky Scalar"            , UiWidgetType::Input , 0.01f, 1.0f , false },
+			{ &sunScalar      , "Sun Scalar"            , UiWidgetType::Input , 0.01f, 1.0f , false },
+			{ &sunAngle       , "Sun Angle"             , UiWidgetType::Input , 0.01f, 1.0f , false },
+			{ &sampleSkyVsSun , "Sky Sample Probablity" , UiWidgetType::Scalar, 0.0f , 1.0f , false },
+		};
+	}
+
 	bool needRegenerate = true;
 
-	float timeOfDay = 0.25f;
-	float sunAxisAngle = 45.0f;
-	float skyScalar = 0.01f;
-	float sunScalar = 1.0f;
-	float sunAngle = 2.0f;
+	float timeOfDay      = 0.25f;
+	float sunAxisAngle   = 45.0f;
+	float skyScalar      = 0.01f;
+	float sunScalar      = 0.01f;
+	float sunAngle       = 5.0f;
+	float sampleSkyVsSun = 0.5f;
 };
 
 struct RenderPassSettings
@@ -103,7 +121,7 @@ struct DenoisingParams
 		};
 	}
 
-	float sigma_normal   = 128.0f;
+	float sigma_normal   = 100.0f;
 	float sigma_depth    = 0.1f;
-	float sigma_material = 128.0f;
+	float sigma_material = 100.0f;
 };

@@ -18,6 +18,8 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           SceneTextures          textures,
                           SurfObj                skyBuffer,
                           float*                 skyCdf,
+                          SurfObj                sunBuffer,
+                          float*                 sunCdf,
                           SurfObj                motionVectorBuffer,
                           SurfObj                noiseLevelBuffer,
                           Int2                   renderSize)
@@ -89,24 +91,26 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // glossy + diffuse
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][2]);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, sunCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][3]);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, sunCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // Light
-    Float3 L0 = GetLightSource(cbo, rayState, sceneMaterial, skyBuffer, randNum[0]);
-    NAN_DETECTER(L0);
+    Float3 L0 = GetLightSource(cbo, rayState, sceneMaterial, skyBuffer, sunBuffer, randNum[0]);
     Float3 L1 = L0 * rayState.beta0;
     Float3 L2 = L1 * rayState.beta1;
 
     // write to buffer
+    NAN_DETECTER(L0);
     NAN_DETECTER(L2);
     NAN_DETECTER(outputNormal);
     NAN_DETECTER(outputDepth);
     NAN_DETECTER(motionVector);
+
+    L2 = clamp3f(L2, Float3(0.0f), Float3(5.0f));
 
     Store2DHalf3Ushort1( { L2 , materialMask } , colorBuffer, idx);
     Store2DHalf4(Float4(outputNormal, 0), normalBuffer, idx);

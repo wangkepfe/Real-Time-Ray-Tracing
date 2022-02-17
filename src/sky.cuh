@@ -69,19 +69,17 @@ inline __device__ bool EqualAreaMapCone(Float2& uv, const Float3& sunDir, const 
 
 	Float3 coords = trans * rayDir;
 	float cosTheta = coords.y;
+	if (cosTheta < cosThetaMax) {
+		return false;
+	}
 	float u = (1.0f - cosTheta) / (1.0f - cosThetaMax);
 
 	float sinTheta = sqrtf(1.0f - cosTheta * cosTheta);
-	if (sinTheta < 1e-5f) {
+	if (sinTheta < 1e-5f || (coords.x / sinTheta) < -1.0f || (coords.x / sinTheta) > 1.0f) {
 		return false;
 	}
 
-	float cosPhi = coords.x / sinTheta;
-	if (cosPhi < -1.0f || cosPhi > 1.0f) {
-		return false;
-	}
-
-	float v = acosf(cosPhi) * INV_TWO_PI;
+	float v = acosf(coords.x / sinTheta) * INV_TWO_PI;
 
 	uv = Float2(u, v);
 
@@ -113,14 +111,14 @@ inline float GetFittingData2(const float* elev_matrix, float solar_elevation)
 
 __constant__ float skyConfigs[90];
 __constant__ float skyRadiances[10];
-// __constant__ float solarDatasets[1800];
-// __constant__ float limbDarkeningDatasets[60];
+__constant__ float solarDatasets[1800];
+__constant__ float limbDarkeningDatasets[60];
 
-// inline void InitSkyConstantBuffer()
-// {
-// 	GpuErrorCheck(cudaMemcpyToSymbol(solarDatasets, h_solarDatasets, sizeof(float) * 1800));
-// 	GpuErrorCheck(cudaMemcpyToSymbol(limbDarkeningDatasets, h_limbDarkeningDatasets, sizeof(float) * 60));
-// }
+inline void InitSkyConstantBuffer()
+{
+	GpuErrorCheck(cudaMemcpyToSymbol(solarDatasets, h_solarDatasets, sizeof(float) * 1800));
+	GpuErrorCheck(cudaMemcpyToSymbol(limbDarkeningDatasets, h_limbDarkeningDatasets, sizeof(float) * 60));
+}
 
 inline void UpdateSkyState(const Float3& sunDir)
 {
@@ -216,86 +214,86 @@ inline __device__ Float3 GetSkyRadiance(const Float3& raydir, const Float3& sunD
 	return rgbColor;
 }
 
-inline __device__ Float3 GetSunRadiance(const Float3& raydir, const Float3& sunDir, SkyParams& skyParams) { return 0; }
-// {
-// 	float theta = acos(raydir.y);
-// 	float gamma = acos(clampf(dot(raydir, sunDir), -1, 1));
+inline __device__ Float3 GetSunRadiance(const Float3& raydir, const Float3& sunDir, SkyParams& skyParams)
+{
+	float theta = acos(raydir.y);
+	float gamma = acos(clampf(dot(raydir, sunDir), -1, 1));
 
-//     unsigned int channel;
+    unsigned int channel;
 
-// 	float elevation = (M_PI / 2.0f) - acos(sunDir.y);
+	float elevation = (M_PI / 2.0f) - acos(sunDir.y);
 
-// 	constexpr float sunAreaScaleFactor = 4.0f;
-// 	constexpr float sunBrightnessScaleFactor = 1.0f / (sunAreaScaleFactor * sunAreaScaleFactor);
-// 	constexpr float solarRadius = 0.51f * M_PI / 180.0f / 2.0f * sunAreaScaleFactor;
+	const float solarRadius = skyParams.sunAngle * M_PI / 180.0f / 2.0f;
+	const float sunBrightnessScaleFactor = 1.0f / ((skyParams.sunAngle / 0.51f) * (skyParams.sunAngle / 0.51f));
 
-// 	Float3 xyzColor = 0;
+	Float3 xyzColor = 0;
 
-// 	float sol_rad_sin = sinf(solarRadius);
-//     float ar2 = 1.0f / ( sol_rad_sin * sol_rad_sin );
-//     float singamma = sin(gamma);
-//     float sc2 = 1.0f - ar2 * singamma * singamma;
+	float sol_rad_sin = sinf(solarRadius);
+    float ar2 = 1.0f / ( sol_rad_sin * sol_rad_sin );
+    float singamma = sinf(gamma);
 
-//     if (sc2 < 0.0f)
-// 		sc2 = 0.0f;
+    float sc2 = 1.0f - ar2 * singamma * singamma;
 
-// 	float sampleCosine = sqrt (sc2);
+    if (sc2 < 0.0f)
+		sc2 = 0.0f;
 
-// 	if (sampleCosine == 0.0f)
-// 		return 0.0f;
+	float sampleCosine = sqrtf(sc2);
 
-// 	#pragma unroll
-// 	for( channel = 0; channel < 10; ++channel )
-// 	{
-// 		const int pieces = 45;
-// 		const int order = 4;
+	if (sampleCosine == 0.0f)
+		return 0.0f;
 
-// 		int pos = (int) (powf(2.0*elevation / M_PI, 1.0/3.0) * pieces); // floor
+	#pragma unroll
+	for( channel = 0; channel < 10; ++channel )
+	{
+		const int pieces = 45;
+		const int order = 4;
 
-// 		if ( pos > 44 )
-// 			pos = 44;
+		int pos = (int) (powf(2.0*elevation / M_PI, 1.0/3.0) * pieces); // floor
 
-// 		const float break_x = powf(((float) pos / (float) pieces), 3.0) * (M_PI * 0.5);
+		if ( pos > 44 )
+			pos = 44;
 
-// 		const float* coefs = solarDatasets + channel * 180 + (order * (pos+1) - 1);
+		const float break_x = powf(((float) pos / (float) pieces), 3.0) * (M_PI * 0.5);
 
-// 		float res = 0.0;
-// 		const float x = elevation - break_x;
-// 		float x_exp = 1.0;
+		const float* coefs = solarDatasets + channel * 180 + (order * (pos+1) - 1);
 
-// 		int i;
-// 		#pragma unroll
-// 		for (i = 0; i < order; ++i)
-// 		{
-// 			res += x_exp * *coefs--;
-// 			x_exp *= x;
-// 		}
+		float res = 0.0;
+		const float x = elevation - break_x;
+		float x_exp = 1.0;
 
-// 		float directRadiance = res;
+		int i;
+		#pragma unroll
+		for (i = 0; i < order; ++i)
+		{
+			res += x_exp * *coefs--;
+			x_exp *= x;
+		}
 
-// 		float ldCoefficient[6];
+		float directRadiance = res;
 
-// 		#pragma unroll
-// 		for ( i = 0; i < 6; i++ )
-// 			ldCoefficient[i] = limbDarkeningDatasets[channel * 6 + i];
+		float ldCoefficient[6];
 
-// 		float darkeningFactor =
-// 			ldCoefficient[0]
-// 			+ ldCoefficient[1] * sampleCosine
-// 			+ ldCoefficient[2] * powf( sampleCosine, 2.0f )
-// 			+ ldCoefficient[3] * powf( sampleCosine, 3.0f )
-// 			+ ldCoefficient[4] * powf( sampleCosine, 4.0f )
-// 			+ ldCoefficient[5] * powf( sampleCosine, 5.0f );
+		#pragma unroll
+		for ( i = 0; i < 6; i++ )
+			ldCoefficient[i] = limbDarkeningDatasets[channel * 6 + i];
 
-// 		directRadiance *= darkeningFactor * sunBrightnessScaleFactor * skyParams.sunScalar;
+		float darkeningFactor =
+			ldCoefficient[0]
+			+ ldCoefficient[1] * sampleCosine
+			+ ldCoefficient[2] * powf( sampleCosine, 2.0f )
+			+ ldCoefficient[3] * powf( sampleCosine, 3.0f )
+			+ ldCoefficient[4] * powf( sampleCosine, 4.0f )
+			+ ldCoefficient[5] * powf( sampleCosine, 5.0f );
 
-// 		xyzColor += directRadiance * SpectrumToXyz(channel);
-// 	}
+		directRadiance *= darkeningFactor * sunBrightnessScaleFactor;
 
-// 	Float3 rgbColor = XyzToRgb(xyzColor);
+		xyzColor += directRadiance * SpectrumToXyz(channel);
+	}
 
-// 	return rgbColor;
-// }
+	Float3 rgbColor = XyzToRgb(xyzColor);
+
+	return rgbColor;
+}
 
 __global__ void Sky(SurfObj skyBuffer, float* skyPdf, Int2 size, Float3 sunDir, SkyParams skyParams)
 {
@@ -311,7 +309,7 @@ __global__ void Sky(SurfObj skyBuffer, float* skyPdf, Int2 size, Float3 sunDir, 
 
 	color = max3f(color, Float3(0.0f));
 
-	Store2D_float4(Float4(color, 0), skyBuffer, Int2(x, y));
+	Store2DFloat4(Float4(color, 0), skyBuffer, Int2(x, y));
 
 	// sky cdf
 	int i = size.x * y + x;
@@ -328,11 +326,11 @@ __global__ void SkySun(SurfObj sunBuffer, float* sunPdf, Int2 size, Float3 sunDi
 
 	Float3 raydir = EqualAreaMapCone(sunDir, u ,v, cos(skyParams.sunAngle * M_PI / 180.0f / 2.0f));
 
-	Float3 color = GetSunRadiance(raydir, sunDir, skyParams) * skyParams.skyScalar;
+	Float3 color = GetSunRadiance(raydir, sunDir, skyParams) * skyParams.sunScalar;
 
 	color = max3f(color, Float3(0.0f));
 
-	Store2D_float4(Float4(color, 0), sunBuffer, Int2(x, y));
+	Store2DFloat4(Float4(color, 0), sunBuffer, Int2(x, y));
 
 	// sky cdf
 	int i = size.x * y + x;

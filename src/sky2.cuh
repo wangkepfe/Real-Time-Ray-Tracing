@@ -324,7 +324,7 @@ __global__ void Sky(SurfObj skyBuffer, float* skyPdf, Int2 size, Float3 sunDir, 
 	#if USE_HALF_PRECISION_SKY
 	Store2DHalf4(Float4(color, 0), skyBuffer, Int2(x, y));
 	#else
-	Store2D_float4(Float4(color, 0), skyBuffer, Int2(x, y));
+	Store2DFloat4(Float4(color, 0), skyBuffer, Int2(x, y));
 	#endif
 
 	// sky cdf
