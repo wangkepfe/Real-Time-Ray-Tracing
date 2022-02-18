@@ -241,7 +241,7 @@ struct __align__(16) ConstBuffer
 	int           tlasBvhNodesSize;
 
 	float         sunAngleCosThetaMax;
-	float         sampleSkyVsSun;
+	SampleParams  sampleParams;
 };
 
 struct __align__(16) RayState
@@ -431,6 +431,7 @@ public:
 	RenderPassSettings renderPassSettings = {};
 	PostProcessParams postProcessParams = {};
 	DenoisingParams denoisingParams = {};
+	SampleParams sampleParams = {};
 
 private:
 

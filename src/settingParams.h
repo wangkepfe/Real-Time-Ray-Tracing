@@ -15,7 +15,7 @@ enum class MiePhaseFunctionType
 
 enum class UiWidgetType
 {
-	Scalar, Input,
+	Scalar, Input, Checkbox,
 };
 
 struct SkyParams
@@ -28,7 +28,6 @@ struct SkyParams
 			{ &skyScalar      , "Sky Scalar"            , UiWidgetType::Input , 0.01f, 1.0f , false },
 			{ &sunScalar      , "Sun Scalar"            , UiWidgetType::Input , 0.01f, 1.0f , false },
 			{ &sunAngle       , "Sun Angle"             , UiWidgetType::Input , 0.01f, 1.0f , false },
-			{ &sampleSkyVsSun , "Sky Sample Probablity" , UiWidgetType::Scalar, 0.0f , 1.0f , false },
 		};
 	}
 
@@ -39,6 +38,23 @@ struct SkyParams
 	float skyScalar      = 0.01f;
 	float sunScalar      = 0.01f;
 	float sunAngle       = 5.0f;
+};
+
+struct SampleParams
+{
+	std::vector<std::tuple<bool*, float*, std::string, UiWidgetType, float, float, bool>> GetValueList()
+	{
+		return {
+			{ &sampleSurfaceVsLightUseMisWeight, nullptr , "Surface vs Light Use MIS Weight" , UiWidgetType::Checkbox, 0.0f , 1.0f , false },
+			{ &sampleSkyVsSunUseFluxWeight, nullptr , "Sky vs Sun Use Flux Weight" , UiWidgetType::Checkbox, 0.0f , 1.0f , false },
+			{ nullptr, &sampleSurfaceVsLight , "Surface vs Light Sample Probablity" , UiWidgetType::Scalar, 0.0f , 1.0f , false },
+			{ nullptr, &sampleSkyVsSun , "Sky vs Sun Sample Probablity" , UiWidgetType::Scalar, 0.0f , 1.0f , false },
+		};
+	}
+
+	bool sampleSurfaceVsLightUseMisWeight = true;
+	bool sampleSkyVsSunUseFluxWeight = false;
+	float sampleSurfaceVsLight = 0.5f;
 	float sampleSkyVsSun = 0.5f;
 };
 

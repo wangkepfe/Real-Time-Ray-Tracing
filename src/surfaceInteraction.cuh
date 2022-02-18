@@ -180,7 +180,18 @@ __device__ inline void DiffuseSurfaceInteraction(
     // DEBUG_PRINT(lightSamplePdf);
     // DEBUG_PRINT(powerHeuristicSurface);
 
-    if (randNum.w < powerHeuristicSurface)
+    float chooseSurfaceProbability;
+
+    if (cbo.sampleParams.sampleSurfaceVsLightUseMisWeight)
+    {
+        chooseSurfaceProbability = powerHeuristicSurface;
+    }
+    else
+    {
+        chooseSurfaceProbability = cbo.sampleParams.sampleSurfaceVsLight;
+    }
+
+    if (randNum.w < chooseSurfaceProbability)
     {
         if (dot(rayState.normal, surfSampleDir) < 0)
         {
@@ -191,8 +202,8 @@ __device__ inline void DiffuseSurfaceInteraction(
         // choose surface scatter sample
         GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
 
-        float finalPdf = surfaceSamplePdf;
-        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-5f);
+        float finalPdf = surfaceSamplePdf * chooseSurfaceProbability;
+        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-10f) * powerHeuristicSurface;
 
         rayState.dir = surfSampleDir;
 
@@ -212,9 +223,9 @@ __device__ inline void DiffuseSurfaceInteraction(
 
         GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
 
-        float finalPdf = lightSamplePdf;
+        float finalPdf = lightSamplePdf * (1.0f - chooseSurfaceProbability);
 
-        beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-5f);
+        beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-10f) * (1.0f - powerHeuristicSurface);
 
         rayState.dir = lightSampleDir;
 

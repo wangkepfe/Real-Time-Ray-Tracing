@@ -150,8 +150,19 @@ __device__ __inline__ void SampleLight(
         // Sample sky or sun pdf
         const float sampleSkyVsSunPdf = maxSkyCdf / (maxSkyCdf + maxSunCdf);
 
+        float chooseSampleSkyVsSun;
+
+        if (cbo.sampleParams.sampleSkyVsSunUseFluxWeight)
+        {
+            chooseSampleSkyVsSun = sampleSkyVsSunPdf;
+        }
+        else
+        {
+            chooseSampleSkyVsSun = cbo.sampleParams.sampleSkyVsSun;
+        }
+
         // Choose to sample sky
-        if (cbo.sampleSkyVsSun > randNum[1])
+        if (chooseSampleSkyVsSun > randNum[1])
         {
             // Binary search in range 0 to size-2, since we want result+1 to be the index, we'll need to subtract result for calculating PDF
             const int sampledSkyIdx = BinarySearch(skyCdf, 0, SKY_SIZE - 2, randNum[0] * maxSkyCdf) + 1;
@@ -171,7 +182,7 @@ __device__ __inline__ void SampleLight(
 
             // Set light sample direction and PDF
             lightSampleDir = rayDir;
-            lightSamplePdf = sampledSkyPdf * lightChoosePdf * cbo.sampleSkyVsSun;
+            lightSamplePdf = sampledSkyPdf * lightChoosePdf * chooseSampleSkyVsSun;
 
             // Set light index for shadow ray rejection
             lightIdx = ENV_LIGHT_ID;
@@ -196,7 +207,7 @@ __device__ __inline__ void SampleLight(
 
             // Set light sample direction and PDF
             lightSampleDir = rayDir;
-            lightSamplePdf = sampledSunPdf * lightChoosePdf * (1.0f - cbo.sampleSkyVsSun);
+            lightSamplePdf = sampledSunPdf * lightChoosePdf * (1.0f - chooseSampleSkyVsSun);
 
             // Set light index for shadow ray rejection
             lightIdx = ENV_LIGHT_ID;

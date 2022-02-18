@@ -51,6 +51,34 @@ void UpdateUI(GLFWwindow* window)
         }
     }
 
+    if (ImGui::CollapsingHeader("Sampling", ImGuiTreeNodeFlags_None))
+    {
+        auto list = g_rayTracer->sampleParams.GetValueList();
+        for (auto& item : list)
+        {
+            if (std::get<3>(item) == UiWidgetType::Scalar)
+            {
+                if (ImGui::SliderFloat(std::get<2>(item).c_str(),
+                                       std::get<1>(item),
+                                       std::get<4>(item),
+                                       std::get<5>(item),
+                                       "%.3f",
+                                       std::get<6>(item) ? ImGuiSliderFlags_Logarithmic : ImGuiSliderFlags_None))
+                {}
+            }
+            else if (std::get<3>(item) == UiWidgetType::Input)
+            {
+                if (ImGui::InputFloat(std::get<2>(item).c_str(), std::get<1>(item)))
+                {}
+            }
+            else if (std::get<3>(item) == UiWidgetType::Checkbox)
+            {
+                if (ImGui::Checkbox(std::get<2>(item).c_str(), std::get<0>(item)))
+                {}
+            }
+        }
+    }
+
     if (ImGui::CollapsingHeader("Tone Mapping", ImGuiTreeNodeFlags_None))
     {
         auto list = g_rayTracer->postProcessParams.GetValueList();

@@ -124,6 +124,9 @@ void RayTracer::UpdateFrame()
     sunPos = cbo.camera.WorldToScreenSpace(cbo.camera.pos + sunDir);
     sunUv = floor2(sunPos * Float2(renderWidth, renderHeight));
 
+    // Update params
+    cbo.sampleParams = sampleParams;
+
     if (cbo.frameNum == 1)
     {
         // init history camera
@@ -176,7 +179,6 @@ void RayTracer::draw(SurfObj* renderTarget)
         Scan(sunPdf, sunCdf, sunCdfScanTmp, SUN_SIZE, SUN_SCAN_BLOCK_SIZE, 1);
 
         cbo.sunAngleCosThetaMax = cosf(skyParams.sunAngle * M_PI / 180.0f / 2.0f);
-        cbo.sampleSkyVsSun = skyParams.sampleSkyVsSun;
 
         skyParams.needRegenerate = false;
     }
