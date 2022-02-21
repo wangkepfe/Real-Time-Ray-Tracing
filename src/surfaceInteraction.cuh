@@ -137,7 +137,6 @@ __device__ inline void DiffuseSurfaceInteraction(
     {
         LambertianSample(surfaceDiffuseRand2, surfSampleDir, normal);
 
-        // if (isDeltaLight == false)
         {
             surfaceBsdfOverPdf = LambertianBsdfOverPdf(albedo);
             surfaceSampleBsdf = LambertianBsdf(albedo);
@@ -156,7 +155,6 @@ __device__ inline void DiffuseSurfaceInteraction(
         Float3 F0 = mat.F0;
         float alpha = mat.alpha;
 
-        // if (isDeltaLight == false)
         {
             MacrofacetReflectionSample(surfaceDiffuseRand2, surfaceDiffuseRand22, rayDir, surfSampleDir, normal, surfaceNormal, surfaceBsdfOverPdf, surfaceSampleBsdf, surfaceSamplePdf, F0, albedo, alpha);
         }
@@ -173,25 +171,9 @@ __device__ inline void DiffuseSurfaceInteraction(
     NAN_DETECTER(surfaceSamplePdf);
     NAN_DETECTER(lightSamplePdf);
 
-
     float powerHeuristicSurface = (surfaceSamplePdf * surfaceSamplePdf) / (surfaceSamplePdf * surfaceSamplePdf + lightSamplePdf * lightSamplePdf);
 
-    // DEBUG_PRINT(surfaceSamplePdf);
-    // DEBUG_PRINT(lightSamplePdf);
-    // DEBUG_PRINT(powerHeuristicSurface);
-
-    float chooseSurfaceProbability;
-
-    if (cbo.sampleParams.sampleSurfaceVsLightUseMisWeight)
-    {
-        chooseSurfaceProbability = powerHeuristicSurface;
-    }
-    else
-    {
-        chooseSurfaceProbability = cbo.sampleParams.sampleSurfaceVsLight;
-    }
-
-    if (randNum.w < chooseSurfaceProbability)
+    if (randNum.z < 0.5)
     {
         if (dot(rayState.normal, surfSampleDir) < 0)
         {
@@ -202,40 +184,59 @@ __device__ inline void DiffuseSurfaceInteraction(
         // choose surface scatter sample
         GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
 
-        float finalPdf = surfaceSamplePdf * chooseSurfaceProbability;
-        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-10f) * powerHeuristicSurface;
+        float finalPdf = surfaceSamplePdf;
+        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-10f);
 
         rayState.dir = surfSampleDir;
-
-        // DEBUG_PRINT(finalPdf);
-        // DEBUG_PRINT(cosThetaWi);
-        // DEBUG_PRINT(surfaceSampleBsdf);
-        // DEBUG_PRINT(beta);
     }
     else
     {
-        // choose light sample
-        if (dot(rayState.normal, lightSampleDir) < 0)
+        if (randNum.w < powerHeuristicSurface)
         {
-            rayState.isOccluded = true;
-            return;
+            if (dot(rayState.normal, surfSampleDir) < 0)
+            {
+                rayState.isOccluded = true;
+                return;
+            }
+
+            // choose surface scatter sample
+            GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
+
+            float finalPdf = surfaceSamplePdf;
+            beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-10f);
+
+            rayState.dir = surfSampleDir;
+
+            // DEBUG_PRINT(finalPdf);
+            // DEBUG_PRINT(cosThetaWi);
+            // DEBUG_PRINT(surfaceSampleBsdf);
+            // DEBUG_PRINT(beta);
         }
+        else
+        {
+            // choose light sample
+            if (dot(rayState.normal, lightSampleDir) < 0)
+            {
+                rayState.isOccluded = true;
+                return;
+            }
 
-        GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
+            GetCosThetaWi(lightSampleDir, normal, cosThetaWi);
 
-        float finalPdf = lightSamplePdf * (1.0f - chooseSurfaceProbability);
+            float finalPdf = lightSamplePdf;
 
-        beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-10f) * (1.0f - powerHeuristicSurface);
+            beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-10f);
 
-        rayState.dir = lightSampleDir;
+            rayState.dir = lightSampleDir;
 
-        rayState.lightIdx = lightIdx;
-        rayState.isShadowRay = true;
+            rayState.lightIdx = lightIdx;
+            rayState.isShadowRay = true;
 
-        // DEBUG_PRINT(finalPdf);
-        // DEBUG_PRINT(cosThetaWi);
-        // DEBUG_PRINT(lightSampleSurfaceBsdf);
-        // DEBUG_PRINT(beta);
+            // DEBUG_PRINT(finalPdf);
+            // DEBUG_PRINT(cosThetaWi);
+            // DEBUG_PRINT(lightSampleSurfaceBsdf);
+            // DEBUG_PRINT(beta);
+        }
     }
 
     NAN_DETECTER(beta);

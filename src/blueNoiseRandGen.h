@@ -13,26 +13,20 @@ __forceinline__ __device__ unsigned int WangHash(unsigned int a)
 	return a;
 }
 
-__forceinline__ __device__ float WangHashFtoF(float a)
-{
-    union FloatUintConverter {
-		__device__ FloatUintConverter() {}
-        float f;
-        uint ui;
-    };
-    FloatUintConverter converter;
-    converter.f = a;
-    uint b = converter.ui;
-    uint c = WangHash(b);
-	float d = abs((float)c / INT32_MAX);
-	return d;
-}
-
 __forceinline__ __device__ float WangHashItoF(uint a)
 {
     uint c = WangHash(a);
-	float d = abs((float)c / INT32_MAX);
-	return d;
+	return (float)c / UINT32_MAX;
+}
+
+__forceinline__ __device__ float HashFloat3(Float3 a)
+{
+    uint s1 = *reinterpret_cast<uint*>(&a.x);
+	uint s2 = *reinterpret_cast<uint*>(&a.y);
+	uint s3 = *reinterpret_cast<uint*>(&a.z);
+
+	// return WangHashItoF(s1 ^ s2 ^ s3);
+	return 1.0;
 }
 
 struct BlueNoiseRandGeneratorHost

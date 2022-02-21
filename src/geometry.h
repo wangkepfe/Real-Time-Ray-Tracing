@@ -45,7 +45,19 @@ struct  __align__(16) Ray
 struct __align__(16) Triangle
 {
 	__host__ __device__ Triangle() {}
-	__host__ __device__ Triangle(const Float3& v1, const Float3& v2, const Float3& v3) : v1(v1), v2(v2), v3(v3) {}
+	__host__ __device__ Triangle(
+		const Float3& v1,
+		const Float3& v2,
+		const Float3& v3
+		) : v1(v1), v2(v2), v3(v3) {}
+	__host__ __device__ Triangle(
+		const Float3& v1,
+		const Float3& v2,
+		const Float3& v3,
+		const Float3& n1,
+		const Float3& n2,
+		const Float3& n3
+		) : v1(v1), v2(v2), v3(v3), n1(n1), n2(n2), n3(n3) {}
 
 	Float3 v1; float w1;
 	Float3 v2; float w2;

@@ -30,6 +30,26 @@ struct Timer
         }
     }
 
+    void updateWithLimiter(float minTimeAllowed) {
+        ++frameCounter;
+
+        do {
+            currentTime = std::chrono::high_resolution_clock::now();
+            deltaTime = std::chrono::duration<double, std::milli>(currentTime - previousTime).count();
+        }
+        while (deltaTime < minTimeAllowed);
+
+        previousTime = currentTime;
+
+        fpsTimer += static_cast<float>(deltaTime);
+
+        if (fpsTimer > 1000.0f) {
+            fps = static_cast<uint32_t>(static_cast<float>(frameCounter) * (1000.0f / fpsTimer));
+            fpsTimer -= 1000.0f;
+            frameCounter = 0;
+        }
+    }
+
     float getDeltaTime() {
         return static_cast<float>(deltaTime);
     }
@@ -64,8 +84,8 @@ struct Timer
 
 struct ScopeTimer
 {
-    ScopeTimer(const std::string& name) : 
-        name {name}, 
+    ScopeTimer(const std::string& name) :
+        name {name},
         startTime {std::chrono::high_resolution_clock::now()}
     {}
     ~ScopeTimer()

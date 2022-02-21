@@ -18,13 +18,18 @@ enum class UiWidgetType
 	Scalar, Input, Checkbox,
 };
 
+enum class ToneMappingType
+{
+	Uncharted, ACES1, ACES2, Reinhard,
+};
+
 struct SkyParams
 {
 	std::vector<std::tuple<float*, std::string, UiWidgetType, float, float, bool>> GetValueList()
 	{
 		return {
-			{ &timeOfDay      , "Time of Day"           , UiWidgetType::Scalar, 0.0f , 1.0f , false },
-			{ &sunAxisAngle   , "Sun Axis Angle"        , UiWidgetType::Scalar, 0.0f , 90.0f, false },
+			{ &timeOfDay      , "Time of Day"           , UiWidgetType::Scalar, 0.01f , 0.99f , false },
+			{ &sunAxisAngle   , "Sun Axis Angle"        , UiWidgetType::Scalar, 5.0f , 85.0f, false },
 			{ &skyScalar      , "Sky Scalar"            , UiWidgetType::Input , 0.01f, 1.0f , false },
 			{ &sunScalar      , "Sun Scalar"            , UiWidgetType::Input , 0.01f, 1.0f , false },
 			{ &sunAngle       , "Sun Angle"             , UiWidgetType::Input , 0.01f, 1.0f , false },
@@ -53,7 +58,7 @@ struct SampleParams
 	}
 
 	bool sampleSurfaceVsLightUseMisWeight = true;
-	bool sampleSkyVsSunUseFluxWeight = false;
+	bool sampleSkyVsSunUseFluxWeight = true;
 	float sampleSurfaceVsLight = 0.5f;
 	float sampleSkyVsSun = 0.5f;
 };
@@ -107,11 +112,13 @@ struct PostProcessParams
 			{ &D, "Tonemap D", 0.0f,  1.0f  , false},
 			{ &E, "Tonemap E", 0.0f,  1.0f  , false},
 			{ &F, "Tonemap F", 0.0f,  1.0f  , false},
-			{ &W, "Tonemap W", 0.01f, 100.0f, true },
+			{ &W, "Tonemap W", 1.0f, 1e10f, true },
 
 			{ &gamma, "Gamma", 1.0f, 5.0f, false }
 		};
 	}
+
+	ToneMappingType toneMappingType = ToneMappingType::Reinhard;
 
 	float exposure = 1.0f;
 
@@ -121,7 +128,7 @@ struct PostProcessParams
 	float D = 0.20f;
 	float E = 0.02f;
 	float F = 0.30f;
-	float W = 11.2f;
+	float W = 10.0f;
 
 	float gamma = 2.2f;
 };

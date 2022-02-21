@@ -11,8 +11,8 @@ int main ()
     ofstream myfile;
     myfile.open ("skyData.h");
 
-    int turbidity = 4;
-    int albedo = 1;
+    int turbidity = 7;
+    int albedo = 0;
 	myfile << "#pragma once\n";
     myfile << "static const float skyDataSets[] = {\n";
     for (double* dataset : datasets)
@@ -130,21 +130,21 @@ int main ()
         }
     }
 
-    myfile << "const float spectrumCieX[] = {\n    ";
+    myfile << "static const float spectrumCieX[] = {\n    ";
     for (int i = 0; i < 10; ++i)
     {
         myfile << std::scientific << static_cast<float>(valueX[i]) << "f, ";
     }
     myfile << "\n};\n\n";
 
-    myfile << "const float spectrumCieY[] = {\n    ";
+    myfile << "static const float spectrumCieY[] = {\n    ";
     for (int i = 0; i < 10; ++i)
     {
         myfile << std::scientific << static_cast<float>(valueY[i]) << "f, ";
     }
     myfile << "\n};\n\n";
 
-    myfile << "const float spectrumCieZ[] = {\n    ";
+    myfile << "static const float spectrumCieZ[] = {\n    ";
     for (int i = 0; i < 10; ++i)
     {
         myfile << std::scientific << static_cast<float>(valueZ[i]) << "f, ";

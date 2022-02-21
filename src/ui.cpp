@@ -81,6 +81,9 @@ void UpdateUI(GLFWwindow* window)
 
     if (ImGui::CollapsingHeader("Tone Mapping", ImGuiTreeNodeFlags_None))
     {
+        const char* items[] = { "Uncharted", "ACES1", "ACES2", "Reinhard" };
+        ImGui::Combo("Tone Mapping Type", (int*)&g_rayTracer->postProcessParams.toneMappingType, items, IM_ARRAYSIZE(items));
+
         auto list = g_rayTracer->postProcessParams.GetValueList();
         for (auto& item : list)
             ImGui::SliderFloat(

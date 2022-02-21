@@ -5,6 +5,7 @@
 #include "geometry.cuh"
 #include <assert.h>
 #include "precision.cuh"
+#include "blueNoiseRandGen.h"
 
 // ------------------------------ Morton Code 3D ----------------------------------------------------
 // 32bit 3D morton code encode
@@ -37,6 +38,25 @@ __inline__ __device__ void WarpReduceMaxMin3f(Float3& vmax, Float3& vmin) {
 		vmax.x = max(__shfl_down_sync(0xffffffff, vmax.x, offset), vmax.x);
 		vmax.y = max(__shfl_down_sync(0xffffffff, vmax.y, offset), vmax.y);
 		vmax.z = max(__shfl_down_sync(0xffffffff, vmax.z, offset), vmax.z);
+	}
+}
+
+__device__ inline void FlipNormal(Float3& n)
+{
+	float dy = dot(n, Float3(0, 1, 0));
+	float dx = dot(n, Float3(1, 0, 0));
+	float dz = dot(n, Float3(0, 0, 1));
+
+	if (abs(dy) < 1e-10f) {
+		if (abs(dx) < 1e-10f) {
+			if (dz < 0) {
+				n *= -1;
+			}
+		} else if (dx < 0) {
+			n *= -1;
+		}
+	} else if (dy < 0) {
+		n *= -1;
 	}
 }
 
@@ -86,24 +106,25 @@ __global__ void UpdateSceneGeometry(
 	{
 		mytriangle[i] = constTriangles[idx[i]];
 
-		// if (applyTransform)
-		// {
-		// 	Float3 v1 = mytriangle[i].v1;
-		// 	Float3 v2 = mytriangle[i].v2;
-		// 	Float3 v3 = mytriangle[i].v3;
+		Float3 v1 = mytriangle[i].v1;
+		Float3 v2 = mytriangle[i].v2;
+		Float3 v3 = mytriangle[i].v3;
 
-		// 	v1.y += 1.2f;
-		// 	v2.y += 1.2f;
-		// 	v3.y += 1.2f;
+		Float3 n1 = mytriangle[i].n1;
+		Float3 n2 = mytriangle[i].n2;
+		Float3 n3 = mytriangle[i].n3;
 
-		// 	Mat3 rotMat = RotationMatrixY(clockTime  * TWO_PI / 50.0);
+		FlipNormal(n1);
+		FlipNormal(n2);
+		FlipNormal(n3);
 
-		// 	v1 = rotMat * v1;
-		// 	v2 = rotMat * v2;
-		// 	v3 = rotMat * v3;
+		const float noiseScale = 0.3f;
 
-		// 	mytriangle[i] = Triangle(v1, v2, v3);
-		// }
+		// v1 += n1 * (HashFloat3(v1) - 0.5f) * noiseScale;
+		// v2 += n2 * (HashFloat3(v2) - 0.5f) * noiseScale;
+		// v3 += n3 * (HashFloat3(v3) - 0.5f) * noiseScale;
+
+		mytriangle[i] = Triangle(v1, v2, v3, n1, n2, n3);
 
 	#if RAY_TRIANGLE_COORDINATE_TRANSFORM
 		PreCalcTriangleCoordTrans(mytriangle[i]);

@@ -65,7 +65,9 @@ void RayTracer::UpdateFrame()
     cbo.frameNum      = framen++;
 
     // timer
-    timer.update();
+    constexpr float maxFpsAllowed = 75.0f;
+    constexpr float minFrameTimeAllowed = 1000.0f / maxFpsAllowed;
+    timer.updateWithLimiter(minFrameTimeAllowed);
     deltaTime = timer.getDeltaTime();
     clockTime = timer.getTime();
     cbo.clockTime     = clockTime;

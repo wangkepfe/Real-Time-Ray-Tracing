@@ -110,7 +110,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
     NAN_DETECTER(outputDepth);
     NAN_DETECTER(motionVector);
 
-    L2 = clamp3f(L2, Float3(0.0f), Float3(5.0f));
+    L2 = clamp3f(L2, Float3(0.0f), Float3(10.0f));
 
     Store2DHalf3Ushort1( { L2 , materialMask } , colorBuffer, idx);
     Store2DHalf4(Float4(outputNormal, 0), normalBuffer, idx);

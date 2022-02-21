@@ -81,6 +81,13 @@ inline __host__ __device__ CompensatedFloat InnerProduct(float a, float b, T... 
     return {sum.v, ab.err + (tp.err + sum.err)};
 }
 
+inline __host__ __device__ auto DifferenceOfProducts(float a, float b, float c, float d) {
+    auto cd = c * d;
+    auto differenceOfProducts = FMA(a, b, -cd);
+    auto error = FMA(-c, d, cd);
+    return differenceOfProducts + error;
+}
+
 struct Float2
 {
 	union {
@@ -460,7 +467,7 @@ struct Mat3
 	__forceinline__ __host__ __device__ Mat3(const Float3& v0, const Float3& v1, const Float3& v2) : v0{v0}, v1{v1}, v2{v2} {}
 
 	// column-major matrix construction
-	__forceinline__ __host__ __device__ Mat3(float m00, float m01, float m02, float m10, float m11, float m12, float m20, float m21, float m22)
+	__forceinline__ __host__ __device__ constexpr Mat3(float m00, float m01, float m02, float m10, float m11, float m12, float m20, float m21, float m22)
 	: m00{m00}, m01{m01}, m02{m02}, m10{m10}, m11{m11}, m12{m12}, m20{m20}, m21{m21}, m22{m22} {}
 
 	__forceinline__ __host__ __device__ Float3&       operator[](int i)       { return _v3[i]; }
@@ -471,16 +478,44 @@ struct Mat3
 
 // column major multiply
 __forceinline__ __host__ __device__ Float3 operator*(const Mat3& m, const Float3& v) {
-	// return Float3((float)InnerProduct(m.m00, v[0], m.m01, v[1], m.m02, v[2]),
-	//               (float)InnerProduct(m.m10, v[0], m.m11, v[1], m.m12, v[2]),
-	// 			  (float)InnerProduct(m.m20, v[0], m.m21, v[1], m.m22, v[2]));
-	return m.v0 * v.x + m.v1 * v.y + m.v2 * v.z;
+	return Float3((float)InnerProduct(m.m00, v[0], m.m01, v[1], m.m02, v[2]),
+	              (float)InnerProduct(m.m10, v[0], m.m11, v[1], m.m12, v[2]),
+				  (float)InnerProduct(m.m20, v[0], m.m21, v[1], m.m22, v[2]));
+	// return m.v0 * v.x + m.v1 * v.y + m.v2 * v.z;
 }
 
 // Rotation matrix
 __forceinline__ __host__ __device__ Mat3 RotationMatrixX(float a) { return { Float3(1, 0, 0), Float3(0, cosf(a), sinf(a)), Float3(0, -sinf(a), cosf(a)) }; }
 __forceinline__ __host__ __device__ Mat3 RotationMatrixY(float a) { return { Float3(cosf(a), 0, -sinf(a)), Float3(0, 1, 0), Float3(sinf(a), 0, cosf(a)) }; }
 __forceinline__ __host__ __device__ Mat3 RotationMatrixZ(float a) { return { Float3(cosf(a), sinf(a), 0), Float3(-sinf(a), cosf(a), 0), Float3(0, 0, 1) }; }
+
+__forceinline__ __host__ __device__ float Determinant(const Mat3 &m) {
+    float minor12 = DifferenceOfProducts(m[1][1], m[2][2], m[1][2], m[2][1]);
+    float minor02 = DifferenceOfProducts(m[1][0], m[2][2], m[1][2], m[2][0]);
+    float minor01 = DifferenceOfProducts(m[1][0], m[2][1], m[1][1], m[2][0]);
+    return FMA(m[0][2], minor01, DifferenceOfProducts(m[0][0], minor12, m[0][1], minor02));
+}
+
+__forceinline__ __host__ __device__ Mat3 Inverse(const Mat3 &m) {
+    float det = Determinant(m);
+    if (det == 0)
+        return {};
+    float invDet = 1 / det;
+
+    Mat3 r;
+
+    r[0][0] = invDet * DifferenceOfProducts(m[1][1], m[2][2], m[1][2], m[2][1]);
+    r[1][0] = invDet * DifferenceOfProducts(m[1][2], m[2][0], m[1][0], m[2][2]);
+    r[2][0] = invDet * DifferenceOfProducts(m[1][0], m[2][1], m[1][1], m[2][0]);
+    r[0][1] = invDet * DifferenceOfProducts(m[0][2], m[2][1], m[0][1], m[2][2]);
+    r[1][1] = invDet * DifferenceOfProducts(m[0][0], m[2][2], m[0][2], m[2][0]);
+    r[2][1] = invDet * DifferenceOfProducts(m[0][1], m[2][0], m[0][0], m[2][1]);
+    r[0][2] = invDet * DifferenceOfProducts(m[0][1], m[1][2], m[0][2], m[1][1]);
+    r[1][2] = invDet * DifferenceOfProducts(m[0][2], m[1][0], m[0][0], m[1][2]);
+    r[2][2] = invDet * DifferenceOfProducts(m[0][0], m[1][1], m[0][1], m[1][0]);
+
+    return r;
+}
 
 struct Mat4
 {

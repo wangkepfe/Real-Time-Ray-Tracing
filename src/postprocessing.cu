@@ -101,16 +101,6 @@ void RayTracer::PostProcessing(Int2 bufferDim, Int2 outputDim)
                     bufferDim);
             }
         }
-
-        // Tone mapping
-        if (renderPassSettings.enableToneMapping)
-        {
-            ToneMapping<<<gridDim, blockDim>>>(
-                GetBuffer2D(RenderColorBuffer),
-                bufferDim,
-                d_exposure,
-                postProcessParams);
-        }
     }
 
     // Scale to final output
@@ -128,6 +118,43 @@ void RayTracer::PostProcessing(Int2 bufferDim, Int2 outputDim)
             SharpeningFilter<<<scaleGridDim, scaleBlockDim>>>(
                 GetBuffer2D(ScaledColorBuffer),
                 outputDim);
+        }
+
+        // Tone mapping
+        if (renderPassSettings.enableToneMapping)
+        {
+            if (postProcessParams.toneMappingType == ToneMappingType::Uncharted)
+            {
+                ToneMappingUncharted<<<scaleGridDim, scaleBlockDim>>>(
+                    GetBuffer2D(ScaledColorBuffer),
+                    outputDim,
+                    d_exposure,
+                    postProcessParams);
+            }
+            else if (postProcessParams.toneMappingType == ToneMappingType::ACES1)
+            {
+                ToneMappingACES<<<scaleGridDim, scaleBlockDim>>>(
+                    GetBuffer2D(ScaledColorBuffer),
+                    outputDim,
+                    d_exposure,
+                    postProcessParams);
+            }
+            else if (postProcessParams.toneMappingType == ToneMappingType::ACES2)
+            {
+                ToneMappingACES2<<<scaleGridDim, scaleBlockDim>>>(
+                    GetBuffer2D(ScaledColorBuffer),
+                    outputDim,
+                    d_exposure,
+                    postProcessParams);
+            }
+            else if (postProcessParams.toneMappingType == ToneMappingType::Reinhard)
+            {
+                ToneMappingReinhardExtended<<<scaleGridDim, scaleBlockDim>>>(
+                    GetBuffer2D(ScaledColorBuffer),
+                    outputDim,
+                    d_exposure,
+                    postProcessParams);
+            }
         }
     }
 }

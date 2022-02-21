@@ -5,6 +5,7 @@
 #include "sampler.cuh"
 #include "settingParams.h"
 #include "skyData.h"
+#include "color.h"
 
 inline __device__ Float3 EqualRectMap(float u, float v)
 {
@@ -161,25 +162,6 @@ inline __device__ Float3 SpectrumToXyz(uint channel)
 	return Float3(spectrumCieX[channel], spectrumCieY[channel], spectrumCieZ[channel]);
 }
 
-inline __device__ Float3 XyzToRgb(Float3 xyzColor)
-{
-	// ACES 2065-1 D60
-	const Mat3 xyzToRgb(
-		1.0498110175f , 0.0f        , -0.0000974845f ,
-		-0.4959030231f, 1.3733130458f, 0.0982400361f   ,
-		0.0f          , 0.0f        , 0.9912520182f);
-
-	// SRGB D65
-	// static const Mat3 xyzToRgb(
-	// 	3.2404542, -1.5371385, -0.4985314,
-	// 	-0.9692660,  1.8760108,  0.0415560,
-	// 	0.0556434, -0.2040259,  1.0572252);
-
-	Float3 rgbColor = xyzToRgb * xyzColor;
-
-	return rgbColor;
-}
-
 inline __device__ Float3 GetSkyRadiance(const Float3& raydir, const Float3& sunDir, SkyParams& skyParams)
 {
 	float theta = acos(raydir.y);
@@ -209,7 +191,7 @@ inline __device__ Float3 GetSkyRadiance(const Float3& raydir, const Float3& sunD
 		xyzColor += radiance * SpectrumToXyz(channel);
 	}
 
-	Float3 rgbColor = XyzToRgb(xyzColor);
+	Float3 rgbColor = XyzToRgbAces2065(xyzColor);
 
 	return rgbColor;
 }
@@ -248,7 +230,7 @@ inline __device__ Float3 GetSunRadiance(const Float3& raydir, const Float3& sunD
 		const int pieces = 45;
 		const int order = 4;
 
-		int pos = (int) (powf(2.0*elevation / M_PI, 1.0/3.0) * pieces); // floor
+		int pos = (int) (powf(2.0*elevation / M_PI, 1.0/3.0) * pieces);
 
 		if ( pos > 44 )
 			pos = 44;
@@ -290,7 +272,7 @@ inline __device__ Float3 GetSunRadiance(const Float3& raydir, const Float3& sunD
 		xyzColor += directRadiance * SpectrumToXyz(channel);
 	}
 
-	Float3 rgbColor = XyzToRgb(xyzColor);
+	Float3 rgbColor = XyzToRgbAces2065(xyzColor);
 
 	return rgbColor;
 }

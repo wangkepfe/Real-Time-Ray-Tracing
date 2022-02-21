@@ -7,6 +7,7 @@
 #include "precision.cuh"
 #include "settingParams.h"
 #include "gaussian.cuh"
+#include "color.h"
 
 #define USE_CATMULL_ROM_SAMPLER 0
 #define USE_BICUBIC_SMOOTH_STEP_SAMPLER 1
@@ -111,7 +112,7 @@ __global__ void AutoExposure(float* exposure, uint* histogram, float area, float
 	float aveLum = lumiSum / lumiSumArea;
 
 	// clamp to min and max. Note 0.1 is no good but for lower night EV value
-	aveLum = clampf(aveLum, 0.1, 10.0);
+	aveLum = clampf(aveLum, 0.1, 100.0);
 
 	// read history lum
 	float lumTemp = exposure[1];
@@ -488,6 +489,167 @@ __global__ void LensFlarePred(SurfObj depthBuffer, Float2 sunPos, Int2 sunUv, Su
 //------------------------------------- Tone mapping ---------------------------------------
 //----------------------------------------------------------------------------------------------
 
+__device__ __forceinline__ float luminance(Float3 v)
+{
+    return dot(v, Float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+__device__ __forceinline__ Float3 ChangeLuminance(Float3 c_in, float l_out)
+{
+    float l_in = luminance(c_in);
+    return c_in * (l_out / l_in);
+}
+
+__device__ __forceinline__ Float3 Reinhard(Float3 v, float max_white)
+{
+    return v / (1.0f + v);
+}
+
+__device__ __forceinline__ Float3 ReinhardExtended(Float3 v, float max_white)
+{
+    Float3 numerator = v * (1.0f + (v / Float3(max_white * max_white)));
+    return numerator / (1.0f + v);
+}
+
+__device__ __forceinline__ Float3 ReinhardExtendedLuminance(Float3 v, float max_white_l)
+{
+    float l_old = luminance(v);
+    float numerator = l_old * (1.0f + (l_old / (max_white_l * max_white_l)));
+    float l_new = numerator / (1.0f + l_old);
+    return ChangeLuminance(v, l_new);
+}
+
+__global__ void ToneMappingReinhardExtended(
+	SurfObj   colorBuffer,
+	Int2      size,
+	float*    exposure,
+	PostProcessParams params)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= size.x || idx.y >= size.y) return;
+
+	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
+	color *= exposure[0];
+
+	color = Aces2065ToSrgb(color);
+
+	// Tone mapping
+	color = ReinhardExtendedLuminance(color, params.W);
+
+	// Gamma correction
+	color = clamp3f(pow3f(color, 1.0f / params.gamma), Float3(0), Float3(1));
+
+	Store2DHalf4(Float4(color, 1.0), colorBuffer, idx);
+}
+
+__device__ __forceinline__ Float3 ACESFilm(Float3 x)
+{
+    float a = 2.51f;
+    float b = 0.03f;
+    float c = 2.43f;
+    float d = 0.59f;
+    float e = 0.14f;
+    return clamp3f((x*(a*x+b))/(x*(c*x+d)+e));
+}
+
+__global__ void ToneMappingACES2(
+	SurfObj   colorBuffer,
+	Int2      size,
+	float*    exposure,
+	PostProcessParams params)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= size.x || idx.y >= size.y) return;
+
+	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
+	color *= exposure[0];
+
+	color = Aces2065ToSrgb(color);
+
+	// Tone mapping
+	color = ACESFilm(color);
+
+	// Gamma correction
+	color = clamp3f(pow3f(color, 1.0f / params.gamma), Float3(0), Float3(1));
+
+	Store2DHalf4(Float4(color, 1.0), colorBuffer, idx);
+}
+
+__device__ __forceinline__ Float3 RRTAndODTFit(Float3 v)
+{
+    Float3 a = v * (v + 0.0245786f) - 0.000090537f;
+    Float3 b = v * (0.983729f * v + 0.4329510f) + 0.238081f;
+    return a / b;
+}
+
+__device__ __forceinline__ Float3 RRTAndODTFitLuminance(Float3 v)
+{
+	float lum = luminance(v);
+    float a = lum * (lum + 0.0245786f) - 0.000090537f;
+    float b = lum * (0.983729f * lum + 0.4329510f) + 0.238081f;
+    return ChangeLuminance(v, a / b);
+}
+
+__device__ __forceinline__ Float3 ACESFitted(Float3 color)
+{
+	// sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT
+	Mat3 ACESInputMat(
+		0.59719, 0.35458, 0.04823,
+		0.07600, 0.90834, 0.01566,
+		0.02840, 0.13383, 0.83777);
+
+	// ODT_SAT => XYZ => D60_2_D65 => sRGB
+	Mat3 ACESOutputMat(
+		1.60475, -0.53108, -0.07367,
+		-0.10208,  1.10813, -0.00605,
+		-0.00327, -0.07276,  1.07602);
+
+    color = ACESInputMat * color;
+
+    // Apply RRT and ODT
+	// color = RRTAndODTFit(color);
+    color = RRTAndODTFitLuminance(color);
+
+    color = ACESOutputMat * color;
+
+    // Clamp to [0, 1]
+    color = clamp3f(color);
+
+    return color;
+}
+
+__global__ void ToneMappingACES(
+	SurfObj   colorBuffer,
+	Int2      size,
+	float*    exposure,
+	PostProcessParams params)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= size.x || idx.y >= size.y) return;
+
+	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
+	color *= exposure[0];
+
+	color = Aces2065ToSrgb(color);
+
+	// Tone mapping
+	color = ACESFitted(color);
+
+	// Gamma correction
+	color = clamp3f(pow3f(color, 1.0f / params.gamma), Float3(0), Float3(1));
+
+	Store2DHalf4(Float4(color, 1.0), colorBuffer, idx);
+}
+
 __device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x, PostProcessParams params)
 {
 	const float A = params.A;
@@ -500,7 +662,7 @@ __device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x, PostProcessParams 
 	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
 
-__global__ void ToneMapping(
+__global__ void ToneMappingUncharted(
 	SurfObj   colorBuffer,
 	Int2      size,
 	float*    exposure,
@@ -516,6 +678,8 @@ __global__ void ToneMapping(
 
 	Float3 texColor = Load2DHalf4(colorBuffer, idx).xyz;
 	texColor *= exposure[0];
+
+	texColor = Aces2065ToSrgb(texColor);
 
 	float ExposureBias = 2.0f;
 	Float3 curr = Uncharted2Tonemap(ExposureBias * texColor, params);
