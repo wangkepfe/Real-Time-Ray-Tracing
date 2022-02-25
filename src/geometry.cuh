@@ -516,6 +516,72 @@ struct RayBoxIntersectionHelper
 	float rdir_far_z ;
 };
 
+__host__ __device__ inline RayBoxIntersectionHelper CreateRayBoxIntersectionHelper(const Ray& ray, const AABB& sceneBox, const Float3& invRayDir)
+{
+	int kz = max_dim(abs(ray.dir));
+	int kx = kz+1; if (kx == 3) kx = 0;
+	int ky = kx+1; if (ky == 3) ky = 0;
+
+	if (ray.dir[kz] < 0.0f) swap(kx,ky);
+
+	Int3 nearID(0,1,2);
+	Int3 farID(3,4,5);
+	int nearX = nearID[kx], farX = farID[kx];
+	int nearY = nearID[ky], farY = farID[ky];
+	int nearZ = nearID[kz], farZ = farID[kz];
+	if (ray.dir[kx] < 0.0f) swap(nearX,farX);
+	if (ray.dir[ky] < 0.0f) swap(nearY,farY);
+	if (ray.dir[kz] < 0.0f) swap(nearZ,farZ);
+
+	const float eps = 5.0f * TwoPowerMinus24();
+	Float3 lower = Dn(abs(ray.orig-sceneBox.min));
+	Float3 upper = Up(abs(ray.orig-sceneBox.max));
+	float max_z = max(lower[kz],upper[kz]);
+
+	float err_near_x = Up(lower[kx]+max_z);
+	float err_near_y = Up(lower[ky]+max_z);
+	float org_near_x = up(ray.orig[kx]+Up(eps*err_near_x));
+	float org_near_y = up(ray.orig[ky]+Up(eps*err_near_y));
+	float org_near_z = ray.orig[kz];
+	float err_far_x = Up(upper[kx]+max_z);
+	float err_far_y = Up(upper[ky]+max_z);
+	float org_far_x = dn(ray.orig[kx]-Up(eps*err_far_x));
+	float org_far_y = dn(ray.orig[ky]-Up(eps*err_far_y));
+	float org_far_z = ray.orig[kz];
+
+	if (ray.dir[kx] < 0.0f) swap(org_near_x,org_far_x);
+	if (ray.dir[ky] < 0.0f) swap(org_near_y,org_far_y);
+
+	float rdir_near_x = Dn(Dn(invRayDir[kx]));
+	float rdir_near_y = Dn(Dn(invRayDir[ky]));
+	float rdir_near_z = Dn(Dn(invRayDir[kz]));
+	float rdir_far_x = Up(Up(invRayDir[kx]));
+	float rdir_far_y = Up(Up(invRayDir[ky]));
+	float rdir_far_z = Up(Up(invRayDir[kz]));
+
+	RayBoxIntersectionHelper rayBoxIntersectionHelper;
+	rayBoxIntersectionHelper.farX = farX;
+	rayBoxIntersectionHelper.farY = farY;
+	rayBoxIntersectionHelper.farZ = farZ;
+	rayBoxIntersectionHelper.nearX = nearX;
+	rayBoxIntersectionHelper.nearY = nearY;
+	rayBoxIntersectionHelper.nearZ = nearZ;
+	rayBoxIntersectionHelper.org_near_x = org_near_x;
+	rayBoxIntersectionHelper.org_near_y = org_near_y;
+	rayBoxIntersectionHelper.org_near_z = org_near_z;
+	rayBoxIntersectionHelper.org_far_x = org_far_x;
+	rayBoxIntersectionHelper.org_far_y = org_far_y;
+	rayBoxIntersectionHelper.org_far_z = org_far_z;
+    rayBoxIntersectionHelper.rdir_near_x = rdir_near_x;
+    rayBoxIntersectionHelper.rdir_near_y = rdir_near_y;
+    rayBoxIntersectionHelper.rdir_near_z = rdir_near_z;
+    rayBoxIntersectionHelper.rdir_far_x  = rdir_far_x ;
+    rayBoxIntersectionHelper.rdir_far_y  = rdir_far_y ;
+    rayBoxIntersectionHelper.rdir_far_z  = rdir_far_z ;
+
+	return rayBoxIntersectionHelper;
+}
+
 __host__ __device__ inline  bool RayAABBIntersect(/*const Float3& invRayDir, const Float3& rayOrig,*/ const AABB& aabb, RayBoxIntersectionHelper helper, float& tNear, float& tFar) {
 
 	float tNearX = (aabb[helper.nearX] - helper.org_near_x) * helper.rdir_near_x;
@@ -532,31 +598,6 @@ __host__ __device__ inline  bool RayAABBIntersect(/*const Float3& invRayDir, con
 	tNear = max(tNear, 0.0f);
 
 	return hit;
-
-	// Float3 t0s = (aabb.min - rayOrig) * invRayDir;
-  	// Float3 t1s = (aabb.max - rayOrig) * invRayDir;
-
-  	// Float3 tsmaller = min3f(t0s, t1s);
-    // Float3 tbigger  = max3f(t0s, t1s);
-
-    // tmin = tsmaller.getmax();
-	// tmax = tbigger.getmin();
-
-	// #if DEBUG_RAY_AABB_INTERSECT_DETAIL
-	// Int2 idx = Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
-	// if (IS_DEBUG_PIXEL())
-	// {
-	// 	printf("RayAABBIntersect: t0s=(%f, %f, %f), t1s=(%f, %f, %f)\n", t0s.x, t0s.y, t0s.z, t1s.x, t1s.y, t1s.z);
-	// 	printf("RayAABBIntersect: tsmaller=(%f, %f, %f), tbigger=(%f, %f, %f)\n", tsmaller.x, tsmaller.y, tsmaller.z, tbigger.x, tbigger.y, tbigger.z);
-	// 	printf("RayAABBIntersect: tmin=%f, tmax=%f\n", tmin, tmax);
-	// }
-	// #endif
-
-	// bool result = (tmin < tmax) && (tmax > 0);
-
-	// tmin = max(tmin, 0.0f);
-
-	// return result;
 }
 
 __host__ __device__ inline void RayAabbPairIntersect(RayBoxIntersectionHelper helper, const Float3& invRayDir, const Float3& rayOrig, const AABBCompact& aabbpair, bool& intersect1, bool& intersect2, float& t1, float& t2)
@@ -567,8 +608,8 @@ __host__ __device__ inline void RayAabbPairIntersect(RayBoxIntersectionHelper he
 	float tmin1, tmin2;
 	float tmax1, tmax2;
 
-	intersect1 = RayAABBIntersect(/*invRayDir, rayOrig,*/  aabbLeft, helper,tmin1, tmax1);
-	intersect2 = RayAABBIntersect(/*invRayDir, rayOrig,*/  aabbRight,helper, tmin2, tmax2);
+	intersect1 = RayAABBIntersect(aabbLeft, helper,tmin1, tmax1);
+	intersect2 = RayAABBIntersect(aabbRight,helper, tmin2, tmax2);
 
 	t1 = tmin1;
 	t2 = tmin2;

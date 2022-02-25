@@ -174,9 +174,9 @@ __device__ inline void DiffuseSurfaceInteraction(
     float powerHeuristicSurface = (surfaceSamplePdf * surfaceSamplePdf) / (surfaceSamplePdf * surfaceSamplePdf + lightSamplePdf * lightSamplePdf);
 
     constexpr float minFinalPdf = 1e-5f;
-    constexpr float freeBounceProbability = 0.0f;
+    constexpr float freeBounceProbability = 0.5f;
 
-    if (0 /*randNum.z < freeBounceProbability*/)
+    if (randNum.z < freeBounceProbability)
     {
         if (dot(rayState.normal, surfSampleDir) < 0)
         {
@@ -194,7 +194,7 @@ __device__ inline void DiffuseSurfaceInteraction(
     }
     else
     {
-        if (0 /*randNum.w < powerHeuristicSurface*/)
+        if (randNum.w < powerHeuristicSurface)
         {
             if (dot(rayState.normal, surfSampleDir) < 0)
             {

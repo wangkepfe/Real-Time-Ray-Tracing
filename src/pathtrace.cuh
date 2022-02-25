@@ -103,16 +103,6 @@ __global__ void PathTrace(ConstBuffer            cbo,
     Float3 L1 = L0 * rayState.beta0;
     Float3 L2 = L1 * rayState.beta1;
 
-    // if (L2.x > 0 || L2.y > 0 || L2.z > 0)
-    // {
-    //     DEBUG_PRINT(rayState.hitLight);
-    //     DEBUG_PRINT(rayState.isOccluded);
-    //     DEBUG_PRINT(L2);
-    //     DEBUG_PRINT(cbo.sunDir);
-    //     DEBUG_PRINT(rayState.dir);
-    //     DEBUG_PRINT(rayState.normal);
-    // }
-
     // write to buffer
     NAN_DETECTER(L0);
     NAN_DETECTER(L2);

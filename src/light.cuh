@@ -162,8 +162,7 @@ __device__ __inline__ void SampleLight(
         }
 
         // Choose to sample sky
-        //if (chooseSampleSkyVsSun > randNum[1])
-        if (false)
+        if (chooseSampleSkyVsSun > randNum[1])
         {
             // Binary search in range 0 to size-2, since we want result+1 to be the index, we'll need to subtract result for calculating PDF
             const int sampledSkyIdx = BinarySearch(skyCdf, 0, SKY_SIZE - 2, randNum[0] * maxSkyCdf) + 1;
