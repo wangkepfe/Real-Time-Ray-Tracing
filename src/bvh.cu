@@ -10,14 +10,14 @@ void RayTracer::BuildBvhLevel1()
     // ------------------------------- Update Geometry -----------------------------------
     // out: triangles, aabbs, morton codes
     UpdateSceneGeometry <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
-        (constTriangles, triangles, aabbs, morton, triCountArray, clockTime);
+        (vertexBuffer, indexBuffer, triangles, aabbs, morton, triCountArray, clockTime);
 
     #if DEBUG_FRAME > 0
     GpuErrorCheck(cudaDeviceSynchronize());
 	GpuErrorCheck(cudaPeekAtLastError());
     if (cbo.frameNum == DEBUG_FRAME)
     {
-        DebugPrintFile("constTriangles.csv"  , constTriangles  , triCountPadded);
+        // DebugPrintFile("constTriangles.csv"  , constTriangles  , triCountPadded);
         DebugPrintFile("triangles.csv"       , triangles       , triCountPadded);
         DebugPrintFile("aabbs.csv"           , aabbs           , triCountPadded);
         DebugPrintFile("morton.csv"          , morton          , triCountPadded);

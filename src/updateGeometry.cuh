@@ -63,7 +63,9 @@ __device__ inline void FlipNormal(Float3& n)
 template<uint kernelSize,          // thread number per kernel, same as sharedAabb size, sharedAabb-thread 1-to-1 mapping
          uint perThreadBatch>      // batch process count per thread
 __global__ void UpdateSceneGeometry(
-	Triangle*    constTriangles,   // [const] reference mesh
+	// Triangle*    constTriangles,   // [const] reference mesh
+	Float3* vertexBuffer,
+	uint* indexBuffer,
 	Triangle*    triangles,        // [out] animated mesh
 	AABB*        aabbs,            // [out] per triangle aabb
 	uint*        morton,           // [out] per triangle motron code
@@ -78,7 +80,8 @@ __global__ void UpdateSceneGeometry(
 	uint triStart = objectId * blocksize;
 	uint triCount = triCountArray[objectId];
 
-	constTriangles   += triStart;
+	indexBuffer += triStart * 3;
+	// constTriangles   += triStart;
 	triangles        += triStart;
 	aabbs            += triStart;
 	morton           += triStart;
@@ -104,34 +107,53 @@ __global__ void UpdateSceneGeometry(
 	#pragma unroll
 	for (uint i = 0; i < perThreadBatch; ++i)
 	{
-		mytriangle[i] = constTriangles[idx[i]];
+		// mytriangle[i] = constTriangles[idx[i]];
 
-		Float3 v1 = mytriangle[i].v1;
-		Float3 v2 = mytriangle[i].v2;
-		Float3 v3 = mytriangle[i].v3;
+		// Float3 v1 = mytriangle[i].v1;
+		// Float3 v2 = mytriangle[i].v2;
+		// Float3 v3 = mytriangle[i].v3;
 
-		Float3 n1 = mytriangle[i].n1;
-		Float3 n2 = mytriangle[i].n2;
-		Float3 n3 = mytriangle[i].n3;
+		// Float3 n1 = mytriangle[i].n1;
+		// Float3 n2 = mytriangle[i].n2;
+		// Float3 n3 = mytriangle[i].n3;
 
-		FlipNormal(n1);
-		FlipNormal(n2);
-		FlipNormal(n3);
+		// FlipNormal(n1);
+		// FlipNormal(n2);
+		// FlipNormal(n3);
 
-		const float noiseScale = 0.3f;
+		// const float noiseScale = 0.3f;
 
 		// v1 += n1 * (HashFloat3(v1) - 0.5f) * noiseScale;
 		// v2 += n2 * (HashFloat3(v2) - 0.5f) * noiseScale;
 		// v3 += n3 * (HashFloat3(v3) - 0.5f) * noiseScale;
 
-		mytriangle[i] = Triangle(v1, v2, v3, n1, n2, n3);
+		// mytriangle[i] = Triangle(v1, v2, v3, n1, n2, n3);
+
+		mytriangle[i].v1 = vertexBuffer[indexBuffer[idx[i] * 3]];
+		mytriangle[i].v2 = vertexBuffer[indexBuffer[idx[i] * 3 + 1]];
+		mytriangle[i].v3 = vertexBuffer[indexBuffer[idx[i] * 3 + 2]];
+
+		Float3 v1 = mytriangle[i].v1;
+		Float3 v2 = mytriangle[i].v2;
+		Float3 v3 = mytriangle[i].v3;
+
+		Float3 center = (v1 + v2 + v3) / 3.0f;
+
+		float scale = 1.0001f;
+
+		v1 = DifferenceOfProducts(v1, scale, center, scale - 1.0f);
+		v2 = DifferenceOfProducts(v2, scale, center, scale - 1.0f);
+		v3 = DifferenceOfProducts(v3, scale, center, scale - 1.0f);
+
+		mytriangle[i].v1 = v1;
+		mytriangle[i].v2 = v2;
+		mytriangle[i].v3 = v3;
 
 	#if RAY_TRIANGLE_COORDINATE_TRANSFORM
-		PreCalcTriangleCoordTrans(mytriangle[i]);
-	#endif
-
-		// write out
+		triangles[idx[i]] = PreCalcTriangleCoordTrans(mytriangle[i]);
+	#else
 		triangles[idx[i]] = mytriangle[i];
+	#endif
 	}
 
 	// ------------------------------------ update aabb ------------------------------------
@@ -148,9 +170,8 @@ __global__ void UpdateSceneGeometry(
 		Float3 aabbmax = max3f(v1, max3f(v2, v3));
 
 		// padding for precision issue
-		Float3 diff = aabbmax - aabbmin;
-		diff = max3f(Float3(0.001f), diff);
-		aabbmax = aabbmin + diff + MachineEpsilon() * aabbmax;
+		Float3 diff = max3f(aabbmax - aabbmin, MachineEpsilon() * aabbmax);
+		aabbmax = aabbmin + diff;
 
 		currentAABB[i] = AABB(aabbmax, aabbmin);
 		triangleCenter[i] = (v1 + v2 + v3) / 3.0f;

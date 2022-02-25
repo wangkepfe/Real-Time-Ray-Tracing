@@ -7,12 +7,11 @@
 #include <fstream>
 #include <cassert>
 
-#define LETS_DEBUG 1
-#if LETS_DEBUG
-#define IS_DEBUG_PIXEL() blockIdx.x * blockDim.x + threadIdx.x == gridDim.x * blockDim.x * 0.5 && blockIdx.y * blockDim.y + threadIdx.y == gridDim.y * blockDim.y * 0.5
-#else
-#define IS_DEBUG_PIXEL() 0
-#endif
+
+// #define IS_DEBUG_PIXEL() blockIdx.x * blockDim.x + threadIdx.x == gridDim.x * blockDim.x * 0.5 && blockIdx.y * blockDim.y + threadIdx.y == gridDim.y * blockDim.y * 0.5
+// #define IS_DEBUG_PIXEL() blockIdx.x == gridDim.x * 0.5 && blockIdx.y == gridDim.y * 0.5
+#define IS_DEBUG_PIXEL() 1
+
 #define DEBUG_PRINT(__THING__) if(IS_DEBUG_PIXEL()) { Print(#__THING__, __THING__); }
 #define DEBUG_PRINT_STRING(__STRING__) if(IS_DEBUG_PIXEL()) { Print(__STRING__); }
 #define DEBUG_PRINT_BAR if(IS_DEBUG_PIXEL()) { Print("------------------------------"); }

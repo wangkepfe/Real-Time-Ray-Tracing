@@ -19,6 +19,7 @@
 #define INV_PI                  0.31830988618f
 #define INV_TWO_PI              0.15915494309f
 
+struct Float3;
 struct Int2;
 
 template<typename T>
@@ -28,6 +29,14 @@ T max(const T& a, const T& b) { return a > b ? a : b; }
 template<typename T>
 __forceinline__ __host__ __device__
 T min(const T& a, const T& b) { return a < b ? a : b; }
+
+template<typename T>
+__forceinline__ __host__ __device__
+T max(const T& a, const T& b, const T& c) { return max(max(a, b), c); }
+
+template<typename T>
+__forceinline__ __host__ __device__
+T min(const T& a, const T& b, const T& c) { return min(min(a, b), c); }
 
 inline __host__ __device__ float FMA(float a, float b, float c) {
 	return fma(a, b, c);
@@ -81,7 +90,7 @@ inline __host__ __device__ CompensatedFloat InnerProduct(float a, float b, T... 
     return {sum.v, ab.err + (tp.err + sum.err)};
 }
 
-inline __host__ __device__ auto DifferenceOfProducts(float a, float b, float c, float d) {
+inline __host__ __device__ float DifferenceOfProducts(float a, float b, float c, float d) {
     auto cd = c * d;
     auto differenceOfProducts = FMA(a, b, -cd);
     auto error = FMA(-c, d, cd);
@@ -318,6 +327,12 @@ __forceinline__ __host__ __device__ Float3 operator-(float a, const Float3& v)  
 __forceinline__ __host__ __device__ Float3 operator*(float a, const Float3& v)   { return Float3(v.x * a, v.y * a, v.z * a); }
 __forceinline__ __host__ __device__ Float3 operator/(float a, const Float3& v)   { return Float3(a / v.x, a / v.y, a / v.z); }
 
+inline __host__ __device__ Float3 DifferenceOfProducts(Float3 a, float b, Float3 c, float d) {
+	return Float3(DifferenceOfProducts(a.x, b, c.x, d),
+		DifferenceOfProducts(a.y, b, c.y, d),
+		DifferenceOfProducts(a.z, b, c.z, d));
+}
+
 struct Int3
 {
 	union {
@@ -427,6 +442,7 @@ __forceinline__ __host__ __device__ Float3 cos3f(const Float3 & v)              
 __forceinline__ __host__ __device__ Float3 mixf(const Float3 & v1, const Float3 & v2, float a) { return v1 * (1.0f - a) + v2 * a; }
 __forceinline__ __host__ __device__ float  mix1f(float v1, float v2, float a)                  { return v1 * (1.0f - a) + v2 * a; }
 __forceinline__ __host__ __device__ Float3 minf3f(const float a, const Float3 & v)             { return Float3(v.x < a ? v.x : a, v.y < a ? v.y : a, v.y < a ? v.y : a); }
+__forceinline__ __host__ __device__ void   swap(int& v1, int& v2)                              { int tmp = v1; v1 = v2; v2 = tmp; }
 __forceinline__ __host__ __device__ void   swap(float& v1, float& v2)                          { float tmp = v1; v1 = v2; v2 = tmp; }
 __forceinline__ __host__ __device__ void   swap(Float3 & v1, Float3 & v2)                      { Float3 tmp = v1; v1 = v2; v2 = tmp; }
 __forceinline__ __host__ __device__ int    clampi(int a, int lo = 0, int hi = 1)               { return a < lo ? lo : a > hi ? hi : a; }
@@ -434,7 +450,8 @@ __forceinline__ __host__ __device__ float  clampf(float a, float lo = 0.0f, floa
 __forceinline__ __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo = Float3(0.0f), Float3 hi = Float3(1.0f)){ return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
 __forceinline__ __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)     { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
 __forceinline__ __host__ __device__ float  dot(const Float2 & v1, const Float2 & v2)           { return v1.x * v2.x + v1.y * v2.y; }
-__forceinline__ __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z; }
+// __forceinline__ __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z; }
+__forceinline__ __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return (float)InnerProduct(v1.x , v2.x , v1.y , v2.y , v1.z , v2.z); }
 __forceinline__ __host__ __device__ float  dot(const Float4 & v1, const Float4 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z + v1.w * v2.w; }
 __forceinline__ __host__ __device__ float  distancesq(const Float3 & v1, const Float3 & v2)    { return (v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y) + (v1.z - v2.z) * (v1.z - v2.z); }
 __forceinline__ __host__ __device__ float  distance(const Float3 & v1, const Float3 & v2)      { return sqrtf((v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y) + (v1.z - v2.z) * (v1.z - v2.z)); }
@@ -530,7 +547,7 @@ struct Mat4
 	};
 
 	__forceinline__ __host__ __device__ Mat4() { for (int i = 0; i < 16; ++i) { _v[i] = 0; } m00 = m11 = m22 = m33 = 1; }
-	__forceinline__ __host__ __device__ Mat4(const Mat4& m) { for (int i = 0; i < 16; ++i) { _v[i] = m[i]; } }
+	__forceinline__ __host__ __device__ Mat4(const Mat4& m) { for (int i = 0; i < 16; ++i) { _v[i] = m._v[i]; } }
 
 	// row
 	__forceinline__ __host__ __device__ void          setRow(uint i, const Float4& v)       { /*assert(i < 4);*/ _v[i] = v[0]; _v[i+4] = v[1]; _v[i+8] = v[2]; _v[i+12] = v[3]; }
@@ -544,38 +561,85 @@ struct Mat4
 	__forceinline__ __host__ __device__ void          set(uint r, uint c, float v)          { /*assert(r < 4 && c < 4);*/ _v[r + c * 4] = v; }
 	__forceinline__ __host__ __device__ float         get(uint r, uint c) const             { /*assert(r < 4 && c < 4);*/ return _v[r + c * 4]; }
 
-	__forceinline__ __host__ __device__ float         operator[](uint i) const { return _v[i]; }
-	__forceinline__ __host__ __device__ float&        operator[](uint i)       { return _v[i]; }
+	__forceinline__ __host__ __device__ const float*  operator[](uint i) const { return _v + i * 4; }
+	__forceinline__ __host__ __device__ float*        operator[](uint i)       { return _v + i * 4; }
 };
 
-__forceinline__ __host__ __device__ Mat4 invert(const Mat4& m)
-{
+// __forceinline__ __host__ __device__ Mat4 invert(const Mat4& m)
+// {
+// 	Mat4 inv;
+
+// 	inv[0]  =  m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+// 	inv[4]  = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+// 	inv[8]  =  m[4] * m[9] *  m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+// 	inv[12] = -m[4] * m[9] *  m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+// 	inv[1]  = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+// 	inv[5]  =  m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+// 	inv[9]  = -m[0] * m[9] *  m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+// 	inv[13] =  m[0] * m[9] *  m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+// 	inv[2]  =  m[1] * m[6] *  m[15] - m[1] * m[7] *  m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] -  m[13] * m[3] * m[6];
+// 	inv[6]  = -m[0] * m[6] *  m[15] + m[0] * m[7] *  m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] +  m[12] * m[3] * m[6];
+// 	inv[10] =  m[0] * m[5] *  m[15] - m[0] * m[7] *  m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] -  m[12] * m[3] * m[5];
+// 	inv[14] = -m[0] * m[5] *  m[14] + m[0] * m[6] *  m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] +  m[12] * m[2] * m[5];
+// 	inv[3]  = -m[1] * m[6] *  m[11] + m[1] * m[7] *  m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] *  m[2] * m[7] +  m[9] *  m[3] * m[6];
+// 	inv[7]  =  m[0] * m[6] *  m[11] - m[0] * m[7] *  m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] *  m[2] * m[7] -  m[8] *  m[3] * m[6];
+// 	inv[11] = -m[0] * m[5] *  m[11] + m[0] * m[7] *  m[9] +  m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -  m[8] *  m[1] * m[7] +  m[8] *  m[3] * m[5];
+// 	inv[15] =  m[0] * m[5] *  m[10] - m[0] * m[6] *  m[9] -  m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +  m[8] *  m[1] * m[6] -  m[8] *  m[2] * m[5];
+
+// 	float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+
+// 	if (det == 0) { return Mat4(); }
+// 	det = 1.f / det;
+// 	for (int i = 0; i < 16; i++) { inv[i] *= det; }
+
+// 	return inv;
+// }
+
+__forceinline__ __host__ __device__ Mat4 invert(const Mat4& m) {
+    float s0 = DifferenceOfProducts(m[0][0], m[1][1], m[1][0], m[0][1]);
+    float s1 = DifferenceOfProducts(m[0][0], m[1][2], m[1][0], m[0][2]);
+    float s2 = DifferenceOfProducts(m[0][0], m[1][3], m[1][0], m[0][3]);
+
+    float s3 = DifferenceOfProducts(m[0][1], m[1][2], m[1][1], m[0][2]);
+    float s4 = DifferenceOfProducts(m[0][1], m[1][3], m[1][1], m[0][3]);
+    float s5 = DifferenceOfProducts(m[0][2], m[1][3], m[1][2], m[0][3]);
+
+    float c0 = DifferenceOfProducts(m[2][0], m[3][1], m[3][0], m[2][1]);
+    float c1 = DifferenceOfProducts(m[2][0], m[3][2], m[3][0], m[2][2]);
+    float c2 = DifferenceOfProducts(m[2][0], m[3][3], m[3][0], m[2][3]);
+
+    float c3 = DifferenceOfProducts(m[2][1], m[3][2], m[3][1], m[2][2]);
+    float c4 = DifferenceOfProducts(m[2][1], m[3][3], m[3][1], m[2][3]);
+    float c5 = DifferenceOfProducts(m[2][2], m[3][3], m[3][2], m[2][3]);
+
+    float determinant = (float)InnerProduct(s0, c5, -s1, c4, s2, c3, s3, c2, s5, c0, -s4, c1);
+    if (determinant == 0)
+        return {};
+    float s = 1 / determinant;
+
 	Mat4 inv;
 
-	inv[0]  =  m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
-	inv[4]  = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
-	inv[8]  =  m[4] * m[9] *  m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
-	inv[12] = -m[4] * m[9] *  m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
-	inv[1]  = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
-	inv[5]  =  m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
-	inv[9]  = -m[0] * m[9] *  m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
-	inv[13] =  m[0] * m[9] *  m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
-	inv[2]  =  m[1] * m[6] *  m[15] - m[1] * m[7] *  m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] -  m[13] * m[3] * m[6];
-	inv[6]  = -m[0] * m[6] *  m[15] + m[0] * m[7] *  m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] +  m[12] * m[3] * m[6];
-	inv[10] =  m[0] * m[5] *  m[15] - m[0] * m[7] *  m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] -  m[12] * m[3] * m[5];
-	inv[14] = -m[0] * m[5] *  m[14] + m[0] * m[6] *  m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] +  m[12] * m[2] * m[5];
-	inv[3]  = -m[1] * m[6] *  m[11] + m[1] * m[7] *  m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] *  m[2] * m[7] +  m[9] *  m[3] * m[6];
-	inv[7]  =  m[0] * m[6] *  m[11] - m[0] * m[7] *  m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] *  m[2] * m[7] -  m[8] *  m[3] * m[6];
-	inv[11] = -m[0] * m[5] *  m[11] + m[0] * m[7] *  m[9] +  m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -  m[8] *  m[1] * m[7] +  m[8] *  m[3] * m[5];
-	inv[15] =  m[0] * m[5] *  m[10] - m[0] * m[6] *  m[9] -  m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +  m[8] *  m[1] * m[6] -  m[8] *  m[2] * m[5];
+    inv[0][0] = s * (float)InnerProduct(m[1][1], c5, m[1][3], c3, -m[1][2], c4) ;
+    inv[0][1] = s * (float)InnerProduct(-m[0][1], c5, m[0][2], c4, -m[0][3], c3);
+    inv[0][2] = s * (float)InnerProduct(m[3][1], s5, m[3][3], s3, -m[3][2], s4) ;
+    inv[0][3] = s * (float)InnerProduct(-m[2][1], s5, m[2][2], s4, -m[2][3], s3);
 
-	float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    inv[1][0] = s * (float)InnerProduct(-m[1][0], c5, m[1][2], c2, -m[1][3], c1);
+    inv[1][1] = s * (float)InnerProduct(m[0][0], c5, m[0][3], c1, -m[0][2], c2) ;
+    inv[1][2] = s * (float)InnerProduct(-m[3][0], s5, m[3][2], s2, -m[3][3], s1);
+    inv[1][3] = s * (float)InnerProduct(m[2][0], s5, m[2][3], s1, -m[2][2], s2) ;
 
-	if (det == 0) { return Mat4(); }
-	det = 1.f / det;
-	for (int i = 0; i < 16; i++) { inv[i] *= det; }
+    inv[2][0] = s * (float)InnerProduct(m[1][0], c4, m[1][3], c0, -m[1][1], c2) ;
+    inv[2][1] = s * (float)InnerProduct(-m[0][0], c4, m[0][1], c2, -m[0][3], c0);
+    inv[2][2] = s * (float)InnerProduct(m[3][0], s4, m[3][3], s0, -m[3][1], s2) ;
+    inv[2][3] = s * (float)InnerProduct(-m[2][0], s4, m[2][1], s2, -m[2][3], s0);
 
-	return inv;
+    inv[3][0] = s * (float)InnerProduct(-m[1][0], c3, m[1][1], c1, -m[1][2], c0);
+    inv[3][1] = s * (float)InnerProduct(m[0][0], c3, m[0][2], c0, -m[0][1], c1) ;
+    inv[3][2] = s * (float)InnerProduct(-m[3][0], s3, m[3][1], s1, -m[3][2], s0);
+    inv[3][3] = s * (float)InnerProduct(m[2][0], s3, m[2][2], s0, -m[2][1], s1) ;
+
+    return inv;
 }
 
 struct Quat

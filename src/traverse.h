@@ -3,6 +3,7 @@
 #include "geometry.cuh"
 #include "bvhNode.cuh"
 #include "debugUtil.h"
+#include "precision.cuh"
 
 // BVH traverse stack
 union BvhNodeStackNode
@@ -103,6 +104,44 @@ __device__ __host__ inline bool TestForFinish(BvhNodeStack& bvhNodeStack, BvhNod
 	return finished;
 }
 
+__device__ __host__ inline const float TwoPowerMinus23()
+{
+	int_32 v {0x34000000};
+	return v.f32;
+}
+
+__device__ __host__ inline const float TwoPowerMinus24()
+{
+	int_32 v {0x33800000};
+	return v.f32;
+}
+
+__device__ __host__ inline const float p()
+{
+	return 1.0f + TwoPowerMinus23();
+}
+
+__device__ __host__ inline const float m()
+{
+	return 1.0f - TwoPowerMinus23();
+}
+
+__device__ __host__ inline float up(float a)
+{
+	return a>0.0f ? a*p() : a*m();
+}
+
+__device__ __host__ inline float dn(float a)
+{
+	return a>0.0f ? a*m() : a*p();
+}
+
+__device__ __host__ inline float Up(float a) { return a*p(); }
+__device__ __host__ inline float Dn(float a) { return a*m(); }
+
+__device__ __host__ inline Float3 Up(Float3 a) { return Float3(Up(a.x), Up(a.y), Up(a.z)); }
+__device__ __host__ inline Float3 Dn(Float3 a) { return Float3(Dn(a.x), Dn(a.y), Dn(a.z)); }
+
 __device__ __host__ inline void TraverseBvh(
 	Triangle*     triangles,
 	BVHNode*      bvhNodes,
@@ -123,6 +162,70 @@ __device__ __host__ inline void TraverseBvh(
 	int           tlasBvhNodesSize,
 	int           trianglesSize)
 {
+	int kz = max_dim(abs(ray.dir));
+	int kx = kz+1; if (kx == 3) kx = 0;
+	int ky = kx+1; if (ky == 3) ky = 0;
+
+	if (ray.dir[kz] < 0.0f) swap(kx,ky);
+
+	Int3 nearID(0,1,2);
+	Int3 farID(3,4,5);
+	int nearX = nearID[kx], farX = farID[kx];
+	int nearY = nearID[ky], farY = farID[ky];
+	int nearZ = nearID[kz], farZ = farID[kz];
+	if (ray.dir[kx] < 0.0f) swap(nearX,farX);
+	if (ray.dir[ky] < 0.0f) swap(nearY,farY);
+	if (ray.dir[kz] < 0.0f) swap(nearZ,farZ);
+
+	BVHNode topNode = tlasBvhNodes[0];
+	AABB sceneBox = topNode.aabb.GetMerged();
+
+	const float eps = 5.0f * TwoPowerMinus24();
+	Float3 lower = Dn(abs(ray.orig-sceneBox.min));
+	Float3 upper = Up(abs(ray.orig-sceneBox.max));
+	float max_z = max(lower[kz],upper[kz]);
+
+	float err_near_x = Up(lower[kx]+max_z);
+	float err_near_y = Up(lower[ky]+max_z);
+	float org_near_x = up(ray.orig[kx]+Up(eps*err_near_x));
+	float org_near_y = up(ray.orig[ky]+Up(eps*err_near_y));
+	float org_near_z = ray.orig[kz];
+	float err_far_x = Up(upper[kx]+max_z);
+	float err_far_y = Up(upper[ky]+max_z);
+	float org_far_x = dn(ray.orig[kx]-Up(eps*err_far_x));
+	float org_far_y = dn(ray.orig[ky]-Up(eps*err_far_y));
+	float org_far_z = ray.orig[kz];
+
+	if (ray.dir[kx] < 0.0f) swap(org_near_x,org_far_x);
+	if (ray.dir[ky] < 0.0f) swap(org_near_y,org_far_y);
+
+	float rdir_near_x = Dn(Dn(invRayDir[kx]));
+	float rdir_near_y = Dn(Dn(invRayDir[ky]));
+	float rdir_near_z = Dn(Dn(invRayDir[kz]));
+	float rdir_far_x = Up(Up(invRayDir[kx]));
+	float rdir_far_y = Up(Up(invRayDir[ky]));
+	float rdir_far_z = Up(Up(invRayDir[kz]));
+
+	RayBoxIntersectionHelper rayBoxIntersectionHelper;
+	rayBoxIntersectionHelper.farX = farX;
+	rayBoxIntersectionHelper.farY = farY;
+	rayBoxIntersectionHelper.farZ = farZ;
+	rayBoxIntersectionHelper.nearX = nearX;
+	rayBoxIntersectionHelper.nearY = nearY;
+	rayBoxIntersectionHelper.nearZ = nearZ;
+	rayBoxIntersectionHelper.org_near_x = org_near_x;
+	rayBoxIntersectionHelper.org_near_y = org_near_y;
+	rayBoxIntersectionHelper.org_near_z = org_near_z;
+	rayBoxIntersectionHelper.org_far_x = org_far_x;
+	rayBoxIntersectionHelper.org_far_y = org_far_y;
+	rayBoxIntersectionHelper.org_far_z = org_far_z;
+    rayBoxIntersectionHelper.rdir_near_x = rdir_near_x;
+    rayBoxIntersectionHelper.rdir_near_y = rdir_near_y;
+    rayBoxIntersectionHelper.rdir_near_z = rdir_near_z;
+    rayBoxIntersectionHelper.rdir_far_x  = rdir_far_x ;
+    rayBoxIntersectionHelper.rdir_far_y  = rdir_far_y ;
+    rayBoxIntersectionHelper.rdir_far_z  = rdir_far_z ;
+
 	// BVH traversal
 	const int maxBvhTraverseLoop = 1024;
 
@@ -165,6 +268,11 @@ __device__ __host__ inline void TraverseBvh(
 					fakeNormal = normalize(tri.n1 * (1.0f - uv.x - uv.y) + tri.n2 * uv.x + tri.n3 * uv.y);
 					#endif
 
+					#if RAY_TRIANGLE_COORDINATE_TRANSFORM
+					intersectNormal = normalize(cross(tri.v2, tri.v3));
+					intersectPoint  = GetRayPlaneIntersectPoint(Float4(intersectNormal, -dot(intersectNormal, tri.v4)), ray, t, errorP);
+					#endif
+
 					// DEBUG_PRINT(t);
 					// DEBUG_PRINT(objectIdx);
 					// DEBUG_PRINT(intersectNormal);
@@ -197,7 +305,7 @@ __device__ __host__ inline void TraverseBvh(
 			}
 
 			// test two aabb
-			RayAabbPairIntersect(invRayDir, ray.orig, currNode.aabb, intersect1, intersect2, t1, t2);
+			RayAabbPairIntersect(rayBoxIntersectionHelper, invRayDir, ray.orig, currNode.aabb, intersect1, intersect2, t1, t2);
 
 			if (!intersect1 && !intersect2) // no hit for both sides
 			{

@@ -11,16 +11,23 @@ struct  __align__(16) Sphere
 	__host__ __device__ Sphere(Float3 center, float radius) : center{ center }, radius{ radius }{}
 };
 
-struct  __align__(16) AABB
+struct AABB
 {
-	Float3 max;
-	float pad16;
-
-	Float3 min;
-	float pad32;
-
 	__host__ __device__ AABB() : max(-FLT_MAX), min(FLT_MAX) {}
-	__host__ __device__ AABB(const Float3& max, const Float3& min) : max{ max }, min{ min } {}
+	__host__ __device__ AABB(const AABB& aabb) : min {aabb.min}, max {aabb.max} {}
+	__host__ __device__ AABB(const Float3& max, const Float3& min) : min{ min }, max{ max } {}
+
+	union
+	{
+		struct
+		{
+			Float3 min;
+			Float3 max;
+		};
+		float v[6];
+	};
+
+	__host__ __device__ float operator[](int i) const { return v[i]; }
 
 	__host__ __device__ static AABB CreateCenterEdge(const Float3& center, float edgeLength) { return AABB(center + Float3(edgeLength / 2.0f), center - Float3(edgeLength / 2.0f)); }
 };
@@ -45,11 +52,23 @@ struct  __align__(16) Ray
 struct __align__(16) Triangle
 {
 	__host__ __device__ Triangle() {}
+
+	__host__ __device__ Triangle(const Triangle& tri)
+	: v1{tri.v1}, w1{tri.w1},
+	  v2{tri.v2}, w2{tri.w2},
+	  v3{tri.v3}, w3{tri.w3},
+	  v4{tri.v4}, w4{tri.w4},
+	  n1{tri.n1}, u1{tri.u1},
+	  n2{tri.n2}, u2{tri.u2},
+	  n3{tri.n3}, u3{tri.u3},
+	  n4{tri.n4}, u4{tri.u4} {}
+
 	__host__ __device__ Triangle(
 		const Float3& v1,
 		const Float3& v2,
 		const Float3& v3
 		) : v1(v1), v2(v2), v3(v3) {}
+
 	__host__ __device__ Triangle(
 		const Float3& v1,
 		const Float3& v2,
@@ -59,10 +78,17 @@ struct __align__(16) Triangle
 		const Float3& n3
 		) : v1(v1), v2(v2), v3(v3), n1(n1), n2(n2), n3(n3) {}
 
-	Float3 v1; float w1;
-	Float3 v2; float w2;
-	Float3 v3; float w3;
-	Float3 v4; float w4;
+	union
+	{
+		struct
+		{
+			Float3 v1; float w1;
+			Float3 v2; float w2;
+			Float3 v3; float w3;
+			Float3 v4; float w4;
+		};
+		Float4 vertices[4];
+	};
 
 	Float3 n1; float u1;
 	Float3 n2; float u2;

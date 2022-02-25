@@ -173,7 +173,10 @@ __device__ inline void DiffuseSurfaceInteraction(
 
     float powerHeuristicSurface = (surfaceSamplePdf * surfaceSamplePdf) / (surfaceSamplePdf * surfaceSamplePdf + lightSamplePdf * lightSamplePdf);
 
-    if (randNum.z < 0.5)
+    constexpr float minFinalPdf = 1e-5f;
+    constexpr float freeBounceProbability = 0.0f;
+
+    if (0 /*randNum.z < freeBounceProbability*/)
     {
         if (dot(rayState.normal, surfSampleDir) < 0)
         {
@@ -185,13 +188,13 @@ __device__ inline void DiffuseSurfaceInteraction(
         GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
 
         float finalPdf = surfaceSamplePdf;
-        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-10f);
+        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, minFinalPdf);
 
         rayState.dir = surfSampleDir;
     }
     else
     {
-        if (randNum.w < powerHeuristicSurface)
+        if (0 /*randNum.w < powerHeuristicSurface*/)
         {
             if (dot(rayState.normal, surfSampleDir) < 0)
             {
@@ -203,7 +206,7 @@ __device__ inline void DiffuseSurfaceInteraction(
             GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
 
             float finalPdf = surfaceSamplePdf;
-            beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, 1e-10f);
+            beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, minFinalPdf);
 
             rayState.dir = surfSampleDir;
 
@@ -225,13 +228,15 @@ __device__ inline void DiffuseSurfaceInteraction(
 
             float finalPdf = lightSamplePdf;
 
-            beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, 1e-10f);
+            beta = lightSampleSurfaceBsdf * cosThetaWi / max(finalPdf, minFinalPdf);
 
             rayState.dir = lightSampleDir;
 
             rayState.lightIdx = lightIdx;
             rayState.isShadowRay = true;
 
+            // DEBUG_PRINT(lightSampleDir);
+            // DEBUG_PRINT(rayState.normal);
             // DEBUG_PRINT(finalPdf);
             // DEBUG_PRINT(cosThetaWi);
             // DEBUG_PRINT(lightSampleSurfaceBsdf);

@@ -136,6 +136,16 @@ void RayTracer::UpdateFrame()
     }
 }
 
+__global__ void ProcessGeometry(Float3* vertexBuffer, uint size)
+{
+    uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= size)
+        return;
+
+    Float3 vertex = vertexBuffer[idx];
+}
+
 void RayTracer::draw(SurfObj* renderTarget)
 {
     // update frame
@@ -186,6 +196,10 @@ void RayTracer::draw(SurfObj* renderTarget)
     }
 
     GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
+
+    // ------------------------------- Geometry processing -------------------------------
+
+
 
     // ------------------------------- BVH -------------------------------
     BuildBvhLevel1();

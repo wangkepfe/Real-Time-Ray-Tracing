@@ -6,11 +6,11 @@
 #include "debugUtil.h"
 #include "precision.cuh"
 
-#define RAY_TRIANGLE_MOLLER_TRUMBORE 1
+#define RAY_TRIANGLE_MOLLER_TRUMBORE 0
 #define RAY_TRIANGLE_COORDINATE_TRANSFORM 0
+#define RAY_TRIANGLE_WATERTIGHT 1
 
 #define RAY_TRIANGLE_CULLING 0
-#define PRE_CALU_TRIANGLE_COORD_TRANS_OPT 1
 
 // ------------------------------ Sphere Ray Intersect ------------------------------------
 // ray/sphere intersection. returns distance, RayMax if no intersection.
@@ -299,7 +299,7 @@ __host__ __device__ inline bool MollerTrumbore(const Float3 &orig, const Float3 
 // ------------------------------ Ray Triangle Coordinate Transform ----------------------------------------------------
 // Ray Triangle intersection with pre-transformation
 // --------------------------------------------------------------------------------------------------
-__device__ __forceinline__ bool RayTriangleCoordinateTransform(Ray ray, Triangle triangle, float tCurrentHit, float& t, float& u, float& v, float& e)
+__host__ __device__ __forceinline__ bool RayTriangleCoordinateTransform(Ray ray, Triangle triangle, float tCurrentHit, float& t, float& u, float& v, float& e)
 {
 	float origZ = triangle.w1 - dot(ray.orig, triangle.v1);
 	float inverseDirZ = 1.0f / dot(ray.dir, triangle.v1);
@@ -337,7 +337,7 @@ __device__ __forceinline__ bool RayTriangleCoordinateTransform(Ray ray, Triangle
 // based on largest of (E1 x E2).xyz
 // so that the matrix has a stable inverse
 //-------------------------------------------------------
-__device__ __forceinline__ void PreCalcTriangleCoordTrans(Triangle& triangle)
+__device__ __forceinline__ Triangle PreCalcTriangleCoordTrans(const Triangle& triangle)
 {
 	Float3 v1 = triangle.v1;
 	Float3 v2 = triangle.v2;
@@ -348,30 +348,6 @@ __device__ __forceinline__ void PreCalcTriangleCoordTrans(Triangle& triangle)
 
 	Float3 n = cross(e1, e2);
 
-#if PRE_CALU_TRIANGLE_COORD_TRANS_OPT
-	Float3 n_abs = abs(n);
-	if (n_abs.x > n_abs.y && n_abs.x > n_abs.z)
-	{
-		// free vector (1, 0, 0)
-		triangle.v1 = { 1           , n.y / n.x   , n.z / n.x };     triangle.w1 = dot(n, v1) / n.x;     // row3
-		triangle.v2 = { 0           , e2.z / n.x  , -e2.y / n.x };  triangle.w2 = cross(v3, v1).x / n.x; // row1
-		triangle.v3 = { 0           , -e1.z / n.x, e1.y / n.x };    triangle.w3 = -cross(v2, v1).x / n.x; // row2
-	}
-	else if (n_abs.y > n_abs.x && n_abs.y > n_abs.z)
-	{
-		// free vector (0, 1, 0)
-		triangle.v1 = { n.x / n.y   , 1           , n.z / n.y };     triangle.w1 = dot(n, v1) / n.y;     // row3
-		triangle.v2 = { -e2.z / n.y, 0           , e2.x / n.y };    triangle.w2 = cross(v3, v1).y / n.y; // row1
-		triangle.v3 = { e1.z / n.y  , 0           , -e1.x / n.y };  triangle.w3 = -cross(v2, v1).y / n.y; // row2
-	}
-	else
-	{
-		// free vector (0, 0, 1)
-		triangle.v1 = { n.x / n.z   , n.y / n.z   , 1 };             triangle.w1 = dot(n, v1) / n.z;     // row3
-		triangle.v2 = { e2.y / n.z  , -e2.x / n.z, 0 };             triangle.w2 = cross(v3, v1).z / n.z; // row1
-		triangle.v3 = { -e1.y / n.z, e1.x / n.z  , 0 };             triangle.w3 = -cross(v2, v1).z / n.z; // row2
-	}
-#else
 	Mat4 mtx;
 
 	mtx.setCol(0, { e1, 0 });
@@ -381,11 +357,118 @@ __device__ __forceinline__ void PreCalcTriangleCoordTrans(Triangle& triangle)
 
 	mtx = invert(mtx);
 
-	triangle.v1 = mtx.getRow(2).xyz; triangle.w1 = - mtx.getRow(2).w;
-	triangle.v2 = mtx.getRow(0).xyz; triangle.w2 = mtx.getRow(0).w;
-	triangle.v3 = mtx.getRow(1).xyz; triangle.w3 = mtx.getRow(1).w;
-	triangle.v4 = v1;
-#endif
+	Triangle transformedTriangle;
+
+	transformedTriangle.v1 = mtx.getRow(2).xyz;
+	transformedTriangle.v2 = mtx.getRow(0).xyz;
+	transformedTriangle.v3 = mtx.getRow(1).xyz;
+
+	transformedTriangle.w1 = - mtx.getRow(2).w;
+	transformedTriangle.w2 = mtx.getRow(0).w;
+	transformedTriangle.w3 = mtx.getRow(1).w;
+
+	transformedTriangle.v4 = v1;
+
+	return transformedTriangle;
+}
+
+__host__ __device__ __forceinline__ int max_dim(Float3 dir)
+{
+	if (dir.x > dir.y)
+	{
+		if (dir.z > dir.x) return 2;
+		else return 0;
+	}
+	else
+	{
+		if (dir.z > dir.y) return 2;
+		else return 1;
+	}
+}
+
+__host__ __device__ __forceinline__ int sign_mask(float a)
+{
+	int b = *reinterpret_cast<int*>(&a);
+	return b & 0x80000000;
+}
+
+__host__ __device__ __forceinline__ float xorf(float a, int b)
+{
+	int c = *reinterpret_cast<int*>(&a);
+	c = c ^ b;
+	float d = *reinterpret_cast<float*>(&c);
+	return d;
+}
+
+// ------------------------------ Ray Triangle Watertight ----------------------------------------------------
+// Ray Triangle intersection described in Watertight Ray/Triangle Intersection https://jcgt.org/published/0002/01/05/paper.pdf
+// -----------------------------------------------------------------------------------------------------------
+__host__ __device__ __forceinline__ bool RayTriangleWatertight(Ray ray, Triangle tri, float tCurrentHit, float& t, float& u, float& v, float& e)
+{
+	Float3 dir = ray.dir;
+	Float3 org = ray.orig;
+
+	int kz = max_dim(abs(dir));
+	int kx = kz+1; if (kx == 3) kx = 0;
+	int ky = kx+1; if (ky == 3) ky = 0;
+
+	if (dir[kz] < 0.0f) swap(kx,ky);
+
+	float Sx = dir[kx]/dir[kz];
+	float Sy = dir[ky]/dir[kz];
+	float Sz = 1.0f/dir[kz];
+
+	const Float3 A = tri.v1-org;
+	const Float3 B = tri.v2-org;
+	const Float3 C = tri.v3-org;
+
+	const float Ax = A[kx] - Sx*A[kz];
+	const float Ay = A[ky] - Sy*A[kz];
+	const float Bx = B[kx] - Sx*B[kz];
+	const float By = B[ky] - Sy*B[kz];
+	const float Cx = C[kx] - Sx*C[kz];
+	const float Cy = C[ky] - Sy*C[kz];
+
+	float U = Cx*By - Cy*Bx;
+	float V = Ax*Cy - Ay*Cx;
+	float W = Bx*Ay - By*Ax;
+
+	if (U == 0.0f || V == 0.0f || W == 0.0f) {
+		double CxBy = (double)Cx*(double)By;
+		double CyBx = (double)Cy*(double)Bx;
+		U = (float)(CxBy - CyBx);
+		double AxCy = (double)Ax*(double)Cy;
+		double AyCx = (double)Ay*(double)Cx;
+		V = (float)(AxCy - AyCx);
+		double BxAy = (double)Bx*(double)Ay;
+		double ByAx = (double)By*(double)Ax;
+		W = (float)(BxAy - ByAx);
+	}
+
+	if ((U<0.0f || V<0.0f || W<0.0f) && (U>0.0f || V>0.0f || W>0.0f))
+		return false;
+
+	float det = U+V+W;
+	if (det == 0.0f)
+		return false;
+
+	const float Az = Sz*A[kz];
+	const float Bz = Sz*B[kz];
+	const float Cz = Sz*C[kz];
+	const float T = U*Az + V*Bz + W*Cz;
+
+	int det_sign = sign_mask(det);
+	if ((xorf(T,det_sign) < 0.0f) || (xorf(T,det_sign) > tCurrentHit * xorf(det, det_sign)))
+		return false;
+
+	const float rcpDet = 1.0f/det;
+	u = U*rcpDet;
+	v = V*rcpDet;
+	t = T*rcpDet;
+
+	e = ErrGamma(16) * abs(t);
+
+	return true;
 }
 
 __host__ __device__ inline float RayTriangleIntersect(Ray ray, Triangle triangle, float tCurr, float& u, float& v, float& e)
@@ -403,37 +486,80 @@ __host__ __device__ inline float RayTriangleIntersect(Ray ray, Triangle triangle
 	if (hit == false) { return RayMax; }
 	return t;
 #endif
+
+#if RAY_TRIANGLE_WATERTIGHT
+	bool hit = RayTriangleWatertight(ray, triangle, tCurr, t, u, v, e);
+	if (hit == false) { return RayMax; }
+	return t;
+#endif
 }
 
-__host__ __device__ inline  bool RayAABBIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABB& aabb, float& tmin, float& tmax) {
+struct RayBoxIntersectionHelper
+{
+	int nearX;
+	int nearY;
+	int nearZ;
+	int farX ;
+	int farY ;
+	int farZ ;
+	float org_near_x;
+	float org_near_y;
+	float org_near_z;
+	float org_far_x;
+	float org_far_y;
+	float org_far_z;
+	float rdir_near_x;
+	float rdir_near_y;
+	float rdir_near_z;
+	float rdir_far_x ;
+	float rdir_far_y ;
+	float rdir_far_z ;
+};
 
-	Float3 t0s = (aabb.min - rayOrig) * invRayDir;
-  	Float3 t1s = (aabb.max - rayOrig) * invRayDir;
+__host__ __device__ inline  bool RayAABBIntersect(/*const Float3& invRayDir, const Float3& rayOrig,*/ const AABB& aabb, RayBoxIntersectionHelper helper, float& tNear, float& tFar) {
 
-  	Float3 tsmaller = min3f(t0s, t1s);
-    Float3 tbigger  = max3f(t0s, t1s);
+	float tNearX = (aabb[helper.nearX] - helper.org_near_x) * helper.rdir_near_x;
+	float tNearY = (aabb[helper.nearY] - helper.org_near_y) * helper.rdir_near_y;
+	float tNearZ = (aabb[helper.nearZ] - helper.org_near_z) * helper.rdir_near_z;
+	float tFarX = (aabb[helper.farX] - helper.org_far_x ) * helper.rdir_far_x;
+	float tFarY = (aabb[helper.farY] - helper.org_far_y ) * helper.rdir_far_y;
+	float tFarZ = (aabb[helper.farZ] - helper.org_far_z ) * helper.rdir_far_z;
 
-    tmin = tsmaller.getmax();
-	tmax = tbigger.getmin();
+	tNear = max(tNearX,tNearY,tNearZ);
+	tFar = min(tFarX ,tFarY ,tFarZ);
 
-	#if DEBUG_RAY_AABB_INTERSECT_DETAIL
-	Int2 idx = Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
-	if (IS_DEBUG_PIXEL())
-	{
-		printf("RayAABBIntersect: t0s=(%f, %f, %f), t1s=(%f, %f, %f)\n", t0s.x, t0s.y, t0s.z, t1s.x, t1s.y, t1s.z);
-		printf("RayAABBIntersect: tsmaller=(%f, %f, %f), tbigger=(%f, %f, %f)\n", tsmaller.x, tsmaller.y, tsmaller.z, tbigger.x, tbigger.y, tbigger.z);
-		printf("RayAABBIntersect: tmin=%f, tmax=%f\n", tmin, tmax);
-	}
-	#endif
+	bool hit = tNear <= tFar && (tFar > 0);
+	tNear = max(tNear, 0.0f);
 
-	bool result = (tmin < tmax) && (tmax > 0);
+	return hit;
 
-	tmin = max(tmin, 0.0f);
+	// Float3 t0s = (aabb.min - rayOrig) * invRayDir;
+  	// Float3 t1s = (aabb.max - rayOrig) * invRayDir;
 
-	return result;
+  	// Float3 tsmaller = min3f(t0s, t1s);
+    // Float3 tbigger  = max3f(t0s, t1s);
+
+    // tmin = tsmaller.getmax();
+	// tmax = tbigger.getmin();
+
+	// #if DEBUG_RAY_AABB_INTERSECT_DETAIL
+	// Int2 idx = Int2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
+	// if (IS_DEBUG_PIXEL())
+	// {
+	// 	printf("RayAABBIntersect: t0s=(%f, %f, %f), t1s=(%f, %f, %f)\n", t0s.x, t0s.y, t0s.z, t1s.x, t1s.y, t1s.z);
+	// 	printf("RayAABBIntersect: tsmaller=(%f, %f, %f), tbigger=(%f, %f, %f)\n", tsmaller.x, tsmaller.y, tsmaller.z, tbigger.x, tbigger.y, tbigger.z);
+	// 	printf("RayAABBIntersect: tmin=%f, tmax=%f\n", tmin, tmax);
+	// }
+	// #endif
+
+	// bool result = (tmin < tmax) && (tmax > 0);
+
+	// tmin = max(tmin, 0.0f);
+
+	// return result;
 }
 
-__host__ __device__ inline void RayAabbPairIntersect(const Float3& invRayDir, const Float3& rayOrig, const AABBCompact& aabbpair, bool& intersect1, bool& intersect2, float& t1, float& t2)
+__host__ __device__ inline void RayAabbPairIntersect(RayBoxIntersectionHelper helper, const Float3& invRayDir, const Float3& rayOrig, const AABBCompact& aabbpair, bool& intersect1, bool& intersect2, float& t1, float& t2)
 {
 	AABB aabbLeft = aabbpair.GetLeftAABB();
 	AABB aabbRight = aabbpair.GetRightAABB();
@@ -441,8 +567,8 @@ __host__ __device__ inline void RayAabbPairIntersect(const Float3& invRayDir, co
 	float tmin1, tmin2;
 	float tmax1, tmax2;
 
-	intersect1 = RayAABBIntersect(invRayDir, rayOrig, aabbLeft, tmin1, tmax1);
-	intersect2 = RayAABBIntersect(invRayDir, rayOrig, aabbRight, tmin2, tmax2);
+	intersect1 = RayAABBIntersect(/*invRayDir, rayOrig,*/  aabbLeft, helper,tmin1, tmax1);
+	intersect2 = RayAABBIntersect(/*invRayDir, rayOrig,*/  aabbRight,helper, tmin2, tmax2);
 
 	t1 = tmin1;
 	t2 = tmin2;

@@ -28,6 +28,7 @@ public:
     virtual ~VoxelMeshGenerator() {}
 
     virtual std::shared_ptr<std::vector<Triangle>> VoxelToMesh() = 0;
+    virtual void VoxelToMesh(std::vector<Float3>& vertices, std::vector<uint>& indices) = 0;
 
 protected:
     const VoxelsGenerator& voxels;
@@ -42,6 +43,10 @@ public:
     virtual ~BlockMeshGenerator() {}
 
     virtual std::shared_ptr<std::vector<Triangle>> VoxelToMesh() override;
+    virtual void VoxelToMesh(std::vector<Float3>& vertices, std::vector<uint>& indices) override
+    {
+
+    }
 };
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
@@ -73,6 +78,7 @@ public:
     virtual ~MarchingCubeMeshGenerator() {}
 
     virtual std::shared_ptr<std::vector<Triangle>> VoxelToMesh() override;
+    virtual void VoxelToMesh(std::vector<Float3>& vertices, std::vector<uint>& indices) override;
 private:
     void Init();
     void InitMarchingCube(const MarchingCube& marchingCube);

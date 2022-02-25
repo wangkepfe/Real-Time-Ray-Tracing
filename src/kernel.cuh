@@ -37,7 +37,7 @@ class VoxelsGenerator;
 #define SUN_LIGHT_ID 8888
 #define DEFAULT_LIGHT_ID 7777
 
-#define USE_INTERPOLATED_FAKE_NORMAL 1
+#define USE_INTERPOLATED_FAKE_NORMAL 0
 
 #define DEBUG_FRAME -1
 #define DUMP_FRAME_NUM -1
@@ -554,10 +554,14 @@ private:
 	uint                        batchCount;
 	uint                        batchCountPadded;
 
+	// input triangles
+	Triangle*                   constTriangles;
+	uint*                       indexBuffer;
+	Float3*                     vertexBuffer;
+
 	// triangles
 	uint*                       triCountArray;
 	uint*                       batchCountArray;
-	Triangle*                   constTriangles;
 	Triangle*                   triangles;
 
 	// bvh

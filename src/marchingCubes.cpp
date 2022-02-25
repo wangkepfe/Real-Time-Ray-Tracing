@@ -545,3 +545,46 @@ std::shared_ptr<std::vector<Triangle>> MarchingCubeMeshGenerator::VoxelToMesh()
 
 	return triangles;
 }
+
+void MarchingCubeMeshGenerator::VoxelToMesh(std::vector<Float3>& vertices, std::vector<uint>& indices)
+{
+    std::unordered_map<Float3, size_t, Float3Hasher> vertsMap;
+
+    size_t idx = 0;
+
+    for (uint i = 0; i < voxels.kMapDim + 1; ++i)
+    {
+        for (uint j = 0; j < voxels.kMapDim + 1; ++j)
+        {
+            for (uint k = 0; k < voxels.kMapDimY + 1; ++k)
+            {
+                std::vector<uint> blocks = voxels.GetNeighborBlockAt2(i, k, j);
+                uint id = BlocksToIdx(blocks);
+                std::vector<Triangle> currentMarchingCube;
+                MeshTraslate(currentMarchingCube, meshes[id], Float3(i, k, j));
+
+                for (auto& triangle : currentMarchingCube)
+                {
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        Float3 p = triangle.vertices[i].xyz;
+
+                        if (vertsMap.find(p) != vertsMap.end())
+                        {
+                            // Redundant vertex, fetch its index, save the index
+                            indices.push_back(vertsMap[p]);
+                        }
+                        else
+                        {
+                            // Push current index and vertex, save to map
+                            indices.push_back(idx);
+                            vertices.push_back(p);
+                            vertsMap[p] = idx;
+                            ++idx;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

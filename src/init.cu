@@ -85,9 +85,13 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		//std::vector<Triangle> h_triangles = *blockMeshGenerator.VoxelToMesh();
 
 		MarchingCubeMeshGenerator marchingCubeMeshGenerator(*pVoxelsGenerator);
-		std::vector<Triangle> h_triangles = *marchingCubeMeshGenerator.VoxelToMesh();
+		// std::vector<Triangle> h_triangles = *marchingCubeMeshGenerator.VoxelToMesh();
+		std::vector<Float3> h_vertexBuffer;
+		std::vector<uint> h_indexBuffer;
+		marchingCubeMeshGenerator.VoxelToMesh(h_vertexBuffer, h_indexBuffer);
 
-		triCount = h_triangles.size();
+		// triCount = h_triangles.size();
+		triCount = h_indexBuffer.size() / 3;
 
 		// Max and min tri count supported
 		assert(triCount >= MIN_TRIANGLE_COUNT_ALLOWED);
@@ -98,10 +102,12 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		if (triCountPadded % KernalBatchSize != 0)
 		{
 			triCountPadded += (KernalBatchSize - triCount % KernalBatchSize);
-			h_triangles.resize(triCountPadded);
-			for (int i = triCount; i < triCountPadded; ++i)
+			// h_triangles.resize(triCountPadded);
+			h_indexBuffer.resize(triCountPadded * 3);
+			for (int i = triCount * 3; i < triCountPadded * 3; ++i)
 			{
-				h_triangles[i] = h_triangles[0];
+				// h_triangles[i] = h_triangles[0];
+				h_indexBuffer[i] = 0;
 			}
 		}
 
@@ -121,9 +127,14 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		h_triCountArray[batchCount - 1] = triCount - (triCountPadded2 - BatchSize);
 
 		// copy triangle data to gpu
-		const uint allocSize = triCountPadded * sizeof(Triangle);
-		GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCountPadded * sizeof(Triangle)));
-		GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCountPadded * sizeof(Triangle), cudaMemcpyHostToDevice));
+		// GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCountPadded * sizeof(Triangle)));
+		// GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCountPadded * sizeof(Triangle), cudaMemcpyHostToDevice));
+
+		GpuErrorCheck(cudaMalloc((void**)& indexBuffer, triCountPadded * 3 * sizeof(uint)));
+		GpuErrorCheck(cudaMemcpy(indexBuffer, h_indexBuffer.data(), triCountPadded * 3 * sizeof(uint), cudaMemcpyHostToDevice));
+
+		GpuErrorCheck(cudaMalloc((void**)& vertexBuffer, h_vertexBuffer.size() * sizeof(Float3)));
+		GpuErrorCheck(cudaMemcpy(vertexBuffer, h_vertexBuffer.data(), h_vertexBuffer.size() * sizeof(Float3), cudaMemcpyHostToDevice));
 
 		// copy batch count to gpu
 		GpuErrorCheck(cudaMalloc((void**)& batchCountArray, 1 * sizeof(uint)));
