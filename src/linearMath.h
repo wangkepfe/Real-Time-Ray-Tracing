@@ -365,6 +365,36 @@ struct Int3
 	__forceinline__ __host__ __device__ int  operator[] (int i) const         { return _v[i]; }
 };
 
+struct UInt3
+{
+	union {
+		struct { uint x, y, z; };
+		uint _v[3];
+	};
+
+	__forceinline__ __host__ __device__ UInt3()                     : x{0}, y{0}, z{0} {}
+	__forceinline__ __host__ __device__ UInt3(uint a)                : x{a}, y{a}, z{a} {}
+    __forceinline__ __host__ __device__ UInt3(uint x, uint y, uint z)  : x{x}, y{y}, z{z} {}
+
+    __forceinline__ __host__ __device__ UInt3 operator + (uint a) const         { return UInt3(x + a, y + a, z + a); }
+    __forceinline__ __host__ __device__ UInt3 operator - (uint a) const         { return UInt3(x - a, y - a, z - a); }
+
+	__forceinline__ __host__ __device__ UInt3 operator += (uint a)              { x += a; y += a; z += a; return *this; }
+    __forceinline__ __host__ __device__ UInt3 operator -= (uint a)              { x -= a; y -= a; z -= a; return *this; }
+
+    __forceinline__ __host__ __device__ UInt3 operator + (const UInt3& v) const { return UInt3(x + v.x, y + v.y, z + v.y); }
+    __forceinline__ __host__ __device__ UInt3 operator - (const UInt3& v) const { return UInt3(x - v.x, y - v.y, z - v.y); }
+
+	__forceinline__ __host__ __device__ UInt3 operator += (const UInt3& v)      { x += v.x; y += v.y; z += v.y; return *this; }
+    __forceinline__ __host__ __device__ UInt3 operator -= (const UInt3& v)      { x -= v.x; y -= v.y; z -= v.y; return *this; }
+
+    __forceinline__ __host__ __device__ bool operator == (const UInt3& v)      { return x == v.x && y == v.y && z == v.z; }
+	__forceinline__ __host__ __device__ bool operator != (const UInt3& v)      { return x != v.x || y != v.y || z != v.z; }
+
+	__forceinline__ __host__ __device__ uint& operator[] (uint i)               { return _v[i]; }
+	__forceinline__ __host__ __device__ uint  operator[] (uint i) const         { return _v[i]; }
+};
+
 struct Float4
 {
 	union {
@@ -460,6 +490,9 @@ __forceinline__ __host__ __device__ float  lerpf(float a, float b, float w)     
 __forceinline__ __host__ __device__ Float3 reflect3f(Float3 i, Float3 n)                       { return i - 2.0f * n * dot(n,i); }
 __forceinline__ __host__ __device__ float  pow2(float a)                                       { return a * a; }
 __forceinline__ __host__ __device__ float  pow3(float a)                                       { return a * a * a; }
+
+__forceinline__ __host__ __device__ float AngleBetween(const Float3& a, const Float3& b) { return acos(dot(a, b) / sqrtf(a.length2() * b.length2())); }
+
 
 __device__ __inline__ float min3(float v1, float v2, float v3) { return min(min(v1, v2), v3); }
 __device__ __inline__ float max3(float v1, float v2, float v3) { return max(max(v1, v2), v3); }

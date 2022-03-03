@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.18)
 project(realtimeraytracing LANGUAGES CUDA CXX)
 
 file(GLOB mySRC
@@ -41,6 +41,7 @@ target_include_directories(meshProcesor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/
 target_link_libraries(realtimeraytracing cudadevrt.lib)
 set_target_properties(realtimeraytracing PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_compile_options(realtimeraytracing PRIVATE "--keep")
+set_property(TARGET realtimeraytracing PROPERTY CUDA_ARCHITECTURES 75)
 
 # vulkan
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

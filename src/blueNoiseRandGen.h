@@ -25,8 +25,7 @@ __forceinline__ __device__ float HashFloat3(Float3 a)
 	uint s2 = *reinterpret_cast<uint*>(&a.y);
 	uint s3 = *reinterpret_cast<uint*>(&a.z);
 
-	// return WangHashItoF(s1 ^ s2 ^ s3);
-	return 1.0;
+	return WangHashItoF(s1 ^ s2 ^ s3);
 }
 
 struct BlueNoiseRandGeneratorHost

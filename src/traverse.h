@@ -167,7 +167,10 @@ __device__ __host__ inline void TraverseBvh(
 					rayOffset       = errorT + errorP;
 
 					#if USE_INTERPOLATED_FAKE_NORMAL
-					fakeNormal = normalize(tri.n1 * (1.0f - uv.x - uv.y) + tri.n2 * uv.x + tri.n3 * uv.y);
+					tri.n1 = normalize(tri.n1);
+					tri.n2 = normalize(tri.n2);
+					tri.n3 = normalize(tri.n3);
+					fakeNormal = normalize(tri.n3 * (1.0f - uv.x - uv.y) + tri.n1 * uv.x + tri.n2 * uv.y);
 					#endif
 
 					#if RAY_TRIANGLE_COORDINATE_TRANSFORM

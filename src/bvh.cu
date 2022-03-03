@@ -10,7 +10,7 @@ void RayTracer::BuildBvhLevel1()
     // ------------------------------- Update Geometry -----------------------------------
     // out: triangles, aabbs, morton codes
     UpdateSceneGeometry <KernelSize, KernalBatchSize> <<< batchCount, KernelSize >>>
-        (vertexBuffer, indexBuffer, triangles, aabbs, morton, triCountArray, clockTime);
+        (vertexBuffer, indexBuffer, normalBuffer, triangles, aabbs, morton, triCountArray, clockTime);
 
     #if DEBUG_FRAME > 0
     GpuErrorCheck(cudaDeviceSynchronize());

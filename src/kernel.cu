@@ -136,14 +136,68 @@ void RayTracer::UpdateFrame()
     }
 }
 
-__global__ void ProcessGeometry(Float3* vertexBuffer, uint size)
+__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, BlueNoiseRandGenerator randGen, uint size)
 {
     uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= size)
         return;
 
-    Float3 vertex = vertexBuffer[idx];
+    Float3 vertex = constVertexBuffer[idx];
+
+    Float4 randNum;
+    randGen.idx       = idx;
+    randGen.sampleIdx = 0;
+    randNum = randGen.Rand4(0);
+
+    Float3 normal = randNum.xyz;
+    float offset = randNum.w;
+
+    const float strength = 0.05f;
+
+    vertex = vertex + normal * offset * strength;
+
+    vertexBuffer[idx] = vertex;
+}
+
+__device__ inline Float3 AtomicAdd3f(Float3& v, const Float3& a)
+{
+	Float3 old;
+	old.x = atomicAdd(&v.x, a.x);
+	old.y = atomicAdd(&v.y, a.y);
+	old.z = atomicAdd(&v.z, a.z);
+	return old;
+}
+
+__global__ void GenerateSmoothNormals(uint* indexBuffer, Float3* vertexBuffer, Float3* normalBuffer, uint triCount)
+{
+    uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= triCount)
+        return;
+
+    uint index0 = indexBuffer[idx * 3 + 0];
+    uint index1 = indexBuffer[idx * 3 + 1];
+    uint index2 = indexBuffer[idx * 3 + 2];
+
+    Float3 v0 = vertexBuffer[index0];
+    Float3 v1 = vertexBuffer[index1];
+    Float3 v2 = vertexBuffer[index2];
+
+    // Float3 planeNormal = cross(v2 - v0, v1 - v0).normalize();
+    // AtomicAdd3f(normalBuffer[index0], planeNormal);
+    // AtomicAdd3f(normalBuffer[index1], planeNormal);
+    // AtomicAdd3f(normalBuffer[index2], planeNormal);
+
+    Float3 planeNormalMultArea = cross(v2 - v0, v2 - v1) / 2;
+
+    float w0 = AngleBetween(v2 - v0, v1 - v0);
+    float w1 = AngleBetween(v2 - v1, v0 - v1);
+    float w2 = AngleBetween(v0 - v2, v1 - v2);
+
+    AtomicAdd3f(normalBuffer[index0], planeNormalMultArea * w0);
+    AtomicAdd3f(normalBuffer[index1], planeNormalMultArea * w1);
+    AtomicAdd3f(normalBuffer[index2], planeNormalMultArea * w2);
 }
 
 void RayTracer::draw(SurfObj* renderTarget)
@@ -198,8 +252,8 @@ void RayTracer::draw(SurfObj* renderTarget)
     GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
 
     // ------------------------------- Geometry processing -------------------------------
-
-
+    MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, d_randGen, numVertices);
+    GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, vertexBuffer, normalBuffer, triCountPadded);
 
     // ------------------------------- BVH -------------------------------
     BuildBvhLevel1();

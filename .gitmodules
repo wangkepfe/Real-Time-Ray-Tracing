@@ -4,9 +4,6 @@
 [submodule "ext/cuda-samples"]
 	path = ext/cuda-samples
 	url = https://github.com/NVIDIA/cuda-samples
-[submodule "ext/TinyTIFF"]
-	path = ext/TinyTIFF
-	url = https://github.com/jkriege2/TinyTIFF
 [submodule "ext/stb"]
 	path = ext/stb
 	url = https://github.com/nothings/stb

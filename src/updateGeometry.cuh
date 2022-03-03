@@ -63,9 +63,9 @@ __device__ inline void FlipNormal(Float3& n)
 template<uint kernelSize,          // thread number per kernel, same as sharedAabb size, sharedAabb-thread 1-to-1 mapping
          uint perThreadBatch>      // batch process count per thread
 __global__ void UpdateSceneGeometry(
-	// Triangle*    constTriangles,   // [const] reference mesh
 	Float3* vertexBuffer,
 	uint* indexBuffer,
+	Float3* normalBuffer,
 	Triangle*    triangles,        // [out] animated mesh
 	AABB*        aabbs,            // [out] per triangle aabb
 	uint*        morton,           // [out] per triangle motron code
@@ -81,7 +81,6 @@ __global__ void UpdateSceneGeometry(
 	uint triCount = triCountArray[objectId];
 
 	indexBuffer += triStart * 3;
-	// constTriangles   += triStart;
 	triangles        += triStart;
 	aabbs            += triStart;
 	morton           += triStart;
@@ -133,21 +132,25 @@ __global__ void UpdateSceneGeometry(
 		mytriangle[i].v2 = vertexBuffer[indexBuffer[idx[i] * 3 + 1]];
 		mytriangle[i].v3 = vertexBuffer[indexBuffer[idx[i] * 3 + 2]];
 
-		Float3 v1 = mytriangle[i].v1;
-		Float3 v2 = mytriangle[i].v2;
-		Float3 v3 = mytriangle[i].v3;
+		mytriangle[i].n1 = normalBuffer[indexBuffer[idx[i] * 3]];
+		mytriangle[i].n2 = normalBuffer[indexBuffer[idx[i] * 3 + 1]];
+		mytriangle[i].n3 = normalBuffer[indexBuffer[idx[i] * 3 + 2]];
 
-		Float3 center = (v1 + v2 + v3) / 3.0f;
+		// Float3 v1 = mytriangle[i].v1;
+		// Float3 v2 = mytriangle[i].v2;
+		// Float3 v3 = mytriangle[i].v3;
 
-		float scale = 1.0001f;
+		// Float3 center = (v1 + v2 + v3) / 3.0f;
 
-		v1 = DifferenceOfProducts(v1, scale, center, scale - 1.0f);
-		v2 = DifferenceOfProducts(v2, scale, center, scale - 1.0f);
-		v3 = DifferenceOfProducts(v3, scale, center, scale - 1.0f);
+		// float scale = 1.0001f;
 
-		mytriangle[i].v1 = v1;
-		mytriangle[i].v2 = v2;
-		mytriangle[i].v3 = v3;
+		// v1 = DifferenceOfProducts(v1, scale, center, scale - 1.0f);
+		// v2 = DifferenceOfProducts(v2, scale, center, scale - 1.0f);
+		// v3 = DifferenceOfProducts(v3, scale, center, scale - 1.0f);
+
+		// mytriangle[i].v1 = v1;
+		// mytriangle[i].v2 = v2;
+		// mytriangle[i].v3 = v3;
 
 	#if RAY_TRIANGLE_COORDINATE_TRANSFORM
 		triangles[idx[i]] = PreCalcTriangleCoordTrans(mytriangle[i]);

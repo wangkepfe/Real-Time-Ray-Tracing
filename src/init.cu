@@ -130,11 +130,17 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 		// GpuErrorCheck(cudaMalloc((void**)& constTriangles, triCountPadded * sizeof(Triangle)));
 		// GpuErrorCheck(cudaMemcpy(constTriangles, h_triangles.data(), triCountPadded * sizeof(Triangle), cudaMemcpyHostToDevice));
 
-		GpuErrorCheck(cudaMalloc((void**)& indexBuffer, triCountPadded * 3 * sizeof(uint)));
-		GpuErrorCheck(cudaMemcpy(indexBuffer, h_indexBuffer.data(), triCountPadded * 3 * sizeof(uint), cudaMemcpyHostToDevice));
+		numVertices = h_vertexBuffer.size();
+		numIndices = triCountPadded * 3;
 
-		GpuErrorCheck(cudaMalloc((void**)& vertexBuffer, h_vertexBuffer.size() * sizeof(Float3)));
-		GpuErrorCheck(cudaMemcpy(vertexBuffer, h_vertexBuffer.data(), h_vertexBuffer.size() * sizeof(Float3), cudaMemcpyHostToDevice));
+		GpuErrorCheck(cudaMalloc((void**)& indexBuffer, numIndices * sizeof(uint)));
+		GpuErrorCheck(cudaMemcpy(indexBuffer, h_indexBuffer.data(), numIndices * sizeof(uint), cudaMemcpyHostToDevice));
+
+		GpuErrorCheck(cudaMalloc((void**)& vertexBuffer, numVertices * sizeof(Float3)));
+		GpuErrorCheck(cudaMalloc((void**)& normalBuffer, numVertices * sizeof(Float3)));
+
+		GpuErrorCheck(cudaMalloc((void**)& constVertexBuffer, numVertices * sizeof(Float3)));
+		GpuErrorCheck(cudaMemcpy(constVertexBuffer, h_vertexBuffer.data(), numVertices * sizeof(Float3), cudaMemcpyHostToDevice));
 
 		// copy batch count to gpu
 		GpuErrorCheck(cudaMalloc((void**)& batchCountArray, 1 * sizeof(uint)));
@@ -492,13 +498,30 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	}
 }
 
+void TextureManager::init()
+{
+	std::unordered_map<TextureManager::TexName, TextureManager::TexType> map =
+	{
+		{ GroundSoilAlbedoRoughness, RGBA16 },
+		{ GroundSoilNormalHeight   , RGBA16 },
+	};
+
+	for (int i = 0; i < TextureManager::TexName::TextureCount; ++i)
+	{
+
+	}
+}
+
 void RayTracer::cleanup()
 {
 	// ---------------- Destroy surface objects ----------------------
 	// triangle
 	cudaFree(batchCountArray);
 
-	cudaFree(constTriangles);
+	cudaFree(vertexBuffer);
+	cudaFree(normalBuffer);
+	cudaFree(indexBuffer);
+	cudaFree(constVertexBuffer);
 	cudaFree(triangles);
 
 	// tlas

@@ -37,7 +37,7 @@ class VoxelsGenerator;
 #define SUN_LIGHT_ID 8888
 #define DEFAULT_LIGHT_ID 7777
 
-#define USE_INTERPOLATED_FAKE_NORMAL 0
+#define USE_INTERPOLATED_FAKE_NORMAL 1
 
 #define DEBUG_FRAME -1
 #define DUMP_FRAME_NUM -1
@@ -291,17 +291,6 @@ struct __align__(16) RayState
 	Float3     beta1;
 };
 
-union SceneTextures
-{
-	struct
-	{
-		TexObj uv;
-		TexObj sandAlbedo;
-		TexObj sandNormal;
-	};
-	TexObj array[3];
-};
-
 enum Buffer2DName
 {
 	RenderColorBuffer,             // main render buffer
@@ -391,6 +380,41 @@ struct Buffer2DManager
 
 	std::array<Buffer2D, Buffer2DCount> buffers;
 };
+
+union SceneTextures
+{
+	struct
+	{
+		TexObj groundSoilAlbedo;
+		TexObj groundSoilNormal;
+		TexObj groundSoilHeight;
+		TexObj groundSoilRoughness;
+		TexObj groundSoilAo;
+	};
+	TexObj array[5];
+};
+
+struct TextureManager
+{
+	enum TexType {
+		RGBA16,
+	} type;
+
+	enum TexName {
+		GroundSoilAlbedoRoughness,
+		GroundSoilNormalHeight,
+		TextureCount,
+	} name;
+
+	std::array<cudaArray*, TextureCount> buffers;
+
+	void init();
+
+	void clear() { for (auto buffer : buffers) { GpuErrorCheck(cudaFreeArray(buffer)); } }
+
+	SceneTextures texObj;
+};
+
 
 class RayTracer
 {
@@ -492,10 +516,7 @@ private:
 	SceneGeometry               d_sceneGeometry;
 
 	// texture
-	SceneTextures               sceneTextures;
-	cudaArray*                  texArraySandAlbedo;
-	cudaArray*                  texArrayUv;
-	cudaArray*                  texArraySandNormal;
+	TextureManager              textureManager;
 
 	// surface
 	Buffer2DManager             buffer2DManager;
@@ -558,6 +579,10 @@ private:
 	Triangle*                   constTriangles;
 	uint*                       indexBuffer;
 	Float3*                     vertexBuffer;
+	Float3*                     constVertexBuffer;
+	uint                        numVertices;
+	uint                        numIndices;
+	Float3*                     normalBuffer;
 
 	// triangles
 	uint*                       triCountArray;

@@ -4,6 +4,11 @@
 #include "fileUtils.cuh"
 #include <unordered_map>
 #include <iostream>
+#include <algorithm>
+#include <vector>
+#include <array>
+#include <utility>
+#include <memory>
 
 namespace {
 
@@ -160,6 +165,22 @@ inline void MeshCopy(std::vector<Triangle>& out, const std::vector<Triangle>& in
     }
 }
 
+inline void MeshFlipNormal(std::vector<Triangle>& out, const std::vector<Triangle>& in)
+{
+    int s = in.size();
+    out.resize(s);
+    for (int i = 0; i < s; ++i)
+    {
+        out[i].v1 = in[i].v1;
+        out[i].v2 = in[i].v3;
+        out[i].v3 = in[i].v2;
+
+        out[i].n1 = -in[i].n1;
+        out[i].n2 = -in[i].n3;
+        out[i].n3 = -in[i].n2;
+    }
+}
+
 inline void MeshTraslate(std::vector<Triangle>& out, const std::vector<Triangle>& in, const Float3& t)
 {
     int s = in.size();
@@ -207,7 +228,7 @@ void MarchingCubeMeshGenerator::InitMarchingCube(const MarchingCube& marchingCub
 
 	if (marchingCube.reversible)
 	{
-		MeshCopy(meshes[FlipBits(meshIdx[0], 8u)], meshes[meshIdx[0]]);
+		MeshFlipNormal(meshes[FlipBits(meshIdx[0], 8u)], meshes[meshIdx[0]]);
 	}
 
     std::vector<std::vector<Float3>> points(transList.size());
@@ -236,7 +257,7 @@ void MarchingCubeMeshGenerator::InitMarchingCube(const MarchingCube& marchingCub
         if (marchingCube.reversible && meshes[destIdx].size() == 0)
         {
 			// std::cout << destIdx << " ";
-            MeshCopy(meshes[destIdx], meshes[srcIdx]);
+            MeshFlipNormal(meshes[destIdx], meshes[srcIdx]);
         }
     }
 	std::cout << "\n\n";
@@ -546,12 +567,151 @@ std::shared_ptr<std::vector<Triangle>> MarchingCubeMeshGenerator::VoxelToMesh()
 	return triangles;
 }
 
+using namespace std;
+
+class VertexMerger
+{
+public:
+    VertexMerger(vector<uint>& indices, vector<Float3>& vertices, Float3 sceneBoundMax, Float3 sceneBoundMin, uint vertexCount, float maxDistanceAllowed)
+    :   indices            { indices            },
+        vertices           { vertices           },
+        sceneBoundMax      { sceneBoundMax      },
+        sceneBoundMin      { sceneBoundMin      },
+        vertexCount        { vertexCount        },
+        maxDistanceAllowed { maxDistanceAllowed },
+        bin                {                    },
+        count              { 0                  },
+        binSize            { 0                  },
+        binDim             { 0                  }
+    {}
+
+    void Init()
+    {
+        Float3 sceneExtent = sceneBoundMax - sceneBoundMin;
+
+        // a x b x c = numVertices
+        // a : b : c = sceneExtent.x : sceneExtent.y : sceneExtent.z
+        //
+        // a x ((sceneExtent.y / sceneExtent.x) x a) x ((sceneExtent.z / sceneExtent.x) x a) = numVertices
+        // a^3 x sceneExtent.y x sceneExtent.z / sceneExtent.x^2 = numVertices
+        // a = (numVertices x sceneExtent.x^2 / sceneExtent.y / sceneExtent.z)^(1/3)
+
+        float dimX = powf(vertexCount * sceneExtent.x * sceneExtent.x / sceneExtent.y / sceneExtent.z, 1.0f / 3.0f);
+        float dimY = dimX / sceneExtent.x * sceneExtent.y;
+        float dimZ = dimX / sceneExtent.x * sceneExtent.z;
+
+        binDim.x = static_cast<int>(dimX) + 1;
+        binDim.y = static_cast<int>(dimY) + 1;
+        binDim.z = static_cast<int>(dimZ) + 1;
+
+        binSize = sceneExtent.x / (float)binDim.x;
+
+        bin.resize(binDim.x, vector<vector<vector<uint>>>(binDim.y, vector<vector<uint>>(binDim.z, vector<uint>{})));
+    }
+
+    void Process(const Float3& v)
+    {
+        uint binX;
+        uint binY;
+        uint binZ;
+
+        GetBinIdx(v, binX, binY, binZ);
+
+        for (uint i = ((binX == 0) ? binX : binX - 1); i <= ((binX == binDim.x - 1) ? binX : binX + 1); ++i)
+        {
+            for (uint j = ((binY == 0) ? binY : binY - 1); j <= ((binY == binDim.y - 1) ? binY : binY + 1); ++j)
+            {
+                for (uint k = ((binZ == 0) ? binZ : binZ - 1); k <= ((binZ == binDim.z - 1) ? binZ : binZ + 1); ++k)
+                {
+                    for (uint idx : bin[i][j][k])
+                    {
+                        if (PointMatch(v, vertices[idx]) == true)
+                        {
+                            // Duplicate found!
+                            indices.push_back(idx);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // New vertex!
+        indices.push_back(count);
+        vertices.push_back(v);
+        bin[binX][binY][binZ].push_back(count);
+        ++count;
+    }
+
+private:
+    void GetBinIdx(const Float3& v, uint& binX, uint& binY, uint& binZ) const
+	{
+		binX = (uint)((v.x - sceneBoundMin.x) / binSize);
+        binY = (uint)((v.y - sceneBoundMin.y) / binSize);
+        binZ = (uint)((v.z - sceneBoundMin.z) / binSize);
+
+        binX = std::clamp(binX, 0u, (binDim.x == 0u) ? 0u : binDim.x - 1u);
+        binY = std::clamp(binY, 0u, (binDim.y == 0u) ? 0u : binDim.y - 1u);
+        binZ = std::clamp(binZ, 0u, (binDim.z == 0u) ? 0u : binDim.z - 1u);
+	}
+
+    bool PointMatch(const Float3& v1, const Float3& v2) const
+	{
+		return distancesq(v1, v2) <= maxDistanceAllowed * maxDistanceAllowed;
+	}
+
+    vector<uint>& indices;
+    vector<Float3>& vertices;
+    Float3 sceneBoundMax;
+    Float3 sceneBoundMin;
+    uint vertexCount;
+    float maxDistanceAllowed;
+    vector<vector<vector<vector<uint>>>> bin;
+    uint count;
+
+    float binSize;
+    UInt3 binDim;
+};
+
+struct Float3ApproxHasher
+{
+	unsigned long long operator() (const Float3& v) const
+	{
+        constexpr float binSize = 0.1f;
+        constexpr unsigned long long binDim = 1u << 20;
+
+		unsigned long long binX = (unsigned long long)(v.x / binSize) + binDim / 2;
+        unsigned long long binY = (unsigned long long)(v.y / binSize) + binDim / 2;
+        unsigned long long binZ = (unsigned long long)(v.z / binSize) + binDim / 2;
+
+        binX = std::clamp(binX, 0Ui64, binDim);
+        binY = std::clamp(binY, 0Ui64, binDim);
+        binZ = std::clamp(binZ, 0Ui64, binDim);
+
+		return binX + binY * binDim + binZ * binDim * binDim;
+	}
+};
+
+struct Float3ApproxEqual
+{
+	bool operator() (const Float3& v1, const Float3& v2) const
+	{
+        constexpr float maxDistanceAllowed = 0.05f;
+		return distancesq(v1, v2) <= maxDistanceAllowed * maxDistanceAllowed;
+	}
+};
+
 void MarchingCubeMeshGenerator::VoxelToMesh(std::vector<Float3>& vertices, std::vector<uint>& indices)
 {
-    std::unordered_map<Float3, size_t, Float3Hasher> vertsMap;
+    std::unordered_map<Float3, uint, Float3Hasher> vertsMap;
 
-    size_t idx = 0;
+	std::vector<Float3> vertices1;
+	std::vector<uint> indices1;
 
+    Float3 sceneBoundMax = Float3(-FLT_MAX);
+    Float3 sceneBoundMin = Float3(FLT_MAX);
+
+    uint idx = 0;
     for (uint i = 0; i < voxels.kMapDim + 1; ++i)
     {
         for (uint j = 0; j < voxels.kMapDim + 1; ++j)
@@ -569,22 +729,30 @@ void MarchingCubeMeshGenerator::VoxelToMesh(std::vector<Float3>& vertices, std::
                     {
                         Float3 p = triangle.vertices[i].xyz;
 
-                        if (vertsMap.find(p) != vertsMap.end())
+                        if (vertsMap.find(p) == vertsMap.end())
                         {
-                            // Redundant vertex, fetch its index, save the index
-                            indices.push_back(vertsMap[p]);
+                            vertices1.push_back(p);
+                            indices1.push_back(idx);
+							vertsMap[p] = idx;
+                            ++idx;
+
+                            sceneBoundMax = max3f(sceneBoundMax, p);
+                            sceneBoundMin = min3f(sceneBoundMin, p);
                         }
                         else
                         {
-                            // Push current index and vertex, save to map
-                            indices.push_back(idx);
-                            vertices.push_back(p);
-                            vertsMap[p] = idx;
-                            ++idx;
+                            indices1.push_back(vertsMap[p]);
                         }
                     }
                 }
             }
         }
+    }
+    constexpr float maxDistanceAllowed = 0.001f;
+    VertexMerger merger(indices, vertices, sceneBoundMax, sceneBoundMin, indices1.size(), maxDistanceAllowed);
+    merger.Init();
+    for (uint idx : indices1)
+    {
+        merger.Process(vertices1[idx]);
     }
 }

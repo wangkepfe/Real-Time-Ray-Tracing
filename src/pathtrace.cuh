@@ -69,6 +69,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
     #endif
 
     float outputDepth = rayState.depth;
+	Float2 outputUv = rayState.uv;
 
     // save material
     ushort materialMask = (ushort)rayState.matId;
