@@ -276,13 +276,15 @@ __device__ inline Float3 GetLightSource(
     if (rayState.matType == MAT_SKY)
     {
         Float3 envLightColor = EnvLight2(cbo.sunDir, lightDir, cbo.clockTime, rayState.isDiffuseRay, skyBuffer, sunBuffer, cbo.sunAngleCosThetaMax, Float2(randNum.x, randNum.y));
+
+        // Float3 envLightColor = Float3(1.0f);
         L0 = envLightColor;
     }
     // else if (rayState.matType == EMISSIVE)
     // {
     //     // local light
     //     SurfaceMaterial mat = sceneMaterial.materials[rayState.matId];
-    //     L0 = mat.albedo;
+    //     L0 = mat.albedo;-0
     // }
 
     return L0;

@@ -182,30 +182,12 @@ struct __align__(16) SurfaceMaterial
 	__device__ __host__ SurfaceMaterial() :
 		albedo  {Float3(0.8f)},
 		type    {PERFECT_REFLECTION},
-		useTex0 {false},
-		useTex1 {false},
-		useTex2 {false},
-		useTex3 {false},
-		texId0  {0},
-		texId1  {0},
-		texId2  {0},
-		texId3  {0},
 		F0      {Float3(0.56f, 0.57f, 0.58f)},
 		alpha   {0.05f}
 	{}
 
 	Float3 albedo;
 	uint   type;
-
-	bool   useTex0;
-	bool   useTex1;
-	bool   useTex2;
-	bool   useTex3;
-
-	uint   texId0;
-	uint   texId1;
-	uint   texId2;
-	uint   texId3;
 
 	Float3 F0;
 	float  alpha;
@@ -289,6 +271,10 @@ struct __align__(16) RayState
 	float      cosWo;
 
 	Float3     beta1;
+	int        unusued2;
+
+	Float3     albedo;
+	int        unusued3;
 };
 
 enum Buffer2DName
@@ -316,6 +302,12 @@ enum Buffer2DName
 	SkyBuffer,                     // sky
 	SunBuffer,
 
+	AlbedoBuffer,
+
+	SoilAlbedoAoBuffer,
+	SoilNormalRoughnessBuffer,
+	SoilHeightBuffer,
+
 	Buffer2DCount,
 };
 
@@ -325,6 +317,8 @@ enum Buffer2DFormat
 	FORMAT_HALF,
 	FORMAT_HALF2,
 	FORMAT_HALF4,
+	FORMAT_USHORT,
+	FORMAT_USHORT4,
 	Buffer2DFormatCount,
 };
 
@@ -339,6 +333,7 @@ enum Buffer2DDim
 	BUFFER_2D_16x16_GRID_DIM,
 	BUFFER_2D_SKY_DIM,
 	BUFFER_2D_SUN_DIM,
+	BUFFER_2D_1024x1024,
 	Buffer2DDimCount,
 };
 
@@ -381,39 +376,67 @@ struct Buffer2DManager
 	std::array<Buffer2D, Buffer2DCount> buffers;
 };
 
-union SceneTextures
-{
-	struct
-	{
-		TexObj groundSoilAlbedo;
-		TexObj groundSoilNormal;
-		TexObj groundSoilHeight;
-		TexObj groundSoilRoughness;
-		TexObj groundSoilAo;
-	};
-	TexObj array[5];
-};
+// enum TexName {
+// 	GroundSoilAlbedoRoughness,
+// 	GroundSoilNormalHeight,
+// 	GroundSoilAo,
 
-struct TextureManager
-{
-	enum TexType {
-		RGBA16,
-	} type;
+// 	TextureCount,
+// };
 
-	enum TexName {
-		GroundSoilAlbedoRoughness,
-		GroundSoilNormalHeight,
-		TextureCount,
-	} name;
+// union SceneTextures
+// {
+// 	struct
+// 	{
+// 		TexObj groundSoilAlbedoRoughness;
+// 		TexObj groundSoilNormalHeight;
+// 		TexObj groundSoilAo;
+// 	};
+// 	TexObj array[TextureCount];
+// };
 
-	std::array<cudaArray*, TextureCount> buffers;
+// struct TextureManager
+// {
+// 	enum TexType {
+// 		RGBA16,
+// 		RGBA8,
+// 	};
 
-	void init();
+// 	struct TextureDesc {
+// 		std::string filepath;
+// 		TexType type;
+// 	};
 
-	void clear() { for (auto buffer : buffers) { GpuErrorCheck(cudaFreeArray(buffer)); } }
+// 	void init();
 
-	SceneTextures texObj;
-};
+// 	void clear()
+// 	{
+// 		for (auto tex : texObj.array)
+// 		{
+// 			GpuErrorCheck(cudaDestroyTextureObject(tex));
+// 		}
+
+// 		for (auto buffer : buffers)
+// 		{
+// 			GpuErrorCheck(cudaFreeArray(buffer));
+// 		}
+
+// 		for (uint16_t* buffer : hBuffers)
+// 		{
+// 			delete buffer;
+// 		}
+// 	}
+
+// 	std::array<cudaArray*, TextureCount> buffers = {};
+
+// 	std::array<cudaChannelFormatDesc, TextureCount> channelDescs = {};
+// 	std::array<cudaResourceDesc, TextureCount> resDescs = {};
+// 	std::array<cudaTextureDesc, TextureCount> texDescs = {};
+
+// 	std::array<uint16_t*, TextureCount> hBuffers = {};
+
+// 	SceneTextures texObj = {};
+// };
 
 
 class RayTracer
@@ -515,8 +538,8 @@ private:
 	// traversal structure
 	SceneGeometry               d_sceneGeometry;
 
-	// texture
-	TextureManager              textureManager;
+	// // texture
+	// TextureManager              textureManager;
 
 	// surface
 	Buffer2DManager             buffer2DManager;

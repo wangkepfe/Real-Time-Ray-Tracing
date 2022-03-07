@@ -4,9 +4,6 @@
 #include <iostream>
 #include <vector>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -82,50 +79,66 @@ void LoadScene(const char* filePath, std::vector<Triangle>& h_triangles)
 	LoadSceneRecursive(h_triangles, scene, scene->mRootNode);
 }
 
-cudaArray* LoadTextureRgba8(const char* texPath, cudaTextureObject_t& texObj)
-{
-	cudaArray* texArray;
+// uint8_t* LoadTexture8::operator()(const char* texPath, int& texWidth, int& texHeight, int& texChannel, int nChannel)
+// {
+// 	uint8_t* buffer = stbi_load(texPath, &texWidth, &texHeight, &texChannel, nChannel);
+// 	std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
+// 	assert(buffer != NULL);
+// 	return buffer;
+// }
 
-	// stbi image load
-	int texWidth, texHeight, texChannel;
-	unsigned char* buffer = stbi_load(texPath, &texWidth, &texHeight, &texChannel, STBI_rgb_alpha);
-	std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
-	assert(buffer != NULL);
+// uint16_t* LoadTexture16::operator()(const char* texPath, int& texWidth, int& texHeight, int& texChannel, int nChannel)
+// {
+// 	uint16_t* buffer = stbi_load_16(texPath, &texWidth, &texHeight, &texChannel, nChannel);
+// 	std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
+// 	assert(buffer != NULL);
+// 	return buffer;
+// }
 
-	// copy to cuda format
-	uchar4* cpuTextureBuffer = new uchar4[texWidth * texHeight];
-	for (int i = 0; i < texWidth * texHeight; ++i)
-	{
-		cpuTextureBuffer[i] = make_uchar4(buffer[i * 4], buffer[i * 4 + 1], buffer[i * 4 + 2], buffer[i * 4 + 3]);
-	}
+// cudaArray* LoadTextureRgba8(const char* texPath, cudaTextureObject_t& texObj)
+// {
+// 	cudaArray* texArray;
 
-	// channel description
-	cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
-	cudaMallocArray(&texArray, &channelDesc, texWidth, texHeight);
-	cudaMemcpyToArray(texArray, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(uchar4), cudaMemcpyHostToDevice);
+// 	// stbi image load
+// 	int texWidth, texHeight, texChannel;
+// 	unsigned char* buffer = stbi_load(texPath, &texWidth, &texHeight, &texChannel, STBI_rgb_alpha);
+// 	std::cout << "Texture loaded: " << texPath << ", width=" << texWidth << ", height=" << texHeight << ", channel=" << texChannel << "\n";
+// 	assert(buffer != NULL);
 
-	// resource description
-	cudaResourceDesc resDesc;
-	memset(&resDesc, 0, sizeof(resDesc));
-	resDesc.resType = cudaResourceTypeArray;
-	resDesc.res.array.array = texArray;
+// 	// copy to cuda format
+// 	uchar4* cpuTextureBuffer = new uchar4[texWidth * texHeight];
+// 	for (int i = 0; i < texWidth * texHeight; ++i)
+// 	{
+// 		cpuTextureBuffer[i] = make_uchar4(buffer[i * 4], buffer[i * 4 + 1], buffer[i * 4 + 2], buffer[i * 4 + 3]);
+// 	}
 
-	// texture description
-	cudaTextureDesc texDesc;
-	memset(&texDesc, 0, sizeof(texDesc));
-	texDesc.addressMode[0]   = cudaAddressModeWrap;
-	texDesc.addressMode[1]   = cudaAddressModeWrap;
-	texDesc.filterMode       = cudaFilterModeLinear;
-	texDesc.readMode         = cudaReadModeNormalizedFloat;
-	texDesc.normalizedCoords = 1;
+// 	// channel description
+// 	cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
+// 	cudaMallocArray(&texArray, &channelDesc, texWidth, texHeight);
+// 	cudaMemcpyToArray(texArray, 0, 0, cpuTextureBuffer, texWidth * texHeight * sizeof(uchar4), cudaMemcpyHostToDevice);
 
-	// create
-	cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL);
-	assert(texObj != NULL);
+// 	// resource description
+// 	cudaResourceDesc resDesc;
+// 	memset(&resDesc, 0, sizeof(resDesc));
+// 	resDesc.resType = cudaResourceTypeArray;
+// 	resDesc.res.array.array = texArray;
 
-	// free cpu buffer
-	delete cpuTextureBuffer;
-	stbi_image_free(buffer);
+// 	// texture description
+// 	cudaTextureDesc texDesc;
+// 	memset(&texDesc, 0, sizeof(texDesc));
+// 	texDesc.addressMode[0]   = cudaAddressModeWrap;
+// 	texDesc.addressMode[1]   = cudaAddressModeWrap;
+// 	texDesc.filterMode       = cudaFilterModeLinear;
+// 	texDesc.readMode         = cudaReadModeNormalizedFloat;
+// 	texDesc.normalizedCoords = 1;
 
-	return texArray;
-}
+// 	// create
+// 	cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL);
+// 	assert(texObj != NULL);
+
+// 	// free cpu buffer
+// 	delete cpuTextureBuffer;
+// 	stbi_image_free(buffer);
+
+// 	return texArray;
+// }

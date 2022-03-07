@@ -17,8 +17,6 @@ file(GLOB mySRC
     "ext/imgui/backends/imgui_impl_glfw.h"
     "ext/imgui/backends/imgui_impl_vulkan.cpp"
     "ext/imgui/backends/imgui_impl_vulkan.h"
-    "ext/TinyTIFF/tinytiffreader.cpp"
-    "ext/TinyTIFF/tinytiffreader.h"
     "ext/stb/stb_image.h")
 
 add_executable(realtimeraytracing ${mySRC})
@@ -64,7 +62,6 @@ target_link_libraries(meshProcesor assimp)
 
 # header only
 target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/stb")
-target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/TinyTIFF")
 target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/toml")
 target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui")
 target_include_directories(realtimeraytracing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui/backends")

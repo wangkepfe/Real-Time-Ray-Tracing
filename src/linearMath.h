@@ -723,11 +723,9 @@ __device__ __forceinline__ void LocalizeSample(
 	Float3& u,
 	Float3& v)
 {
-	Float3 w;
+	Float3 w = Float3(1, 0, 0);
 
-	if (abs(n.y) > 0.707f)
-		w = Float3(0, 0, 1);
-	else
+	if (abs(n.x) > 0.707f)
 		w = Float3(0, 1, 0);
 
 	u = cross(n, w);

@@ -6,4 +6,13 @@
 #include <memory>
 
 void LoadScene(const char* filePath, std::vector<Triangle>& h_triangles);
-cudaArray* LoadTextureRgba8(const char* texPath, cudaTextureObject_t& texObj);
+
+// struct LoadTexture8
+// {
+//     uint8_t* operator()(const char* texPath, int& texWidth, int& texHeight, int& texChannel, int nChannel);
+// };
+
+// struct LoadTexture16
+// {
+//     uint16_t* operator()(const char* texPath, int& texWidth, int& texHeight, int& texChannel, int nChannel);
+// };

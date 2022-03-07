@@ -15,13 +15,14 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           SurfObj                colorBuffer,
                           SurfObj                normalBuffer,
                           SurfObj                depthBuffer,
-                          SceneTextures          textures,
+                          //SceneTextures          textures,
                           SurfObj                skyBuffer,
                           float*                 skyCdf,
                           SurfObj                sunBuffer,
                           float*                 sunCdf,
                           SurfObj                motionVectorBuffer,
                           SurfObj                noiseLevelBuffer,
+                          SurfObj                albedoBuffer,
                           Int2                   renderSize)
 {
     // index
@@ -44,6 +45,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
     rayState.isOccluded     = false;
     rayState.isShadowRay    = false;
     rayState.normal         = Float3(0, -1, 0);
+    rayState.albedo         = Float3(1.0f);
 
     // setup rand gen
     Float4 randNum[4];
@@ -61,12 +63,6 @@ __global__ void PathTrace(ConstBuffer            cbo,
     Float2 sampleUv;
     GenerateRay(rayState.orig, rayState.dir, sampleUv, cbo.camera, idx, Float2(randNum[0][0], randNum[0][1]), Float2(randNum[0][2], randNum[0][3]));
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
-
-    #if USE_INTERPOLATED_FAKE_NORMAL
-    Float3 outputNormal = rayState.fakeNormal;
-    #else
-    Float3 outputNormal = rayState.normal;
-    #endif
 
     float outputDepth = rayState.depth;
 	Float2 outputUv = rayState.uv;
@@ -92,11 +88,18 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // glossy + diffuse
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][2]);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, sunCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
+
+    #if USE_INTERPOLATED_FAKE_NORMAL
+    Float3 outputNormal = rayState.fakeNormal;
+    #else
+    Float3 outputNormal = rayState.normal;
+    #endif
+
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][3]);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, textures, skyCdf, sunCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
+    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // Light
@@ -113,8 +116,11 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     L2 = clamp3f(L2, Float3(0.0f), Float3(10.0f));
 
+    // L2 = L2 / rayState.albedo;
+
     Store2DHalf3Ushort1( { L2 , materialMask } , colorBuffer, idx);
     Store2DHalf4(Float4(outputNormal, 0), normalBuffer, idx);
+    Store2DHalf4(Float4(rayState.albedo, 0), albedoBuffer, idx);
     Store2DHalf1(outputDepth, depthBuffer, idx);
     Store2DHalf2(motionVector, motionVectorBuffer, idx);
 }

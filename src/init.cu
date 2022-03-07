@@ -6,6 +6,9 @@
 #include "terrain.h"
 #include "meshing.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 extern GlobalSettings* g_settings;
 
 template<typename T>
@@ -222,6 +225,12 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	++i;
 	materials[i].type          = LAMBERTIAN_DIFFUSE;
 	materials[i].albedo        = Float3(0.9f);
+	// materials[i].useTex0       = true;
+	// materials[i].texId0        = static_cast<uint>(GroundSoilAlbedoRoughness);
+	// materials[i].useTex1       = true;
+	// materials[i].texId1        = static_cast<uint>(GroundSoilNormalHeight);
+	// materials[i].useTex2       = true;
+	// materials[i].texId0        = static_cast<uint>(GroundSoilAo);
 	++i;
 	materials[i].type          = MICROFACET_REFLECTION;
 	materials[i].albedo        = Float3(0.9f);
@@ -231,8 +240,6 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	materials[i].type          = PERFECT_REFLECTION;
 	++i;
 	materials[i].type          = LAMBERTIAN_DIFFUSE;
-	materials[i].useTex0       = true;
-	materials[i].texId0        = 0;
 	++i;
 	materials[i].type          = LAMBERTIAN_DIFFUSE;
 	materials[i].albedo        = Float3(0.9f, 0.2f, 0.1f);
@@ -390,7 +397,7 @@ void RayTracer::init(cudaStream_t* cudaStreams)
 	CameraSetup(cbo.camera);
 
 	// textures
-	texArrayUv = LoadTextureRgba8(g_settings->inputTextureFileNames[0].c_str(), sceneTextures.uv);
+	// texArrayUv = LoadTextureRgba8(g_settings->inputTextureFileNames[0].c_str(), sceneTextures.uv);
 	//texArraySandAlbedo = LoadTextureRgb8("resources/textures/sand.png", sceneTextures.sandAlbedo);
 	//texArraySandNormal = LoadTextureRgb8("resources/textures/sand_n.png", sceneTextures.sandNormal);
 
@@ -434,13 +441,15 @@ void RayTracer::CameraSetup(Camera& camera)
 void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, int screenHeight)
 {
 	std::array<cudaChannelFormatDesc, Buffer2DFormatCount> format;
-	std::array<UInt2, Buffer2DDimCount>                    dim;
+	std::array<UInt2, Buffer2DDimCount> dim;
 
 	// ------------------------- Format --------------------------
-	format[FORMAT_FLOAT4] = cudaCreateChannelDesc<float4>();
-	format[FORMAT_HALF2]  = cudaCreateChannelDescHalf2();
-	format[FORMAT_HALF]   = cudaCreateChannelDescHalf1();
-	format[FORMAT_HALF4]  = cudaCreateChannelDescHalf4();
+	format[FORMAT_FLOAT4]  = cudaCreateChannelDesc<float4>();
+	format[FORMAT_HALF2]   = cudaCreateChannelDescHalf2();
+	format[FORMAT_HALF]    = cudaCreateChannelDescHalf1();
+	format[FORMAT_HALF4]   = cudaCreateChannelDescHalf4();
+	format[FORMAT_USHORT]  = cudaCreateChannelDesc<ushort1>();
+	format[FORMAT_USHORT4] = cudaCreateChannelDesc<ushort4>();
 
 	// ------------------------- Dimension --------------------------
 
@@ -457,6 +466,7 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 	dim[BUFFER_2D_16x16_GRID_DIM] = UInt2(divRoundUp(renderWidth, 16u), divRoundUp(renderHeight, 16u));
 	dim[BUFFER_2D_SKY_DIM]        = UInt2(SKY_WIDTH, SKY_HEIGHT);
 	dim[BUFFER_2D_SUN_DIM]        = UInt2(SUN_WIDTH, SUN_HEIGHT);
+	dim[BUFFER_2D_1024x1024]      = UInt2(1024, 1024);
 
 	// ------------------------- Mapping --------------------------
 
@@ -484,6 +494,12 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 
 		{ SkyBuffer                     , { FORMAT_FLOAT4 , BUFFER_2D_SKY_DIM       } },
 		{ SunBuffer                     , { FORMAT_FLOAT4 , BUFFER_2D_SKY_DIM       } },
+
+		{ AlbedoBuffer                  , { FORMAT_HALF4   , BUFFER_2D_RENDER_DIM    } },
+
+		{ SoilAlbedoAoBuffer            , { FORMAT_USHORT4 , BUFFER_2D_1024x1024    } } ,
+		{ SoilNormalRoughnessBuffer     , { FORMAT_USHORT4 , BUFFER_2D_1024x1024    } } ,
+		{ SoilHeightBuffer              , { FORMAT_USHORT  , BUFFER_2D_1024x1024    } } ,
 	};
 
 	// -------------------------- Init buffer -------------------------
@@ -496,21 +512,131 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 		assert(static_cast<int>(feature.dim) < Buffer2DDimCount, "Static assert: Buffer2DDimCount max count error!");
 		buffers[i].init(&format[static_cast<int>(feature.format)], dim[static_cast<int>(feature.dim)]);
 	}
-}
 
-void TextureManager::init()
-{
-	std::unordered_map<TextureManager::TexName, TextureManager::TexType> map =
+	struct TextureDescripton
 	{
-		{ GroundSoilAlbedoRoughness, RGBA16 },
-		{ GroundSoilNormalHeight   , RGBA16 },
+		const char* filepath;
+		int numChannel;
 	};
 
-	for (int i = 0; i < TextureManager::TexName::TextureCount; ++i)
+	std::unordered_map<Buffer2DName, TextureDescripton> textureFileMap =
 	{
+		{ SoilAlbedoAoBuffer            , { "resources/textures/soil/out/albedoAo.png"        , STBI_rgb_alpha }    } ,
+		{ SoilNormalRoughnessBuffer     , { "resources/textures/soil/out/normalRoughness.png" , STBI_rgb_alpha }    } ,
+		{ SoilHeightBuffer              , { "resources/textures/soil/out/height.png"          , STBI_grey      }    } ,
+	};
 
+	for (const auto& pair : textureFileMap)
+	{
+		int texWidth;
+		int texHeight;
+		int texChannel;
+
+		auto buffer = stbi_load_16(pair.second.filepath, &texWidth, &texHeight, &texChannel, pair.second.numChannel);
+		assert(buffer != NULL);
+
+		GpuErrorCheck(cudaMemcpyToArray(buffers[static_cast<int>(pair.first)].array, 0, 0, buffer, texWidth * texHeight * pair.second.numChannel * 2, cudaMemcpyHostToDevice));
+
+		STBI_FREE(buffer);
 	}
 }
+
+// template<int numChannel, typename TexelType, typename LoadFunc>
+// inline uint16_t* CreateTexture(const char* filepath, cudaArray*& buffer, TexObj& texObj, cudaChannelFormatDesc& channelDesc, cudaResourceDesc& resDesc, cudaTextureDesc& desc)
+// {
+// 	int texWidth;
+// 	int texHeight;
+// 	int texChannel;
+
+// 	uint16_t* hBufferPtr = LoadFunc()(filepath, texWidth, texHeight, texChannel, numChannel);
+
+// 	int texelSize = sizeof(TexelType);
+// 	channelDesc = cudaCreateChannelDesc<TexelType>();
+// 	GpuErrorCheck(cudaMallocArray(&buffer, &channelDesc, texWidth, texHeight, cudaArrayTextureGather));
+// 	GpuErrorCheck(cudaMemcpyToArray(buffer, 0, 0, hBufferPtr, texWidth * texHeight * texelSize, cudaMemcpyHostToDevice));
+
+// 	resDesc = cudaResourceDesc{};
+// 	resDesc.resType = cudaResourceTypeArray;
+// 	resDesc.res.array.array = buffer;
+
+// 	desc = cudaTextureDesc{};
+// 	desc.addressMode[0]   = cudaAddressModeWrap;
+// 	desc.addressMode[1]   = cudaAddressModeWrap;
+// 	desc.filterMode       = cudaFilterModeLinear;
+// 	desc.readMode         = cudaReadModeNormalizedFloat;
+// 	desc.normalizedCoords = 1;
+
+// 	GpuErrorCheck(cudaCreateTextureObject(&texObj, &resDesc, &desc, NULL));
+// 	assert(texObj != NULL);
+
+// 	return hBufferPtr;
+// }
+
+// void TextureManager::init()
+// {
+// 	std::unordered_map<TexName, TextureDesc> map =
+// 	{
+// 		{ GroundSoilAlbedoRoughness, { "resources/textures/soil/out/albedoRoughness.png", RGBA16 } },
+// 		{ GroundSoilNormalHeight   , { "resources/textures/soil/out/normalHeight.png"   , RGBA16 } },
+// 		{ GroundSoilAo             , { "resources/textures/soil/out/ao.png"             , RGBA16  } },
+// 	};
+
+// 	for (int i = 0; i < TexName::TextureCount; ++i)
+// 	{
+// 		auto name = static_cast<TexName>(i);
+// 		auto& texDesc = map[name];
+
+// 		hBuffers[i] = CreateTexture<4, ushort4, LoadTexture16>(texDesc.filepath.c_str(), buffers[i], texObj.array[i], channelDescs[i], resDescs[i], texDescs[i]);
+
+// 		// switch (texDesc.type)
+// 		// {
+// 		// 	case RGBA16: CreateTexture<4, ushort4, LoadTexture16>(texDesc.filepath.c_str(), buffers[i], texObj.array[i], channelDescs[i], resDescs[i], texDescs[i]); break;
+// 		// 	case RGBA8:  CreateTexture<4, uchar4,  LoadTexture8> (texDesc.filepath.c_str(), buffers[i], texObj.array[i], channelDescs[i], resDescs[i], texDescs[i]); break;
+// 		// }
+// 	}
+// }
+
+// void TextureManager::init()
+// {
+// 	std::unordered_map<TexName, TextureDesc> map =
+// 	{
+// 		{ GroundSoilAlbedoRoughness, { "resources/textures/soil/out/albedoRoughness.png", RGBA16 } },
+// 		{ GroundSoilNormalHeight   , { "resources/textures/soil/out/normalHeight.png"   , RGBA16 } },
+// 		{ GroundSoilAo             , { "resources/textures/soil/out/ao.png"             , RGBA16 } },
+// 	};
+
+// 	for (int i = 0; i < TexName::TextureCount; ++i)
+// 	{
+// 		auto name = static_cast<TexName>(i);
+// 		auto& texDesc = map[name];
+
+// 		int texWidth;
+// 		int texHeight;
+// 		int texChannel;
+
+// 		hBuffers[i] = LoadTexture16()(texDesc.filepath.c_str(), texWidth, texHeight, texChannel, 4);
+
+// 		channelDescs[i] = cudaCreateChannelDesc<ushort4>();
+// 		int texelSize = sizeof(ushort4);
+
+// 		GpuErrorCheck(cudaMallocArray(&buffers[i], &channelDescs[i], texWidth, texHeight));
+// 		GpuErrorCheck(cudaMemcpyToArray(buffers[i], 0, 0, hBuffers[i], texWidth * texHeight * texelSize, cudaMemcpyHostToDevice));
+
+// 		memset(&resDescs[i], 0, sizeof(cudaResourceDesc));
+// 		resDescs[i].resType            = cudaResourceTypeArray;
+// 		resDescs[i].res.array.array    = buffers[i];
+
+// 		memset(&texDescs[i], 0, sizeof(cudaTextureDesc));
+// 		texDescs[i].normalizedCoords = 1;
+//         texDescs[i].filterMode = cudaFilterModeLinear;
+//         texDescs[i].addressMode[0] = cudaAddressModeWrap;
+//         texDescs[i].addressMode[1] = cudaAddressModeWrap;
+//         texDescs[i].addressMode[2] = cudaAddressModeWrap;
+// 		texDescs[i].readMode = cudaReadModeNormalizedFloat;
+
+// 		GpuErrorCheck(cudaCreateTextureObject(&texObj.array[i], &resDescs[i], &texDescs[i], NULL));
+// 	}
+// }
 
 void RayTracer::cleanup()
 {
@@ -537,10 +663,9 @@ void RayTracer::cleanup()
 	cudaFree(aabbs);
 
 	buffer2DManager.clear();
+	// textureManager.clear();
 
 	// ---------------------- destroy texture objects --------------------------
-	cudaDestroyTextureObject(sceneTextures.uv);
-	cudaFreeArray(texArrayUv);
 
 	//cudaDestroyTextureObject(sceneTextures.sandAlbedo);
 	//cudaDestroyTextureObject(sceneTextures.sandNormal);

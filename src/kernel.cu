@@ -136,7 +136,7 @@ void RayTracer::UpdateFrame()
     }
 }
 
-__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, BlueNoiseRandGenerator randGen, uint size)
+__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Float3* normalBuffer, BlueNoiseRandGenerator randGen, uint size)
 {
     uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -144,18 +144,58 @@ __global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Bl
         return;
 
     Float3 vertex = constVertexBuffer[idx];
+    Float3 normal = normalize(normalBuffer[idx]);
 
-    Float4 randNum;
-    randGen.idx       = idx;
-    randGen.sampleIdx = 0;
-    randNum = randGen.Rand4(0);
+    //{
+    //    Float4 randNum;
+    //    randGen.idx       = idx;
+    //    randGen.sampleIdx = 0;
+    //    randNum = randGen.Rand4(0);
 
-    Float3 normal = randNum.xyz;
-    float offset = randNum.w;
+    //    Float3 normal = randNum.xyz;
+    //    float offset = randNum.w;
 
-    const float strength = 0.05f;
+    //    const float strength = 0.1f;
+    //    vertex = vertex + normal * offset * strength;
+    //}
 
-    vertex = vertex + normal * offset * strength;
+    // {
+    //     const float strength = 0.2f;
+    //     const float uvScale = 0.5f;
+    //     Float3 displaceX;
+    //     Float3 displaceY;
+    //     Float3 displaceZ;
+    //     {
+    //         Float2 uv(vertex.y, vertex.z);
+    //         uv *= uvScale;
+    //         float height = tex2D<float4>(textures.groundSoilNormalHeight, uv[0], uv[1]).w - 0.5f;
+    //         displaceX = Float3(1, 0, 0) * height * strength;
+    //     }
+    //     {
+    //         Float2 uv(vertex.x, vertex.z);
+    //         uv *= uvScale;
+    //         float height = tex2D<float4>(textures.groundSoilNormalHeight, uv[0], uv[1]).w - 0.5f;
+    //         displaceY = Float3(0, 1, 0) * height * strength;
+    //     }
+    //     {
+    //         Float2 uv(vertex.x, vertex.y);
+    //         uv *= uvScale;
+    //         float height = tex2D<float4>(textures.groundSoilNormalHeight, uv[0], uv[1]).w - 0.5f;
+    //         displaceZ = Float3(0, 0, 1) * height * strength;
+    //     }
+
+    //     float wx = normal.x * normal.x;
+    //     float wy = normal.y * normal.y;
+    //     float wz = normal.z * normal.z;
+
+    //     vertex = vertex + displaceX * wx + displaceY * wy + displaceZ * wz;
+    // }
+
+    // if (blockIdx.x == gridDim.x * 0.5f)
+    // {
+    //     DEBUG_PRINT(uv);
+    //     DEBUG_PRINT(height);
+    // }
 
     vertexBuffer[idx] = vertex;
 }
@@ -252,8 +292,12 @@ void RayTracer::draw(SurfObj* renderTarget)
     GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());
 
     // ------------------------------- Geometry processing -------------------------------
-    MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, d_randGen, numVertices);
-    GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, vertexBuffer, normalBuffer, triCountPadded);
+    if (cbo.frameNum == 1)
+    {
+        GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, constVertexBuffer, normalBuffer, triCountPadded);
+        MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, normalBuffer, d_randGen, numVertices);
+        GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, vertexBuffer, normalBuffer, triCountPadded);
+    }
 
     // ------------------------------- BVH -------------------------------
     BuildBvhLevel1();
@@ -270,13 +314,13 @@ void RayTracer::draw(SurfObj* renderTarget)
         GetBuffer2D(RenderColorBuffer),
         GetBuffer2D(NormalBuffer),
         GetBuffer2D(DepthBuffer),
-        sceneTextures,
         GetBuffer2D(SkyBuffer),
         skyCdf,
         GetBuffer2D(SunBuffer),
         sunCdf,
         GetBuffer2D(MotionVectorBuffer),
         GetBuffer2D(NoiseLevelBuffer),
+        GetBuffer2D(AlbedoBuffer),
         bufferDim);
 
     GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());

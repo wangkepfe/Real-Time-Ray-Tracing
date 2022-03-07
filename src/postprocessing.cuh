@@ -500,7 +500,7 @@ __device__ __forceinline__ Float3 ChangeLuminance(Float3 c_in, float l_out)
     return c_in * (l_out / l_in);
 }
 
-__device__ __forceinline__ Float3 Reinhard(Float3 v, float max_white)
+__device__ __forceinline__ Float3 Reinhard(Float3 v)
 {
     return v / (1.0f + v);
 }
@@ -519,7 +519,7 @@ __device__ __forceinline__ Float3 ReinhardExtendedLuminance(Float3 v, float max_
     return ChangeLuminance(v, l_new);
 }
 
-__global__ void ToneMappingReinhardExtended(
+__global__ void ToneMappingReinhard(
 	SurfObj   colorBuffer,
 	Int2      size,
 	float*    exposure,
@@ -534,7 +534,29 @@ __global__ void ToneMappingReinhardExtended(
 	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
 	color *= exposure[0];
 
-	color = Aces2065ToSrgb(color);
+	// Tone mapping
+	color = Reinhard(color);
+
+	// Gamma correction
+	color = clamp3f(pow3f(color, 1.0f / params.gamma), Float3(0), Float3(1));
+
+	Store2DHalf4(Float4(color, 1.0), colorBuffer, idx);
+}
+
+__global__ void ToneMappingReinhardExtended(
+	SurfObj   colorBuffer,
+	Int2      size,
+	float*    exposure,
+	PostProcessParams params)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= size.x || idx.y >= size.y) return;
+
+	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
+	color *= exposure[0];
 
 	// Tone mapping
 	color = ReinhardExtendedLuminance(color, params.W);
@@ -569,8 +591,6 @@ __global__ void ToneMappingACES2(
 
 	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
 	color *= exposure[0];
-
-	color = Aces2065ToSrgb(color);
 
 	// Tone mapping
 	color = ACESFilm(color);
@@ -639,8 +659,6 @@ __global__ void ToneMappingACES(
 	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
 	color *= exposure[0];
 
-	color = Aces2065ToSrgb(color);
-
 	// Tone mapping
 	color = ACESFitted(color);
 
@@ -678,8 +696,6 @@ __global__ void ToneMappingUncharted(
 
 	Float3 texColor = Load2DHalf4(colorBuffer, idx).xyz;
 	texColor *= exposure[0];
-
-	texColor = Aces2065ToSrgb(texColor);
 
 	float ExposureBias = 2.0f;
 	Float3 curr = Uncharted2Tonemap(ExposureBias * texColor, params);

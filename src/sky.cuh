@@ -191,7 +191,7 @@ inline __device__ Float3 GetSkyRadiance(const Float3& raydir, const Float3& sunD
 		xyzColor += radiance * SpectrumToXyz(channel);
 	}
 
-	Float3 rgbColor = XyzToRgbAces2065(xyzColor);
+	Float3 rgbColor = XyzToRgbSrgb(xyzColor);
 
 	return rgbColor;
 }
@@ -272,7 +272,7 @@ inline __device__ Float3 GetSunRadiance(const Float3& raydir, const Float3& sunD
 		xyzColor += directRadiance * SpectrumToXyz(channel);
 	}
 
-	Float3 rgbColor = XyzToRgbAces2065(xyzColor);
+	Float3 rgbColor = XyzToRgbSrgb(xyzColor);
 
 	return rgbColor;
 }
