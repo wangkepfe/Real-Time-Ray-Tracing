@@ -557,7 +557,23 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 			InitMipmapImage<float, ushort>(&mipmapImage);
 		}
 
+		tex.tex[i] = mipmapImage.textureObject;
+
 		STBI_FREE(hBuffer);
+	}
+}
+
+void Buffer2DManager::clear()
+{
+	for (auto& buffer : buffers)
+	{
+		buffer.clear();
+	}
+
+	for (auto& image : mipmapImages)
+	{
+		GpuErrorCheck(cudaDestroyTextureObject(image.textureObject));
+		GpuErrorCheck(cudaFreeMipmappedArray(image.mipmapArray));
 	}
 }
 

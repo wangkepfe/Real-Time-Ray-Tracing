@@ -732,3 +732,10 @@ __device__ __forceinline__ void LocalizeSample(
 	u = cross(n, w);
 	v = cross(n, u);
 }
+
+// __forceinline__ __host__ __device__ constexpr int log2(int x)
+// {
+// 	int result = 0;
+// 	while (x >>= 1) result++;
+// 	return result;
+// }

@@ -15,32 +15,6 @@ struct __align__(16) MipmapImage
     cudaTextureObject_t     textureObject;
 };
 
-// __device__ __inline__ float4 to_float4(uchar4 vec)
-// {
-//     return make_float4(vec.x, vec.y, vec.z, vec.w);
-// }
-
-// __device__ __inline__ uchar2 to_uchar2(float2 vec)
-// {
-//     return make_uchar2((unsigned char)vec.x, (unsigned char)vec.y);
-// }
-
-// __device__ __inline__ ushort2 to_ushort2(float2 vec)
-// {
-//     return make_ushort2((unsigned short)vec.x, (unsigned short)vec.y);
-// }
-
-// __device__ __inline__ uchar4 to_uchar4(float4 vec)
-// {
-//     return make_uchar4((unsigned char)vec.x, (unsigned char)vec.y, (unsigned char)vec.z, (unsigned char)vec.w);
-// }
-
-// __device__ __inline__ ushort4 to_ushort4(float4 vec)
-// {
-//     return make_ushort4((unsigned short)vec.x, (unsigned short)vec.y, (unsigned short)vec.z, (unsigned short)vec.w);
-// }
-
-
 template<typename VectorType>
 inline  __device__ VectorType fminf(VectorType a, VectorType b);
 

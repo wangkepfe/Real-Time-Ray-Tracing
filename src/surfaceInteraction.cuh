@@ -131,14 +131,15 @@ __device__ inline void DiffuseSurfaceInteraction(
         texNormal = normalize(normalX * wx + normalY * wy + normalZ * wz);
         roughness = roughnessX * wx + roughnessY * wy + roughnessZ * wz;
     }
-
     if (bounceNumber == 0)
         rayState.albedo = albedo;
 
     // Normal process
     {
         Float3 w = Float3(1, 0, 0);
-        w = normalize(cross(normal, w));
+        if (abs(normal.x) > 0.999f)
+            w = Float3(0, 1, 0);
+        w = cross(normal, w);
         Float3 u = cross(normal, w);
         Float3 v = cross(normal, u);
         texNormal = normalize(u * texNormal.x + v * texNormal.y + normal * texNormal.z);

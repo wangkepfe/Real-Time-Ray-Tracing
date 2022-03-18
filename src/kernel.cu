@@ -136,7 +136,7 @@ void RayTracer::UpdateFrame()
     }
 }
 
-__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Float3* normalBuffer, SurfObj heightMap, BlueNoiseRandGenerator randGen, uint size)
+__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Float3* normalBuffer, TexObj heightMap, int lod, BlueNoiseRandGenerator randGen, uint size)
 {
     uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -170,8 +170,11 @@ __global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Fl
             Float2 uv(vertex.y, vertex.z);
             uv *= uvScale;
 
-            float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
             height -= 0.5f;
+
+            Print("height",height);
 
             displaceX = Float3(1, 0, 0) * height * strength;
         }
@@ -179,7 +182,8 @@ __global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Fl
             Float2 uv(vertex.x, vertex.z);
             uv *= uvScale;
 
-            float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
             height -= 0.5f;
 
             displaceY = Float3(0, 1, 0) * height * strength;
@@ -188,15 +192,16 @@ __global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Fl
             Float2 uv(vertex.x, vertex.y);
             uv *= uvScale;
 
-            float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
             height -= 0.5f;
 
             displaceZ = Float3(0, 0, 1) * height * strength;
         }
 
-        float wx = normal.x * normal.x;
-        float wy = normal.y * normal.y;
-        float wz = normal.z * normal.z;
+        float wx = normal.x;
+        float wy = normal.y;
+        float wz = normal.z;
 
         vertex = vertex + displaceX * wx + displaceY * wy + displaceZ * wz;
     }
@@ -305,7 +310,16 @@ void RayTracer::draw(SurfObj* renderTarget)
     if (cbo.frameNum == 1)
     {
         GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, constVertexBuffer, normalBuffer, triCountPadded);
-        MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, normalBuffer, GetBuffer2D(SoilHeightBuffer), d_randGen, numVertices);
+
+        // constexpr int subdivisionLevel = 2;
+        // constexpr int baseVertexCount = 2;
+        // constexpr int vertexCount = baseVertexCount * (1 << subdivisionLevel);
+        // constexpr int texRes = 1024;
+        // constexpr int lod = log2(texRes / vertexCount);
+        constexpr int lod = 7;
+
+        MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, normalBuffer, GetTexture(SoilHeightBuffer), lod, d_randGen, numVertices);
+
         GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, vertexBuffer, normalBuffer, triCountPadded);
     }
 

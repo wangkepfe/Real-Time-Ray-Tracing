@@ -365,7 +365,12 @@ struct Buffer2D
 
 struct Textures
 {
-	SurfObj textures[4];
+	SurfObj textures[3];
+};
+
+struct MipmapTextures
+{
+	TexObj tex[3];
 };
 
 struct Buffer2DManager
@@ -378,12 +383,15 @@ struct Buffer2DManager
 
 	void init(int renderWidth, int renderHeight, int screenWidth, int screenHeight);
 
-	void clear() { for (auto& buffer : buffers) { buffer.clear(); } }
+	void clear();
 
 	std::array<Buffer2D, Buffer2DCount> buffers;
 
+
+	MipmapImage mipmapImages[3];
+
 	Textures textures;
-	MipmapImage mipmapImages[4];
+	MipmapTextures tex;
 };
 
 // enum TexName {
@@ -478,6 +486,7 @@ public:
 	void LoadCameraFromFile(const std::string &camFileName);
 
 	SurfObj GetBuffer2D(Buffer2DName name) { return buffer2DManager.buffers[(uint)name].buffer; }
+	TexObj GetTexture(Buffer2DName name) { return buffer2DManager.tex.tex[(uint)name - (uint)SoilAlbedoAoBuffer]; }
 
 	const Camera& GetCamera() { return cbo.camera; }
 	uint GetTriangleCount() { return triCountPadded; }
