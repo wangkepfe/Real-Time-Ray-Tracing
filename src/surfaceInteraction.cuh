@@ -5,7 +5,7 @@
 #include "bsdf.cuh"
 
 #define USE_MIS 1
-#define USE_TEXTURE_0 0
+#define USE_TEXTURE_0 1
 #define USE_TEXTURE_1 0
 
 __device__ inline void GlossySurfaceInteraction(ConstBuffer& cbo, RayState& rayState, SceneMaterial sceneMaterial, float randNum)
@@ -34,6 +34,7 @@ __device__ inline void GlossySurfaceInteraction(ConstBuffer& cbo, RayState& rayS
 }
 
 __device__ inline void DiffuseSurfaceInteraction(
+    int bounceNumber,
     ConstBuffer& cbo,
     RayState& rayState,
     SceneMaterial sceneMaterial,
@@ -43,7 +44,8 @@ __device__ inline void DiffuseSurfaceInteraction(
     float sampleLightProbablity,
     Float3& beta,
 	Float4& randNum,
-    Float4& randNum2)
+    Float4& randNum2,
+    Textures textures)
 {
     // check for termination and hit light
     if (rayState.hitLight == true || rayState.isDiffuse == false || rayState.isOccluded == true) { return; }
@@ -64,34 +66,60 @@ __device__ inline void DiffuseSurfaceInteraction(
 #endif
 
     // texture
-    Float3 albedo;
-#if USE_TEXTURE_0
-    if (mat.useTex0)
+    Float3 albedo = mat.albedo;
+    float ao = 1.0f;
+    Float3 texNormal;
+    float roughness = 1.0f;
     {
+        Int2 texSize = Int2(1024, 1024);
         const float uvScale = 0.5f;
         Float3 albedoX;
         Float3 albedoY;
         Float3 albedoZ;
+        float aoX;
+        float aoY;
+        float aoZ;
+        Float3 normalX;
+        Float3 normalY;
+        Float3 normalZ;
+        float roughnessX;
+        float roughnessY;
+        float roughnessZ;
         {
             Float2 uv(rayState.pos.y, rayState.pos.z);
             uv *= uvScale;
-            float4 texColor = tex2D<float4>(textures.array[mat.texId0], uv[0], uv[1]);
-            albedoX = Float3(texColor.x, texColor.y, texColor.z);
+            Float4 texColor = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[0], uv, texSize);
+            albedoX = texColor.xyz;
             albedoX = pow3f(albedoX, 2.2f);
+            aoX = texColor.w;
+
+            Float4 texColor2 = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[1], uv, texSize);
+            normalX = texColor2.xyz - 0.5f;
+            roughnessX = texColor2.w;
         }
         {
             Float2 uv(rayState.pos.x, rayState.pos.z);
             uv *= uvScale;
-            float4 texColor = tex2D<float4>(textures.array[mat.texId0], uv[0], uv[1]);
-            albedoY = Float3(texColor.x, texColor.y, texColor.z);
+            Float4 texColor = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[0], uv, texSize);
+            albedoY = texColor.xyz;
             albedoY = pow3f(albedoY, 2.2f);
+            aoY = texColor.w;
+
+            Float4 texColor2 = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[1], uv, texSize);
+            normalY = texColor2.xyz - 0.5f;
+            roughnessY = texColor2.w;
         }
         {
             Float2 uv(rayState.pos.x, rayState.pos.y);
             uv *= uvScale;
-            float4 texColor = tex2D<float4>(textures.array[mat.texId0], uv[0], uv[1]);
-            albedoZ = Float3(texColor.x, texColor.y, texColor.z);
+            Float4 texColor = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[0], uv, texSize);
+            albedoZ = texColor.xyz;
             albedoZ = pow3f(albedoZ, 2.2f);
+            aoZ = texColor.w;
+
+            Float4 texColor2 = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[1], uv, texSize);
+            normalZ = texColor2.xyz - 0.5f;
+            roughnessZ = texColor2.w;
         }
 
         float wx = surfaceNormal.x * surfaceNormal.x;
@@ -99,76 +127,16 @@ __device__ inline void DiffuseSurfaceInteraction(
         float wz = surfaceNormal.z * surfaceNormal.z;
 
         albedo = albedoX * wx + albedoY * wy + albedoZ * wz;
+        ao = aoX * wx + aoY * wy + aoZ * wz;
+        texNormal = normalize(normalX * wx + normalY * wy + normalZ * wz);
+        roughness = roughnessX * wx + roughnessY * wy + roughnessZ * wz;
     }
-    else
+
+    if (bounceNumber == 0)
+        rayState.albedo = albedo;
+
+    // Normal process
     {
-        albedo = mat.albedo;
-    }
-#else
-    albedo = mat.albedo;
-#endif
-
-    // float ao = 1.0f;
-    // if (mat.useTex2)
-    // {
-    //     const float uvScale = 0.5f;
-    //     float aoX;
-    //     float aoY;
-    //     float aoZ;
-    //     {
-    //         Float2 uv(rayState.pos.y, rayState.pos.z);
-    //         uv *= uvScale;
-    //         aoX = tex2D<float>(textures.array[mat.texId2], uv[0], uv[1]);
-    //     }
-    //     {
-    //         Float2 uv(rayState.pos.x, rayState.pos.z);
-    //         uv *= uvScale;
-    //         aoY = tex2D<float>(textures.array[mat.texId2], uv[0], uv[1]);
-    //     }
-    //     {
-    //         Float2 uv(rayState.pos.x, rayState.pos.y);
-    //         uv *= uvScale;
-    //         aoZ = tex2D<float>(textures.array[mat.texId2], uv[0], uv[1]);
-    //     }
-    //     float wx = surfaceNormal.x * surfaceNormal.x;
-    //     float wy = surfaceNormal.y * surfaceNormal.y;
-    //     float wz = surfaceNormal.z * surfaceNormal.z;
-
-    //     ao = aoX * wx + aoY * wy + aoZ * wz;
-    // }
-
-#if USE_TEXTURE_1
-    if (mat.useTex1)
-    {
-        const float uvScale = 0.5f;
-        Float3 normalX;
-        Float3 normalY;
-        Float3 normalZ;
-        {
-            Float2 uv(rayState.pos.y, rayState.pos.z);
-            uv *= uvScale;
-            float4 texColor = tex2D<float4>(textures.array[mat.texId1], uv[0], uv[1]);
-            normalX = Float3(texColor.x, texColor.y, texColor.z) - 0.5f;
-        }
-        {
-            Float2 uv(rayState.pos.x, rayState.pos.z);
-            uv *= uvScale;
-            float4 texColor = tex2D<float4>(textures.array[mat.texId1], uv[0], uv[1]);
-            normalY = Float3(texColor.x, texColor.y, texColor.z) - 0.5f;
-        }
-        {
-            Float2 uv(rayState.pos.x, rayState.pos.y);
-            uv *= uvScale;
-            float4 texColor = tex2D<float4>(textures.array[mat.texId1], uv[0], uv[1]);
-            normalZ = Float3(texColor.x, texColor.y, texColor.z) - 0.5f;
-        }
-
-        float wx = surfaceNormal.x * surfaceNormal.x;
-        float wy = surfaceNormal.y * surfaceNormal.y;
-        float wz = surfaceNormal.z * surfaceNormal.z;
-
-        Float3 texNormal = normalize(normalX * wx + normalY * wy + normalZ * wz);
-
         Float3 w = Float3(1, 0, 0);
         w = normalize(cross(normal, w));
         Float3 u = cross(normal, w);
@@ -179,14 +147,8 @@ __device__ inline void DiffuseSurfaceInteraction(
 
         normal = lerp3f(normal, texNormal, normalMapStrength);
 
-        if (dot(normal, surfaceNormal) < 0)
-        {
-            normal = -normal;
-        }
-
         rayState.fakeNormal = normal;
     }
-#endif
 
     Float3 rayDir = rayState.dir;
 
@@ -322,8 +284,6 @@ __device__ inline void DiffuseSurfaceInteraction(
             // DEBUG_PRINT(beta);
         }
     }
-
-    rayState.albedo *= albedo;
 
     NAN_DETECTER(beta);
 

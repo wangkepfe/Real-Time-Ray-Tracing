@@ -42,7 +42,7 @@ struct SkyParams
 	float sunAxisAngle   = 45.0f;
 	float skyScalar      = 0.01f;
 	float sunScalar      = 0.01f;
-	float sunAngle       = 5.0f;
+	float sunAngle       = 0.6f;
 };
 
 struct SampleParams
@@ -96,7 +96,7 @@ struct RenderPassSettings
 	bool enableBloomEffect         = false;
 	bool enableLensFlare           = false;
 	bool enableToneMapping         = true;
-	bool enableSharpening          = false;
+	bool enableSharpening          = true;
 };
 
 struct PostProcessParams

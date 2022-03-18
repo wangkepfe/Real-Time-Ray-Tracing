@@ -142,10 +142,10 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
             bufferDim);
     }
 
-    // ApplyAlbedo<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
-    //     GetBuffer2D(RenderColorBuffer),
-    //     GetBuffer2D(AlbedoBuffer),
-    //     bufferDim);
+    ApplyAlbedo<<<dim3(divRoundUp(renderWidth, 8), divRoundUp(renderHeight, 8), 1), dim3(8, 8, 1)>>>(
+        GetBuffer2D(RenderColorBuffer),
+        GetBuffer2D(AlbedoBuffer),
+        bufferDim);
 
     if (renderPassSettings.enableTemporalDenoising2)
     {
@@ -169,4 +169,6 @@ void RayTracer::TemporalSpatialDenoising(Int2 bufferDim, Int2 historyDim)
             GetBuffer2D(HistoryDepthBuffer),
             bufferDim);
     }
+
+
 }

@@ -15,7 +15,6 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           SurfObj                colorBuffer,
                           SurfObj                normalBuffer,
                           SurfObj                depthBuffer,
-                          //SceneTextures          textures,
                           SurfObj                skyBuffer,
                           float*                 skyCdf,
                           SurfObj                sunBuffer,
@@ -23,6 +22,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           SurfObj                motionVectorBuffer,
                           SurfObj                noiseLevelBuffer,
                           SurfObj                albedoBuffer,
+                          Textures               textures,
                           Int2                   renderSize)
 {
     // index
@@ -88,7 +88,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // glossy + diffuse
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][2]);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta1, randNum[0], randNum[1]);
+    DiffuseSurfaceInteraction(0, cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta1, randNum[0], randNum[1], textures);
 
     #if USE_INTERPOLATED_FAKE_NORMAL
     Float3 outputNormal = rayState.fakeNormal;
@@ -99,7 +99,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][3]);
-    DiffuseSurfaceInteraction(cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta0, randNum[2], randNum[3]);
+    DiffuseSurfaceInteraction(1, cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta0, randNum[2], randNum[3], textures);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // Light
@@ -116,7 +116,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     L2 = clamp3f(L2, Float3(0.0f), Float3(10.0f));
 
-    // L2 = L2 / rayState.albedo;
+    L2 = L2 / rayState.albedo;
 
     Store2DHalf3Ushort1( { L2 , materialMask } , colorBuffer, idx);
     Store2DHalf4(Float4(outputNormal, 0), normalBuffer, idx);

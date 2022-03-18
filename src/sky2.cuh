@@ -292,9 +292,9 @@ inline __device__ Float3 EnvLight2(const Float3& raydir, float clockTime, bool i
 	Float2 jitter = (blueNoise * jitterSize - jitterSize * 0.5f);
 
 #if USE_HALF_PRECISION_SKY // half precision sky
-	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DHalf4ToFloat3ForSky, HemisphereUniformMap(rayDirOrRefl) + jitter, Int2(SKY_WIDTH, SKY_HEIGHT));
+	Float3 color = SampleBicubicSmoothStep<Load2DHalf4<Float3>, Float3, BoundaryFuncRepeatXClampY>(skyBuffer, HemisphereUniformMap(rayDirOrRefl) + jitter, Int2(SKY_WIDTH, SKY_HEIGHT));
 #else // full precision sky
-	Float3 color = SampleBicubicSmoothStep(skyBuffer, Load2DFloat4ToFloat3ForSky, EqualAreaMap(rayDirOrRefl), Int2(SKY_WIDTH, SKY_HEIGHT));
+	Float3 color = SampleBicubicSmoothStep<Load2DFloat4<Float3>, Float3, BoundaryFuncRepeatXClampY>(skyBuffer, EqualAreaMap(rayDirOrRefl), Int2(SKY_WIDTH, SKY_HEIGHT));
 #endif
 
 	return color * beta;

@@ -136,7 +136,7 @@ void RayTracer::UpdateFrame()
     }
 }
 
-__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Float3* normalBuffer, BlueNoiseRandGenerator randGen, uint size)
+__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Float3* normalBuffer, SurfObj heightMap, BlueNoiseRandGenerator randGen, uint size)
 {
     uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -159,37 +159,47 @@ __global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Fl
     //    vertex = vertex + normal * offset * strength;
     //}
 
-    // {
-    //     const float strength = 0.2f;
-    //     const float uvScale = 0.5f;
-    //     Float3 displaceX;
-    //     Float3 displaceY;
-    //     Float3 displaceZ;
-    //     {
-    //         Float2 uv(vertex.y, vertex.z);
-    //         uv *= uvScale;
-    //         float height = tex2D<float4>(textures.groundSoilNormalHeight, uv[0], uv[1]).w - 0.5f;
-    //         displaceX = Float3(1, 0, 0) * height * strength;
-    //     }
-    //     {
-    //         Float2 uv(vertex.x, vertex.z);
-    //         uv *= uvScale;
-    //         float height = tex2D<float4>(textures.groundSoilNormalHeight, uv[0], uv[1]).w - 0.5f;
-    //         displaceY = Float3(0, 1, 0) * height * strength;
-    //     }
-    //     {
-    //         Float2 uv(vertex.x, vertex.y);
-    //         uv *= uvScale;
-    //         float height = tex2D<float4>(textures.groundSoilNormalHeight, uv[0], uv[1]).w - 0.5f;
-    //         displaceZ = Float3(0, 0, 1) * height * strength;
-    //     }
+    {
+        Int2 texSize = Int2(1024, 1024);
+        const float strength = 0.2f;
+        const float uvScale = 0.5f;
+        Float3 displaceX;
+        Float3 displaceY;
+        Float3 displaceZ;
+        {
+            Float2 uv(vertex.y, vertex.z);
+            uv *= uvScale;
 
-    //     float wx = normal.x * normal.x;
-    //     float wy = normal.y * normal.y;
-    //     float wz = normal.z * normal.z;
+            float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            height -= 0.5f;
 
-    //     vertex = vertex + displaceX * wx + displaceY * wy + displaceZ * wz;
-    // }
+            displaceX = Float3(1, 0, 0) * height * strength;
+        }
+        {
+            Float2 uv(vertex.x, vertex.z);
+            uv *= uvScale;
+
+            float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            height -= 0.5f;
+
+            displaceY = Float3(0, 1, 0) * height * strength;
+        }
+        {
+            Float2 uv(vertex.x, vertex.y);
+            uv *= uvScale;
+
+            float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+            height -= 0.5f;
+
+            displaceZ = Float3(0, 0, 1) * height * strength;
+        }
+
+        float wx = normal.x * normal.x;
+        float wy = normal.y * normal.y;
+        float wz = normal.z * normal.z;
+
+        vertex = vertex + displaceX * wx + displaceY * wy + displaceZ * wz;
+    }
 
     // if (blockIdx.x == gridDim.x * 0.5f)
     // {
@@ -295,7 +305,7 @@ void RayTracer::draw(SurfObj* renderTarget)
     if (cbo.frameNum == 1)
     {
         GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, constVertexBuffer, normalBuffer, triCountPadded);
-        MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, normalBuffer, d_randGen, numVertices);
+        MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, normalBuffer, GetBuffer2D(SoilHeightBuffer), d_randGen, numVertices);
         GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, vertexBuffer, normalBuffer, triCountPadded);
     }
 
@@ -321,6 +331,7 @@ void RayTracer::draw(SurfObj* renderTarget)
         GetBuffer2D(MotionVectorBuffer),
         GetBuffer2D(NoiseLevelBuffer),
         GetBuffer2D(AlbedoBuffer),
+        buffer2DManager.textures,
         bufferDim);
 
     GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());

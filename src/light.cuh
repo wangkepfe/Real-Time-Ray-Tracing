@@ -46,7 +46,7 @@ inline __device__ Float3 EnvLight2(
     {
         // Float2 jitterSize = Float2(1.0f) / Float2(SKY_WIDTH, SKY_HEIGHT);
         // Float2 jitter = (blueNoise * jitterSize - jitterSize * 0.5f);
-        color += SampleBicubicSmoothStep(skyBuffer, Load2DFloat4ToFloat3ForSky, EqualAreaMap(raydir), Int2(SKY_WIDTH, SKY_HEIGHT));
+        color += SampleBicubicSmoothStep<Load2DFuncFloat4<Float3>, Float3, BoundaryFuncRepeatXClampY>(skyBuffer, EqualAreaMap(raydir), Int2(SKY_WIDTH, SKY_HEIGHT));
     }
 
     // Sun
@@ -57,7 +57,7 @@ inline __device__ Float3 EnvLight2(
         Float2 uv;
         if (EqualAreaMapCone(uv, sunDir, raydir, sunAngleCosThetaMax))
         {
-            Float3 sunColor = SampleBicubicSmoothStep(sunBuffer, Load2DFloat4ToFloat3, uv, Int2(SUN_WIDTH, SUN_HEIGHT));
+            Float3 sunColor = SampleBicubicSmoothStep<Load2DFuncFloat4<Float3>>(sunBuffer, uv, Int2(SUN_WIDTH, SUN_HEIGHT));
             color += sunColor;
         }
     }

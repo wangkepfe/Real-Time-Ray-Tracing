@@ -794,7 +794,7 @@ __global__ void TemporalFilter(
 	}
 
 	// sample history
-	Float3 colorHistory = SampleBicubicSmoothStep(accumulateBuffer, Load2DHalf3Ushort1Float3, historyUv, historySize);
+	Float3 colorHistory = SampleBicubicSmoothStep<Load2DFuncHalf3Ushort1<Float3>>(accumulateBuffer, historyUv, historySize);
 
 	// clamp history
 	Float3 colorHistoryYcocg = RgbToYcocg(colorHistory);
@@ -1010,7 +1010,7 @@ __global__ void TemporalFilter2(
 	}
 
 	// sample history
-	Float3 colorHistory = SampleBicubicSmoothStep(accumulateBuffer, Load2DHalf3Ushort1Float3, historyUv, historySize);
+	Float3 colorHistory = SampleBicubicSmoothStep<Load2DFuncHalf3Ushort1<Float3>>(accumulateBuffer, historyUv, historySize);
 
 	// clamp history
 	Float3 colorHistoryYcocg = RgbToYcocg(colorHistory);

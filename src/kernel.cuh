@@ -6,6 +6,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
+#include <helper_math.h>
 
 #include <stdio.h>
 #include <iostream>
@@ -29,6 +30,7 @@
 #include "cudaError.cuh"
 #include "settingParams.h"
 #include "debugUtil.h"
+#include "mipgen.h"
 
 class VoxelsGenerator;
 
@@ -361,6 +363,11 @@ struct Buffer2D
 	cudaArray* array;
 };
 
+struct Textures
+{
+	SurfObj textures[4];
+};
+
 struct Buffer2DManager
 {
 	struct Buffer2DFeature
@@ -374,6 +381,9 @@ struct Buffer2DManager
 	void clear() { for (auto& buffer : buffers) { buffer.clear(); } }
 
 	std::array<Buffer2D, Buffer2DCount> buffers;
+
+	Textures textures;
+	MipmapImage mipmapImages[4];
 };
 
 // enum TexName {

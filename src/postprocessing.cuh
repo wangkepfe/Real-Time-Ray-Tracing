@@ -396,8 +396,8 @@ __global__ void Bloom(SurfObj colorBuffer, SurfObj buffer4, SurfObj buffer16, In
 	if (idx.x >= size.x || idx.y >= size.y) return;
 	Float2 uv((float)idx.x / size.x, (float)idx.y / size.y);
 
-	Float3 sampledColor4 = SampleBicubicCatmullRom(buffer4, Load2DHalf4ToFloat3, uv, size4);
-	Float3 sampledColor16 = SampleBicubicCatmullRom(buffer16, Load2DHalf4ToFloat3, uv, size16);
+	Float3 sampledColor4 = SampleBicubicCatmullRom<Load2DFuncHalf4<Float3>>(buffer4, uv, size4);
+	Float3 sampledColor16 = SampleBicubicCatmullRom<Load2DFuncHalf4<Float3>>(buffer16, uv, size16);
 	Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
 
 	color = color + (sampledColor4 + sampledColor16) * 0.05;
@@ -798,7 +798,7 @@ __global__ void BicubicScale(
 
 	Float2 uv((float)idx.x / outSize.x, (float)idx.y / outSize.y);
 
-	Float3 sampledColor = SampleBicubicCatmullRom(finalColorBuffer, Load2DHalf4ToFloat3, uv, texSize);
+	Float3 sampledColor = SampleBicubicCatmullRom<Load2DFuncHalf4<Float3>>(finalColorBuffer, uv, texSize);
 
 	Store2DHalf4(Float4(sampledColor, 1.0f), outputResColor, idx);
 }

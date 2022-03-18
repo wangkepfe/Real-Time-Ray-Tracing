@@ -27,7 +27,6 @@
 #include <cuda_runtime.h>
 #include <helper_cuda.h>
 #include <helper_image.h>
-#include <helper_math.h>
 
 #include "kernel.cuh"
 #include "configLoader.h"
@@ -480,7 +479,7 @@ private:
         cudaVkImportSemaphore();
     }
 
-    void initImgui() 
+    void initImgui()
     {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -527,7 +526,7 @@ private:
             // Rendering
             ImGui::Render();
             ImDrawData* draw_data = ImGui::GetDrawData();
-        
+
             // cmd buffer begin info
             VkCommandBufferBeginInfo beginInfo = {};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -587,7 +586,7 @@ private:
         {
             glfwPollEvents();
 
-            
+
             drawFrame();
         }
     #endif

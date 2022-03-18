@@ -6,31 +6,27 @@
 
 #define uchar unsigned char
 
-__forceinline__ __device__ void ClampBorder(Int2& uv, Int2 size)
-{
-    if (uv.x >= size.x) { uv.x = size.x - 1; }
-    if (uv.y >= size.y) { uv.y = size.y - 1; }
-    if (uv.x < 0) { uv.x = 0; }
-    if (uv.y < 0) { uv.y = 0; }
-}
+//----------------------------------------------------------------------------------------------
+//
+//                                   Utils
+//
+//----------------------------------------------------------------------------------------------
 
-__forceinline__ __device__ void RepeatBorder(Int2& uv, Int2 size)
-{
-    if (uv.x >= size.x) { uv.x %= size.x; }
-    if (uv.y >= size.y) { uv.y %= size.y; }
-    if (uv.x < 0) { uv.x = size.x - (-uv.x) % size.x; }
-    if (uv.y < 0) { uv.y = size.y - (-uv.y) % size.y; }
-}
 
-__forceinline__ __device__ void RepeatXClampYBorder(Int2& uv, Int2 size)
-{
-    if (uv.x >= size.x) { uv.x %= size.x; }
-    if (uv.x < 0) { uv.x = size.x - (-uv.x) % size.x; }
-    if (uv.y >= size.y) { uv.y = size.y - 1; }
-    if (uv.y < 0) { uv.y = 0; }
-}
+union UintFloatConverter { uint ui; float f; __device__ UintFloatConverter() : ui(0) {} };
+struct Float3Ushort1 { Float3 xyz; ushort w; };
+struct Half3Ushort1 { Half3 xyz; ushort w; };
+
+
+//----------------------------------------------------------------------------------------------
+//
+//                                   Load/Store Functions
+//
+//----------------------------------------------------------------------------------------------
+
 
 //------------------------------------------- 2d load store ---------------------------------------------------
+// For cuda types like float4
 
 template<typename T>
 __forceinline__ __device__ T Load2D (
@@ -51,7 +47,7 @@ __forceinline__ __device__ void Store2D (
     surf2Dwrite(val, tex, uv.x * sizeof(T), uv.y, boundaryMode);
 }
 
-//------------------------------------------- 2d float4 ---------------------------------------------------
+//------------------------------------------- 2d Float4 ---------------------------------------------------
 // byte    4     4     4     4
 // data  float float float float
 
@@ -71,17 +67,7 @@ __forceinline__ __device__ Float4 Load2DFloat4(
 	return Float4(ret.x, ret.y, ret.z, ret.w);
 }
 
-__forceinline__ __device__ Float4 Load2DFloat4ForSky (
-	SurfObj tex,
-	Int2    uv,
-    Int2    size)
-{
-    RepeatXClampYBorder(uv, size);
-    float4 ret = surf2Dread<float4>(tex, uv.x * 4 * sizeof(float), uv.y, cudaBoundaryModeClamp);
-	return Float4(ret.x, ret.y, ret.z, ret.w);
-}
-
-//------------------------------------------- 2d float2 ---------------------------------------------------
+//------------------------------------------- 2d Float2 ---------------------------------------------------
 // byte    4     4
 // data  float float
 
@@ -97,12 +83,9 @@ __forceinline__ __device__ void Store2DFloat2(Float2 val, SurfObj tex, Int2 uv)
 }
 
 
-//------------------------------------------- 2d half3 ushort1 ---------------------------------------------------
+//------------------------------------------- 2d Half3Ushort1 ---------------------------------------------------
 // byte    2     2     2     2
 // data  half  half  half  ushort
-
-struct Float3Ushort1 { Float3 xyz; ushort w; };
-struct Half3Ushort1 { Half3 xyz; ushort w; };
 
 template<typename ReturnType = Float3Ushort1>
 __forceinline__ __device__ ReturnType Load2DHalf3Ushort1(
@@ -143,7 +126,7 @@ __forceinline__ __device__ void Store2DHalf3Ushort1(
     surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
 }
 
-//------------------------------------------- 2d half4 ---------------------------------------------------
+//------------------------------------------- 2d Half4 ---------------------------------------------------
 // byte    2     2     2     2
 // data  half  half  half  half
 
@@ -186,33 +169,6 @@ __forceinline__ __device__ Half3 Load2DHalf4<Half3>(
 	return hf3;
 }
 
-__forceinline__ __device__ Float4 Load2DHalf4(
-	SurfObj tex,
-	Int2    uv)
-{
-	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
-
-	ushort4ToHalf4Converter conv(ret);
-	Half4 hf4 = conv.hf4;
-
-	return half4ToFloat4(hf4);
-}
-
-__forceinline__ __device__ Float4 Load2DHalf4ForSky(
-	SurfObj tex,
-	Int2    uv,
-    Int2    size)
-{
-    RepeatXClampYBorder(uv, size);
-
-	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
-
-	ushort4ToHalf4Converter conv(ret);
-	Half4 hf4 = conv.hf4;
-
-	return half4ToFloat4(hf4);
-}
-
 __forceinline__ __device__ void Store2DHalf4(
     Float4  fl4,
 	SurfObj tex,
@@ -224,6 +180,30 @@ __forceinline__ __device__ void Store2DHalf4(
     ushort4 us4 = conv.us4;
 
     surf2Dwrite(us4, tex, uv.x * 4 * sizeof(unsigned short), uv.y, cudaBoundaryModeClamp);
+}
+
+//------------------------------------------- 2d Ushort4 ---------------------------------------------------
+// byte    2       2       2       2
+// data  ushort  ushort  ushort  ushort
+
+__forceinline__ __device__ Float4 Load2DUshort4(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort4 ret = surf2Dread<ushort4>(tex, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
+	return { ret.x / (float)USHRT_MAX,
+             ret.y / (float)USHRT_MAX,
+             ret.z / (float)USHRT_MAX,
+             ret.w / (float)USHRT_MAX };
+}
+
+__forceinline__ __device__ void Store2DUshort4(
+    Float4  value,
+	SurfObj tex,
+	Int2    uv)
+{
+    Float4 val = clamp4f(value) * (float)USHRT_MAX;
+	surf2Dwrite(make_ushort4((ushort)val.x, (ushort)val.y, (ushort)val.z, (ushort)val.w), tex, uv.x * 4 * sizeof(ushort), uv.y, cudaBoundaryModeClamp);
 }
 
 //------------------------------------------- 2d half2 ---------------------------------------------------
@@ -267,33 +247,203 @@ __forceinline__ __device__ void Store2DHalf1(float val, SurfObj tex, Int2 uv)
     surf2Dwrite(conv.us1, tex, uv.x * 1 * sizeof(short), uv.y, cudaBoundaryModeClamp);
 }
 
+//------------------------------------------- 2d Ushort ---------------------------------------------------
+// byte    2
+// data  ushort
+
+__forceinline__ __device__ float Load2DUshort1(
+	SurfObj tex,
+	Int2    uv)
+{
+	ushort1 ret = surf2Dread<ushort1>(tex, uv.x * sizeof(ushort1), uv.y, cudaBoundaryModeClamp);
+	return ret.x / (float)USHRT_MAX;
+}
+
+__forceinline__ __device__ void Store2DUshort1(
+    float  value,
+	SurfObj tex,
+	Int2    uv)
+{
+    float val = clampf(value) * (float)USHRT_MAX;
+	surf2Dwrite(make_ushort1((ushort)val), tex, uv.x * sizeof(ushort1), uv.y, cudaBoundaryModeClamp);
+}
+
+
 //------------------------------------------- 2d uchar1 ---------------------------------------------------
 // byte    1
 // data  uchar
 
-__forceinline__ __device__ int Load2D_uchar1(SurfObj tex, Int2 uv)
+__forceinline__ __device__ int Load2DUchar1(SurfObj tex, Int2 uv)
 {
     return surf2Dread<uchar1>(tex, uv.x, uv.y, cudaBoundaryModeClamp).x;
 }
 
-__forceinline__ __device__ void Store2D_uchar1(int val, SurfObj tex, Int2 uv)
+__forceinline__ __device__ void Store2DUchar1(int val, SurfObj tex, Int2 uv)
 {
     surf2Dwrite(make_uchar1(val), tex, uv.x, uv.y, cudaBoundaryModeClamp);
 }
 
-//------------------------------------------- bicubic sample func ---------------------------------------------------
+//----------------------------------------------------------------------------------------------
+//
+//                                   Boundary Functors
+//
+//----------------------------------------------------------------------------------------------
 
-__forceinline__ __device__ Float3 Load2DHalf3Ushort1Float3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf3Ushort1(tex, uv).xyz; }
-__forceinline__ __device__ Float3 Load2DHalf4ToFloat3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf4(tex, uv).xyz; }
-__forceinline__ __device__ Float3 Load2DHalf4ToFloat3ForSky(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DHalf4ForSky(tex, uv, size).xyz; }
-__forceinline__ __device__ Float3 Load2DFloat4ToFloat3(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DFloat4(tex, uv).xyz; }
-__forceinline__ __device__ Float3 Load2DFloat4ToFloat3ForSky(SurfObj tex, Int2 uv, Int2 size = 0) { return Load2DFloat4ForSky(tex, uv, size).xyz; }
+struct BoundaryFuncDefault
+{
+    __forceinline__ __device__ Int2 operator() (Int2 uv, Int2 size) { return uv; }
+};
 
-typedef Float3 (*SampleFunc)(SurfObj, Int2, Int2);
+struct BoundaryFuncClamp
+{
+    __forceinline__ __device__ Int2 operator() (Int2 uvIn, Int2 size)
+    {
+        Int2 uv = uvIn;
 
-inline __device__ Float3 SampleBicubicCatmullRom(
-    SurfObj tex,
-    SampleFunc sampleFunc,
+        if (uv.x >= size.x) { uv.x = size.x - 1; }
+        if (uv.y >= size.y) { uv.y = size.y - 1; }
+        if (uv.x < 0) { uv.x = 0; }
+        if (uv.y < 0) { uv.y = 0; }
+
+        return uv;
+    }
+};
+
+struct BoundaryFuncRepeat
+{
+    __forceinline__ __device__ Int2 operator() (Int2 uvIn, Int2 size)
+    {
+        Int2 uv = uvIn;
+
+        if (uv.x >= size.x) { uv.x %= size.x; }
+        if (uv.y >= size.y) { uv.y %= size.y; }
+        if (uv.x < 0) { uv.x = size.x - (-uv.x) % size.x; }
+        if (uv.y < 0) { uv.y = size.y - (-uv.y) % size.y; }
+
+        return uv;
+    }
+};
+
+struct BoundaryFuncRepeatXClampY
+{
+    __forceinline__ __device__ Int2 operator() (Int2 uvIn, Int2 size)
+    {
+        Int2 uv = uvIn;
+
+        if (uv.x >= size.x) { uv.x %= size.x; }
+        if (uv.x < 0) { uv.x = size.x - (-uv.x) % size.x; }
+        if (uv.y >= size.y) { uv.y = size.y - 1; }
+        if (uv.y < 0) { uv.y = 0; }
+
+        return uv;
+    }
+};
+
+//----------------------------------------------------------------------------------------------
+//
+//                                   Load Functors
+//
+//----------------------------------------------------------------------------------------------
+
+
+template<typename VectorType = Float3>
+struct Load2DFuncHalf3Ushort1
+{
+    __forceinline__ __device__ VectorType operator()(SurfObj tex, Int2 uv) { return Load2DHalf3Ushort1(tex, uv).xyz; }
+};
+
+template<typename VectorType = Float3>
+struct Load2DFuncHalf4
+{
+    __forceinline__ __device__ VectorType operator()(SurfObj tex, Int2 uv) { return Load2DHalf4(tex, uv).xyz; }
+};
+
+template<typename VectorType = Float3>
+struct Load2DFuncFloat4
+{
+    __forceinline__ __device__ VectorType operator()(SurfObj tex, Int2 uv) { return Load2DFloat4(tex, uv).xyz; }
+};
+
+template<typename VectorType = Float3>
+struct Load2DFuncUshort4
+{
+    __forceinline__ __device__ VectorType operator()(SurfObj tex, Int2 uv) { return Load2DUshort4(tex, uv).xyz; }
+};
+
+template<>
+struct Load2DFuncUshort4<Float4>
+{
+    __forceinline__ __device__ Float4 operator()(SurfObj tex, Int2 uv) { return Load2DUshort4(tex, uv); }
+};
+
+template<typename VectorType = float>
+struct Load2DFuncUshort1
+{
+    __forceinline__ __device__ VectorType operator()(SurfObj tex, Int2 uv) { return Load2DUshort1(tex, uv); }
+};
+
+//----------------------------------------------------------------------------------------------
+//
+//                                   Sample Functions
+//
+//----------------------------------------------------------------------------------------------
+
+template<typename LoadFunc, typename VectorType = Float3, typename BoundaryFunc = BoundaryFuncDefault>
+inline __device__ VectorType SampleNearest(
+    SurfObj             tex,
+    const Float2&       uv,
+    const Int2&         texSize)
+{
+    Float2 UV  = uv * texSize;
+    Int2 tc    = floori(UV + 0.5f);
+    return LoadFunc()(tex, BoundaryFunc()(tc, texSize));
+}
+
+template<typename LoadFunc, typename VectorType = Float3, typename BoundaryFunc = BoundaryFuncDefault>
+inline __device__ VectorType SampleBilinear(
+    SurfObj             tex,
+    const Float2&       uv,
+    const Int2&         texSize)
+{
+    Float2 UV         = uv * texSize;
+    Float2 invTexSize = 1.0f / texSize;
+    Float2 tc         = floor( UV - 0.5f ) + 0.5f;
+    Float2 f          = UV - tc;
+
+    Float2 w1 = f;
+    Float2 w0 = 1.0f - f;
+
+    Int2 tc0 = floori(UV - 0.5f);
+    Int2 tc1 = tc0 + 1;
+
+    Int2 sampleUV[4] = {
+        { tc0.x, tc0.y }, { tc1.x, tc0.y },
+        { tc0.x, tc1.y }, { tc1.x, tc1.y },
+    };
+
+    float weights[4] = {
+        w0.x * w0.y,  w1.x * w0.y,
+        w0.x * w1.y,  w1.x * w1.y,
+    };
+
+	VectorType OutColor;
+    float sumWeight = 0;
+
+	#pragma unroll
+	for (int i = 0; i < 4; i++)
+	{
+        sumWeight += weights[i];
+		OutColor += LoadFunc()(tex, BoundaryFunc()(sampleUV[i], texSize)) * weights[i];
+	}
+
+	OutColor /= sumWeight;
+
+    return OutColor;
+}
+
+template<typename LoadFunc, typename VectorType = Float3, typename BoundaryFunc = BoundaryFuncDefault>
+inline __device__ VectorType SampleBicubicCatmullRom(
+    SurfObj             tex,
     const Float2&       uv,
     const Int2&         texSize)
 {
@@ -329,14 +479,14 @@ inline __device__ Float3 SampleBicubicCatmullRom(
         w0.x * w3.y,  w1.x * w3.y,  w2.x * w3.y,  w3.x * w3.y,
     };
 
-	Float3 OutColor;
+	VectorType OutColor;
     float sumWeight = 0;
 
 	#pragma unroll
 	for (int i = 0; i < 16; i++)
 	{
         sumWeight += weights[i];
-		OutColor += sampleFunc(tex, sampleUV[i], texSize) * weights[i];
+		OutColor += LoadFunc()(tex, BoundaryFunc()(sampleUV[i], texSize)) * weights[i];
 	}
 
 	OutColor /= sumWeight;
@@ -344,9 +494,9 @@ inline __device__ Float3 SampleBicubicCatmullRom(
     return OutColor;
 }
 
-inline __device__ Float3 SampleBicubicSmoothStep(
-    SurfObj tex,
-    SampleFunc sampleFunc,
+template<typename LoadFunc, typename VectorType = Float3, typename BoundaryFunc = BoundaryFuncDefault>
+inline __device__ VectorType SampleBicubicSmoothStep(
+    SurfObj             tex,
     const Float2&       uv,
     const Int2&         texSize)
 {
@@ -374,14 +524,14 @@ inline __device__ Float3 SampleBicubicSmoothStep(
         w0.x * w1.y,  w1.x * w1.y,
     };
 
-	Float3 OutColor;
+	VectorType OutColor;
     float sumWeight = 0;
 
 	#pragma unroll
 	for (int i = 0; i < 4; i++)
 	{
         sumWeight += weights[i];
-		OutColor += sampleFunc(tex, sampleUV[i], texSize) * weights[i];
+		OutColor += LoadFunc()(tex, BoundaryFunc()(sampleUV[i], texSize)) * weights[i];
 	}
 
 	OutColor /= sumWeight;
@@ -389,9 +539,11 @@ inline __device__ Float3 SampleBicubicSmoothStep(
     return OutColor;
 }
 
-//------------------------------------------- encode/decode R11_G10_B11 ---------------------------------------------------
-
-union UintFloatConverter { uint ui; float f; __device__ UintFloatConverter() : ui(0) {} };
+//----------------------------------------------------------------------------------------------
+//
+//                                   Encode/Decode R11_G10_B11
+//
+//----------------------------------------------------------------------------------------------
 
 // [x sign] [x] [y sign] [y] [z sign] [z]
 //    1     10     1      9     1     10

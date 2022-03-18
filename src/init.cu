@@ -5,6 +5,7 @@
 #include "cuda_fp16.h"
 #include "terrain.h"
 #include "meshing.h"
+#include "mipgen.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -526,18 +527,37 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 		{ SoilHeightBuffer              , { "resources/textures/soil/out/height.png"          , STBI_grey      }    } ,
 	};
 
-	for (const auto& pair : textureFileMap)
+	for (int i = 0; i < static_cast<int>(Buffer2DCount) - static_cast<int>(SoilAlbedoAoBuffer); ++i)
 	{
+		TextureDescripton desc = textureFileMap[static_cast<Buffer2DName>(i + static_cast<int>(SoilAlbedoAoBuffer))];
+
+		Buffer2D& buffer2d = buffers[i + static_cast<int>(SoilAlbedoAoBuffer)];
+
+		textures.textures[i] = buffer2d.buffer;
+
 		int texWidth;
 		int texHeight;
 		int texChannel;
 
-		auto buffer = stbi_load_16(pair.second.filepath, &texWidth, &texHeight, &texChannel, pair.second.numChannel);
-		assert(buffer != NULL);
+		auto hBuffer = stbi_load_16(desc.filepath, &texWidth, &texHeight, &texChannel, desc.numChannel);
+		assert(hBuffer != NULL);
 
-		GpuErrorCheck(cudaMemcpyToArray(buffers[static_cast<int>(pair.first)].array, 0, 0, buffer, texWidth * texHeight * pair.second.numChannel * 2, cudaMemcpyHostToDevice));
+		GpuErrorCheck(cudaMemcpyToArray(buffer2d.array, 0, 0, hBuffer, texWidth * texHeight * desc.numChannel * sizeof(ushort), cudaMemcpyHostToDevice));
 
-		STBI_FREE(buffer);
+		MipmapImage& mipmapImage = mipmapImages[i];
+		mipmapImage.h_data = hBuffer;
+		mipmapImage.size = make_cudaExtent(1024, 1024, 0);
+
+		if (desc.numChannel == 4)
+		{
+			InitMipmapImage<float4, ushort4>(&mipmapImage);
+		}
+		else if (desc.numChannel == 1)
+		{
+			InitMipmapImage<float, ushort>(&mipmapImage);
+		}
+
+		STBI_FREE(hBuffer);
 	}
 }
 
