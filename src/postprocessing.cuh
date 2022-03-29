@@ -40,7 +40,7 @@ __global__ void Histogram2(
 
 __device__ __inline__ float BinToLum(int i) { return exp2f(((float)i / (63 * 0.99999) - 0.75) / 0.1); }
 
-__global__ void AutoExposure(float* exposure, uint* histogram, float area, float deltaTime)
+__global__ void AutoExposure(float* exposure, uint* histogram, float area, float deltaTime, float gainConstant)
 {
 	// Threshold for histogram cut
 	const float darkThreshold = 0.4;
@@ -112,26 +112,27 @@ __global__ void AutoExposure(float* exposure, uint* histogram, float area, float
 	float aveLum = lumiSum / lumiSumArea;
 
 	// clamp to min and max. Note 0.1 is no good but for lower night EV value
-	aveLum = clampf(aveLum, 0.1, 100.0);
+	aveLum = clampf(aveLum, 0.1f, 100.0f);
 
 	// read history lum
 	float lumTemp = exposure[1];
 	float lumBrightTemp = exposure[2];
 
 	// perform eye adaption (smooth transit between EV)
-	lumTemp = lumTemp + (aveLum - lumTemp) * (1.0 - expf(-deltaTime * 0.001));
-	lumBrightTemp = lumBrightTemp + (brightLum - lumBrightTemp) * (1.0 - expf(-deltaTime * 0.001));
+	lumTemp = lumTemp + (aveLum - lumTemp) * (1.0f - expf(-deltaTime * 0.001f));
+	lumBrightTemp = lumBrightTemp + (brightLum - lumBrightTemp) * (1.0f - expf(-deltaTime * 0.001f));
 
 	// Exposure compensation curve: Brigher for day, darker for night
-	float EC = 1.03 - 2.0 / (log10f(lumTemp + 1.0) + 2.0);
+	float EC = 1.03f - 2.0f / (log10f(lumTemp + 1.0f) + 2.0f);
 
 	// Standart exposure value compute with a constant gain
-	float EV = 7.0 * EC / lumTemp;
+	float EV = gainConstant * EC / lumTemp;
 
 	// write EV and lum
 	exposure[0] = EV;
 	exposure[1] = lumTemp;
 	exposure[2] = lumBrightTemp;
+	exposure[3] = brightLum;
 }
 
 //----------------------------------------------------------------------------------------------
@@ -489,11 +490,6 @@ __global__ void LensFlarePred(SurfObj depthBuffer, Float2 sunPos, Int2 sunUv, Su
 //------------------------------------- Tone mapping ---------------------------------------
 //----------------------------------------------------------------------------------------------
 
-__device__ __forceinline__ float luminance(Float3 v)
-{
-    return dot(v, Float3(0.2126f, 0.7152f, 0.0722f));
-}
-
 __device__ __forceinline__ Float3 ChangeLuminance(Float3 c_in, float l_out)
 {
     float l_in = luminance(c_in);
@@ -559,7 +555,7 @@ __global__ void ToneMappingReinhardExtended(
 	color *= exposure[0];
 
 	// Tone mapping
-	color = ReinhardExtendedLuminance(color, params.W);
+	color = ReinhardExtendedLuminance(color, params.maxWhite);
 
 	// Gamma correction
 	color = clamp3f(pow3f(color, 1.0f / params.gamma), Float3(0), Float3(1));
@@ -670,14 +666,16 @@ __global__ void ToneMappingACES(
 
 __device__ __forceinline__ Float3 Uncharted2Tonemap(Float3 x, PostProcessParams params)
 {
-	const float A = params.A;
-	const float B = params.B;
-	const float C = params.C;
-	const float D = params.D;
-	const float E = params.E;
-	const float F = params.F;
+	//const float A = params.A;
+	//const float B = params.B;
+	//const float C = params.C;
+	//const float D = params.D;
+	//const float E = params.E;
+	//const float F = params.F;
 
-	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+	//return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+
+	return 0;
 }
 
 __global__ void ToneMappingUncharted(
@@ -692,7 +690,7 @@ __global__ void ToneMappingUncharted(
 
 	if (idx.x >= size.x || idx.y >= size.y) return;
 
-	const float W = params.W;
+	const float W = 1;// params.W;
 
 	Float3 texColor = Load2DHalf4(colorBuffer, idx).xyz;
 	texColor *= exposure[0];

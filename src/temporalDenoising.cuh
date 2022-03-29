@@ -4,7 +4,8 @@
 #include "sampler.cuh"
 #include "gaussian.cuh"
 
-#define NOISE_THRESHOLD 3
+#define NOISE_THRESHOLD_7x7 0.003f
+#define NOISE_THRESHOLD_GLOBAL_5x5 0.0001f
 
 __device__ __forceinline__ Float3 RgbToYcocg(const Float3& rgb)
 {
@@ -100,19 +101,40 @@ __global__ void TileNoiseLevel8x8to16x16(SurfObj noiseLevelBuffer, SurfObj noise
 	Store2DHalf1((v1 + v2 + v3 + v4) / 4, noiseLevelBuffer16, Int2(x, y));
 }
 
-__global__ void TileNoiseLevelVisualize(SurfObj colorBuffer, SurfObj noiseLevelBuffer, Int2 size)
+__global__ void TileNoiseLevelVisualize(SurfObj colorBuffer, SurfObj normalBuffer, SurfObj depthBuffer,SurfObj noiseLevelBuffer, Int2 size, int level, DenoisingParams params)
 {
 	float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
-	int x1 = threadIdx.x + blockIdx.x * blockDim.x;
-	int y1 = threadIdx.y + blockIdx.y * blockDim.y;
-	Float3Ushort1 colorAndMask1 = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
-	Float3 colorValue1          = colorAndMask1.xyz;
-	ushort maskValue1           = colorAndMask1.w;
-	if (noiseLevel > 0.0005f)
+
+	Int2 idx(threadIdx.x + blockIdx.x * blockDim.x, threadIdx.y + blockIdx.y * blockDim.y);
+
+	// Float3Ushort1 colorAndMask1 = Load2DHalf3Ushort1(colorBuffer, Int2(x1, y1));
+	// Float3 colorValue1          = colorAndMask1.xyz;
+	// ushort maskValue1           = colorAndMask1.w;
+	// Float3 normal = half3ToFloat3(Load2DHalf4<Half3>(normalBuffer, Int2(x1, y1)));
+	// float depth = __half2float(Load2DHalf1<half>(depthBuffer, Int2(x1, y1)));
+
+	if (level == 1)
 	{
-		if ((threadIdx.x == 0) || (threadIdx.x == (blockDim.x - 1)) || (threadIdx.y == 0) || (threadIdx.y == (blockDim.y - 1)))
+		if (noiseLevel > params.noise_threshold_local)
 		{
-			Store2DHalf3Ushort1( { Float3(1, 0, 0), maskValue1 } , colorBuffer, Int2(x1, y1));
+			if ((threadIdx.x == 0) || (threadIdx.x == (blockDim.x - 1)) || (threadIdx.y == 0) || (threadIdx.y == (blockDim.y - 1)))
+			{
+				Store2DHalf3Ushort1( { Float3(1, 0.5f, 0), 0xFFFF } , colorBuffer, idx);
+				Store2DHalf4(Float4(0), normalBuffer, idx);
+    			Store2DHalf1(RayMax, depthBuffer, idx);
+			}
+		}
+	}
+	else if (level == 2)
+	{
+		if (noiseLevel > params.noise_threshold_large)
+		{
+			if ((threadIdx.x == 0) || (threadIdx.x == (blockDim.x - 1)) || (threadIdx.y == 0) || (threadIdx.y == (blockDim.y - 1)))
+			{
+				Store2DHalf3Ushort1( { Float3(1, 0, 0), 0xFFFF } , colorBuffer, idx);
+				Store2DHalf4(Float4(0), normalBuffer, idx);
+    			Store2DHalf1(RayMax, depthBuffer, idx);
+			}
 		}
 	}
 }
@@ -147,135 +169,135 @@ __global__ void CopyToHistoryColorBuffer(
 	            accumulateBuffer, uv.x * sizeof(ushort4), uv.y, cudaBoundaryModeClamp);
 }
 
-__global__ void SpatialFilter5x5(
-	SurfObj colorBuffer,
-	SurfObj normalBuffer,
-	SurfObj depthBuffer,
-	SurfObj noiseLevelBuffer16,
-	DenoisingParams params,
-	Int2    size)
-{
-	int x = threadIdx.x + blockIdx.x * 16;
-	int y = threadIdx.y + blockIdx.y * 16;
+// __global__ void SpatialFilter5x5(
+// 	SurfObj colorBuffer,
+// 	SurfObj normalBuffer,
+// 	SurfObj depthBuffer,
+// 	SurfObj noiseLevelBuffer16,
+// 	DenoisingParams params,
+// 	Int2    size)
+// {
+// 	int x = threadIdx.x + blockIdx.x * 16;
+// 	int y = threadIdx.y + blockIdx.y * 16;
 
-	float noiseLevel = Load2DHalf1(noiseLevelBuffer16, Int2(blockIdx.x, blockIdx.y));
+// 	float noiseLevel = Load2DHalf1(noiseLevelBuffer16, Int2(blockIdx.x, blockIdx.y));
 
-	if (noiseLevel < NOISE_THRESHOLD)
-	{
-		return;
-	}
+// 	if (noiseLevel < NOISE_THRESHOLD_5x5)
+// 	{
+// 		return;
+// 	}
 
-	struct AtrousLDS
-	{
-		Half3 color;
-		ushort mask;
-		Half3 normal;
-		half depth;
-	};
-	__shared__ AtrousLDS sharedBuffer[20 * 20];
+// 	struct AtrousLDS
+// 	{
+// 		Half3 color;
+// 		ushort mask;
+// 		Half3 normal;
+// 		half depth;
+// 	};
+// 	__shared__ AtrousLDS sharedBuffer[20 * 20];
 
-	// calculate address
-	int id = (threadIdx.x + threadIdx.y * 16);
-	int x1 = blockIdx.x * 16 - 2 + id % 20;
-	int y1 = blockIdx.y * 16 - 2 + id / 20;
-	int x2 = blockIdx.x * 16 - 2 + (id + 256) % 20;
-	int y2 = blockIdx.y * 16 - 2 + (id + 256) / 20;
+// 	// calculate address
+// 	int id = (threadIdx.x + threadIdx.y * 16);
+// 	int x1 = blockIdx.x * 16 - 2 + id % 20;
+// 	int y1 = blockIdx.y * 16 - 2 + id / 20;
+// 	int x2 = blockIdx.x * 16 - 2 + (id + 256) % 20;
+// 	int y2 = blockIdx.y * 16 - 2 + (id + 256) / 20;
 
-	// global load 1
-	Half3Ushort1 colorAndMask1 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x1, y1));
-	sharedBuffer[id] =
-	{
-		colorAndMask1.xyz,
-		colorAndMask1.w,
-		Load2DHalf4<Half3>(normalBuffer, Int2(x1, y1)),
-		Load2DHalf1<half>(depthBuffer, Int2(x1, y1))
-	};
+// 	// global load 1
+// 	Half3Ushort1 colorAndMask1 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x1, y1));
+// 	sharedBuffer[id] =
+// 	{
+// 		colorAndMask1.xyz,
+// 		colorAndMask1.w,
+// 		Load2DHalf4<Half3>(normalBuffer, Int2(x1, y1)),
+// 		Load2DHalf1<half>(depthBuffer, Int2(x1, y1))
+// 	};
 
-	// global load 2
-	if (id + 256 < 400)
-	{
-		Half3Ushort1 colorAndMask2 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x2, y2));
-		sharedBuffer[id + 256] =
-		{
-			colorAndMask2.xyz,
-			colorAndMask2.w,
-			Load2DHalf4<Half3>(normalBuffer, Int2(x2, y2)),
-			Load2DHalf1<half>(depthBuffer, Int2(x2, y2))
-		};
-	}
+// 	// global load 2
+// 	if (id + 256 < 400)
+// 	{
+// 		Half3Ushort1 colorAndMask2 = Load2DHalf3Ushort1<Half3Ushort1>(colorBuffer, Int2(x2, y2));
+// 		sharedBuffer[id + 256] =
+// 		{
+// 			colorAndMask2.xyz,
+// 			colorAndMask2.w,
+// 			Load2DHalf4<Half3>(normalBuffer, Int2(x2, y2)),
+// 			Load2DHalf1<half>(depthBuffer, Int2(x2, y2))
+// 		};
+// 	}
 
-	__syncthreads();
+// 	__syncthreads();
 
-	if (x >= size.x && y >= size.y) return;
+// 	if (x >= size.x && y >= size.y) return;
 
-	// load center
-	AtrousLDS center   = sharedBuffer[threadIdx.x + 2 + (threadIdx.y + 2) * 20];
-	Float3 colorValue  = half3ToFloat3(center.color);
-	float depthValue   = __half2float(center.depth);
-	Float3 normalValue = half3ToFloat3(center.normal);
-	ushort maskValue   = center.mask;
+// 	// load center
+// 	AtrousLDS center   = sharedBuffer[threadIdx.x + 2 + (threadIdx.y + 2) * 20];
+// 	Float3 colorValue  = half3ToFloat3(center.color);
+// 	float depthValue   = __half2float(center.depth);
+// 	Float3 normalValue = half3ToFloat3(center.normal);
+// 	ushort maskValue   = center.mask;
 
-	if (depthValue >= RayMax) return;
+// 	if (depthValue >= RayMax) return;
 
-	// -------------------------------- atrous filter --------------------------------
-	Float3 sumOfColor = 0;
-	float sumOfWeight = 0;
+// 	// -------------------------------- atrous filter --------------------------------
+// 	Float3 sumOfColor = 0;
+// 	float sumOfWeight = 0;
 
-	#pragma unroll
-	for (int i = 0; i < 25; i += 1)
-	{
-		int xoffset = i % 5;
-		int yoffset = i / 5;
+// 	#pragma unroll
+// 	for (int i = 0; i < 25; i += 1)
+// 	{
+// 		int xoffset = i % 5;
+// 		int yoffset = i / 5;
 
-		AtrousLDS bufferReadTmp = sharedBuffer[threadIdx.x + xoffset + (threadIdx.y + yoffset) * 20];
+// 		AtrousLDS bufferReadTmp = sharedBuffer[threadIdx.x + xoffset + (threadIdx.y + yoffset) * 20];
 
-		// get data
-		Float3 color  = half3ToFloat3(bufferReadTmp.color);
-		float depth   = __half2float(bufferReadTmp.depth);
-		Float3 normal = half3ToFloat3(bufferReadTmp.normal);
-		ushort mask   = bufferReadTmp.mask;
+// 		// get data
+// 		Float3 color  = half3ToFloat3(bufferReadTmp.color);
+// 		float depth   = __half2float(bufferReadTmp.depth);
+// 		Float3 normal = half3ToFloat3(bufferReadTmp.normal);
+// 		ushort mask   = bufferReadTmp.mask;
 
-		float weight = 1.0f;
+// 		float weight = 1.0f;
 
-		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.sigma_normal);
+// 		// normal diff factor
+// 		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.sigma_normal);
 
-		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / params.sigma_depth;
-		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
+// 		// depth diff fatcor
+// 		float deltaDepth = (depthValue - depth) / params.sigma_depth;
+// 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
-		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
+// 		// material mask diff factor
+// 		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
 
-		// gaussian filter weight
-		weight      *= GetGaussian5x5(xoffset + yoffset * 5);
+// 		// gaussian filter weight
+// 		weight      *= GetGaussian5x5(xoffset + yoffset * 5);
 
-		// accumulate
-		sumOfColor  += color * weight;
-		sumOfWeight += weight;
-	}
+// 		// accumulate
+// 		sumOfColor  += color * weight;
+// 		sumOfWeight += weight;
+// 	}
 
-	Float3 finalColor;
+// 	Float3 finalColor;
 
-	// final color
-	if (sumOfWeight == 0)
-    {
-        finalColor = 0;
-    }
-    else
-    {
-        finalColor = sumOfColor / sumOfWeight;
-    }
+// 	// final color
+// 	if (sumOfWeight == 0)
+//     {
+//         finalColor = 0;
+//     }
+//     else
+//     {
+//         finalColor = sumOfColor / sumOfWeight;
+//     }
 
-	if (isnan(finalColor.x) || isnan(finalColor.y) || isnan(finalColor.z))
-    {
-        printf("SpatialFilter5x5: nan found at (%d, %d)\n", x, y);
-        finalColor = 0;
-    }
+// 	if (isnan(finalColor.x) || isnan(finalColor.y) || isnan(finalColor.z))
+//     {
+//         printf("SpatialFilter5x5: nan found at (%d, %d)\n", x, y);
+//         finalColor = 0;
+//     }
 
-	// store to current
-	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, Int2(x, y));
-}
+// 	// store to current
+// 	Store2DHalf3Ushort1( { finalColor, maskValue } , colorBuffer, Int2(x, y));
+// }
 
 #if 0
 #define SAMPLE_KERNEL_SAMPLE_PER_FRAME 13
@@ -305,7 +327,7 @@ __global__ void SpatialFilter7x7(
 	int y = threadIdx.y + blockIdx.y * 16;
 
 	float noiseLevel = Load2DHalf1(noiseLevelBuffer16, Int2(blockIdx.x, blockIdx.y));
-	if (noiseLevel < 0.003f)
+	if (noiseLevel < params.noise_threshold_local)
 	{
 		return;
 	}
@@ -431,14 +453,14 @@ __global__ void SpatialFilter7x7(
 		float weight = 1.0f;
 
 		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0001f), params.sigma_normal);
+		weight      *= powf(max(dot(normalValue, normal), 0.0001f), params.local_denoise_sigma_normal);
 
 		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / params.sigma_depth;
+		float deltaDepth = (depthValue - depth) / params.local_denoise_sigma_depth;
 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
+		weight      *= (maskValue != mask) ? 1.0f / params.local_denoise_sigma_material : 1.0f;
 
 		// gaussian filter weight
 		weight      *= GetGaussian7x7(xoffset + yoffset * kernelDim);
@@ -480,7 +502,7 @@ __global__ void SpatialFilterGlobal5x5(
 	Int2    size)
 {
 	float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
-	if (noiseLevel < 0.0001f)
+	if (noiseLevel < params.noise_threshold_large)
 	{
 		return;
 	}
@@ -540,14 +562,14 @@ __global__ void SpatialFilterGlobal5x5(
 		float weight = 1.0f;
 
 		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.sigma_normal);
+		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.large_denoise_sigma_normal);
 
 		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / params.sigma_depth;
+		float deltaDepth = (depthValue - depth) / params.large_denoise_sigma_depth;
 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
+		weight      *= (maskValue != mask) ? 1.0f / params.large_denoise_sigma_material : 1.0f;
 
 		// gaussian filter weight
 		weight      *= GetGaussian5x5(i + j * 5);
@@ -593,17 +615,10 @@ __global__ void TemporalFilter(
 	SurfObj   depthBuffer,
 	SurfObj   depthHistoryBuffer,
     SurfObj   motionVectorBuffer,
-	SurfObj   noiseLevelBuffer,
 	DenoisingParams params,
 	Int2      size,
 	Int2      historySize)
 {
-	// float noiseLevel = Load2DHalf1(noiseLevelBuffer, Int2(blockIdx.x, blockIdx.y));
-	// if (noiseLevel < 0.003f)
-	// {
-	// 	return;
-	// }
-
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
@@ -724,14 +739,14 @@ __global__ void TemporalFilter(
 		float weight = 1.0f;
 
 		// normal diff factor
-		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.sigma_normal);
+		weight      *= powf(max(dot(normalValue, normal), 0.0f), params.temporal_denoise_sigma_normal);
 
 		// depth diff fatcor
-		float deltaDepth = (depthValue - depth) / params.sigma_depth;
+		float deltaDepth = (depthValue - depth) / params.temporal_denoise_sigma_depth;
 		weight      *= expf(-0.5f * deltaDepth * deltaDepth);
 
 		// material mask diff factor
-		weight      *= (maskValue != mask) ? 1.0f / params.sigma_material : 1.0f;
+		weight      *= (maskValue != mask) ? 1.0f / params.temporal_denoise_sigma_material : 1.0f;
 
 		// gaussian filter weight
 		if (kernelDim == 3)
@@ -1093,6 +1108,20 @@ __global__ void TemporalFilter2(
 
 	// store to current
 	Store2DHalf3Ushort1( { outColor, maskValue } , colorBuffer, Int2(x, y));
+}
+
+__global__ void DecoupleAlbedo(SurfObj colorBuffer, SurfObj albedoBuffer, Int2 texSize)
+{
+	Int2 idx;
+	idx.x = blockIdx.x * blockDim.x + threadIdx.x;
+	idx.y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (idx.x >= texSize.x || idx.y >= texSize.y) return;
+
+    Float3 color = Load2DHalf4(colorBuffer, idx).xyz;
+    Float3 albedo = Load2DHalf4(albedoBuffer, idx).xyz;
+
+    Store2DHalf4(Float4(color / albedo, 1.0f), colorBuffer, idx);
 }
 
 __global__ void ApplyAlbedo(SurfObj colorBuffer, SurfObj albedoBuffer, Int2 texSize)

@@ -20,11 +20,13 @@ __device__ inline void UpdateMaterial(
 	}
 	else
 	{
-		rayState.matId = SAFE_LOAD(sceneMaterial.materialsIdx, rayState.objectIdx, sceneMaterial.numMaterialsIdx, 6);
-
 		if (rayState.objectIdx == PLANE_OBJECT_IDX) // special case for floor, will be removed
 		{
-			rayState.matId = 6;
+			rayState.matId = 5;
+		}
+		else
+		{
+			rayState.matId = SAFE_LOAD(sceneMaterial.materialsIdx, rayState.objectIdx, sceneMaterial.numMaterialsIdx, 6);
 		}
 
 		SurfaceMaterial mat = SAFE_LOAD(sceneMaterial.materials, rayState.matId, sceneMaterial.numMaterials, SurfaceMaterial{});
@@ -173,7 +175,7 @@ __device__ inline void RaySceneIntersect(
 	// ----------------------- planes ---------------------------
 	Float4 plane(Float3(0, 1, 0), 0);
 	float t_temp = RayPlaneIntersect(plane, ray, errorT);
-	if (t_temp < t && t_temp < 1e3f)
+	if (t_temp < t)
 	{
 		t               = t_temp;
 		objectIdx       = PLANE_OBJECT_IDX;
@@ -212,6 +214,11 @@ __device__ inline void RaySceneIntersect(
 		#if USE_INTERPOLATED_FAKE_NORMAL
 		fakeNormal = Float3(0, -1, 0);
 		#endif
+	}
+	else
+	{
+		rayState.rayConeWidth += rayState.rayConeSpread * t;
+		// rayState.rayConeSpread += surfaceRayConeSpread; @TODO
 	}
 
 	UpdateMaterial(cbo, rayState, sceneMaterial, sceneGeometry);

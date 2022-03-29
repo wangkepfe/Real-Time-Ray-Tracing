@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <surface_indirect_functions.h>
 #include "fp16Utils.cuh"
+#include "texture.h"
 
 #define uchar unsigned char
 
@@ -538,6 +539,50 @@ inline __device__ VectorType SampleBicubicSmoothStep(
 
     return OutColor;
 }
+
+
+template<typename LoadFunc, typename VectorType = Float3, typename BoundaryFunc = BoundaryFuncDefault>
+inline __device__ VectorType SampleNearestLod(
+    Mipmap              tex,
+    const Float2&       uv,
+    float               lod)
+{
+    float low = floorf(lod);
+    float f = lod - low;
+
+    int loLod = (int) low;
+    int hiLod = loLod + 1;
+
+    loLod = clampi(loLod, 0, tex.maxLod);
+    hiLod = clampi(hiLod, 0, tex.maxLod);
+
+    VectorType valueLo = SampleNearest<LoadFunc, VectorType, BoundaryFunc>(tex.mip[loLod], uv, tex.size[loLod]);
+    VectorType valueHi = SampleNearest<LoadFunc, VectorType, BoundaryFunc>(tex.mip[hiLod], uv, tex.size[hiLod]);
+
+    return valueLo * (1.0f - f) + valueHi * f;
+}
+
+template<typename LoadFunc, typename VectorType = Float3, typename BoundaryFunc = BoundaryFuncDefault>
+inline __device__ VectorType SampleBicubicSmoothStepLod(
+    Mipmap              tex,
+    const Float2&       uv,
+    float               lod)
+{
+    float low = floorf(lod);
+    float f = lod - low;
+
+    int loLod = (int) low;
+    int hiLod = loLod + 1;
+
+    loLod = clampi(loLod, 0, tex.maxLod);
+    hiLod = clampi(hiLod, 0, tex.maxLod);
+
+    VectorType valueLo = SampleBicubicSmoothStep<LoadFunc, VectorType, BoundaryFunc>(tex.mip[loLod], uv, tex.size[loLod]);
+    VectorType valueHi = SampleBicubicSmoothStep<LoadFunc, VectorType, BoundaryFunc>(tex.mip[hiLod], uv, tex.size[hiLod]);
+
+    return valueLo * (1.0f - f) + valueHi * f;
+}
+
 
 //----------------------------------------------------------------------------------------------
 //

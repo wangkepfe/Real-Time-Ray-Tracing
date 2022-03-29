@@ -5,7 +5,6 @@
 #include "cuda_fp16.h"
 #include "terrain.h"
 #include "meshing.h"
-#include "mipgen.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -497,10 +496,7 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 		{ SunBuffer                     , { FORMAT_FLOAT4 , BUFFER_2D_SKY_DIM       } },
 
 		{ AlbedoBuffer                  , { FORMAT_HALF4   , BUFFER_2D_RENDER_DIM    } },
-
-		{ SoilAlbedoAoBuffer            , { FORMAT_USHORT4 , BUFFER_2D_1024x1024    } } ,
-		{ SoilNormalRoughnessBuffer     , { FORMAT_USHORT4 , BUFFER_2D_1024x1024    } } ,
-		{ SoilHeightBuffer              , { FORMAT_USHORT  , BUFFER_2D_1024x1024    } } ,
+		{ HistoryAlbedoBuffer           , { FORMAT_HALF4   , BUFFER_2D_RENDER_DIM    } },
 	};
 
 	// -------------------------- Init buffer -------------------------
@@ -514,53 +510,77 @@ void Buffer2DManager::init(int renderWidth, int renderHeight, int screenWidth, i
 		buffers[i].init(&format[static_cast<int>(feature.format)], dim[static_cast<int>(feature.dim)]);
 	}
 
+	// -------------------------- Texture mapping -------------------------
+
 	struct TextureDescripton
 	{
 		const char* filepath;
 		int numChannel;
+		int byteDepth;
+		Buffer2DFormat format;
+	    Buffer2DDim    dim;
 	};
 
-	std::unordered_map<Buffer2DName, TextureDescripton> textureFileMap =
+	std::unordered_map<MipmapTextureName, TextureDescripton> textureFileMap =
 	{
-		{ SoilAlbedoAoBuffer            , { "resources/textures/soil/out/albedoAo.png"        , STBI_rgb_alpha }    } ,
-		{ SoilNormalRoughnessBuffer     , { "resources/textures/soil/out/normalRoughness.png" , STBI_rgb_alpha }    } ,
-		{ SoilHeightBuffer              , { "resources/textures/soil/out/height.png"          , STBI_grey      }    } ,
+		{ SoilAlbedoAo            , { "resources/textures/soil/out/albedoAo.png"        , STBI_rgb_alpha, sizeof(ushort), FORMAT_USHORT4 , BUFFER_2D_1024x1024 }    } ,
+		{ SoilNormalRoughness     , { "resources/textures/soil/out/normalRoughness.png" , STBI_rgb_alpha, sizeof(ushort), FORMAT_USHORT4 , BUFFER_2D_1024x1024 }    } ,
+		{ SoilHeight              , { "resources/textures/soil/out/height.png"          , STBI_grey     , sizeof(ushort), FORMAT_USHORT  , BUFFER_2D_1024x1024 }    } ,
 	};
 
-	for (int i = 0; i < static_cast<int>(Buffer2DCount) - static_cast<int>(SoilAlbedoAoBuffer); ++i)
+	// -------------------------- Init textures -------------------------
+
+	for (int i = 0; i < static_cast<int>(MipmapTextureCount); ++i)
 	{
-		TextureDescripton desc = textureFileMap[static_cast<Buffer2DName>(i + static_cast<int>(SoilAlbedoAoBuffer))];
+		TextureDescripton desc = textureFileMap[static_cast<MipmapTextureName>(i)];
 
-		Buffer2D& buffer2d = buffers[i + static_cast<int>(SoilAlbedoAoBuffer)];
+		// Init GPU buffer
+		UInt2 texSize = dim[static_cast<int>(desc.dim)];
+		textures[i].init(&format[static_cast<int>(desc.format)], texSize, MipmapTexture::numMipLevels);
 
-		textures.textures[i] = buffer2d.buffer;
-
+		// Load buffer from disk
 		int texWidth;
 		int texHeight;
 		int texChannel;
-
 		auto hBuffer = stbi_load_16(desc.filepath, &texWidth, &texHeight, &texChannel, desc.numChannel);
 		assert(hBuffer != NULL);
+		assert(texSize.x == texWidth);
+		assert(texSize.y == texHeight);
+		assert(texChannel == desc.numChannel);
 
-		GpuErrorCheck(cudaMemcpyToArray(buffer2d.array, 0, 0, hBuffer, texWidth * texHeight * desc.numChannel * sizeof(ushort), cudaMemcpyHostToDevice));
+		// Copy buffer to mip 0
+		cudaArray* arrayLevel;
+    	checkCudaErrors(cudaGetMipmappedArrayLevel(&arrayLevel, textures[i].array, 0));
+		cudaMemcpy3DParms copyParams = {0};
+		copyParams.srcPtr       = make_cudaPitchedPtr(hBuffer, texWidth * texChannel * desc.byteDepth, texWidth, texHeight);
+		copyParams.dstArray     = arrayLevel;
+		copyParams.extent       = make_cudaExtent(texWidth, texHeight, 0);
+		copyParams.extent.depth = 1;
+		copyParams.kind         = cudaMemcpyHostToDevice;
+		checkCudaErrors(cudaMemcpy3D(&copyParams));
 
-		MipmapImage& mipmapImage = mipmapImages[i];
-		mipmapImage.h_data = hBuffer;
-		mipmapImage.size = make_cudaExtent(1024, 1024, 0);
-
-		if (desc.numChannel == 4)
+		// Generate mipmap
+		if (desc.numChannel == 1 && desc.byteDepth == sizeof(ushort))
 		{
-			InitMipmapImage<float4, ushort4>(&mipmapImage);
+			textures[i].GenerateMipmap<float, ushort>();
 		}
-		else if (desc.numChannel == 1)
+		else if (desc.numChannel == 4 && desc.byteDepth == sizeof(ushort))
 		{
-			InitMipmapImage<float, ushort>(&mipmapImage);
+			textures[i].GenerateMipmap<float4, ushort4>();
 		}
 
-		tex.tex[i] = mipmapImage.textureObject;
+		for (int lod = 0; lod < Mipmap::numMipLevels; ++lod)
+		{
+			h_textureAtlas.mipmapTex[i].mip[lod] = textures[i].mip[lod];
+			h_textureAtlas.mipmapTex[i].size[lod] = textures[i].mipSizes[lod];
+		}
+		h_textureAtlas.mipmapTex[i].maxLod = 10;
 
 		STBI_FREE(hBuffer);
 	}
+
+	GpuErrorCheck(cudaMalloc((void**)&textureAtlas, sizeof(TextureAtlas)));
+	GpuErrorCheck(cudaMemcpy(textureAtlas, &h_textureAtlas, sizeof(TextureAtlas), cudaMemcpyHostToDevice));
 }
 
 void Buffer2DManager::clear()
@@ -570,109 +590,13 @@ void Buffer2DManager::clear()
 		buffer.clear();
 	}
 
-	for (auto& image : mipmapImages)
+	for (auto& texture : textures)
 	{
-		GpuErrorCheck(cudaDestroyTextureObject(image.textureObject));
-		GpuErrorCheck(cudaFreeMipmappedArray(image.mipmapArray));
+		texture.clear();
 	}
+
+	cudaFree(textureAtlas);
 }
-
-// template<int numChannel, typename TexelType, typename LoadFunc>
-// inline uint16_t* CreateTexture(const char* filepath, cudaArray*& buffer, TexObj& texObj, cudaChannelFormatDesc& channelDesc, cudaResourceDesc& resDesc, cudaTextureDesc& desc)
-// {
-// 	int texWidth;
-// 	int texHeight;
-// 	int texChannel;
-
-// 	uint16_t* hBufferPtr = LoadFunc()(filepath, texWidth, texHeight, texChannel, numChannel);
-
-// 	int texelSize = sizeof(TexelType);
-// 	channelDesc = cudaCreateChannelDesc<TexelType>();
-// 	GpuErrorCheck(cudaMallocArray(&buffer, &channelDesc, texWidth, texHeight, cudaArrayTextureGather));
-// 	GpuErrorCheck(cudaMemcpyToArray(buffer, 0, 0, hBufferPtr, texWidth * texHeight * texelSize, cudaMemcpyHostToDevice));
-
-// 	resDesc = cudaResourceDesc{};
-// 	resDesc.resType = cudaResourceTypeArray;
-// 	resDesc.res.array.array = buffer;
-
-// 	desc = cudaTextureDesc{};
-// 	desc.addressMode[0]   = cudaAddressModeWrap;
-// 	desc.addressMode[1]   = cudaAddressModeWrap;
-// 	desc.filterMode       = cudaFilterModeLinear;
-// 	desc.readMode         = cudaReadModeNormalizedFloat;
-// 	desc.normalizedCoords = 1;
-
-// 	GpuErrorCheck(cudaCreateTextureObject(&texObj, &resDesc, &desc, NULL));
-// 	assert(texObj != NULL);
-
-// 	return hBufferPtr;
-// }
-
-// void TextureManager::init()
-// {
-// 	std::unordered_map<TexName, TextureDesc> map =
-// 	{
-// 		{ GroundSoilAlbedoRoughness, { "resources/textures/soil/out/albedoRoughness.png", RGBA16 } },
-// 		{ GroundSoilNormalHeight   , { "resources/textures/soil/out/normalHeight.png"   , RGBA16 } },
-// 		{ GroundSoilAo             , { "resources/textures/soil/out/ao.png"             , RGBA16  } },
-// 	};
-
-// 	for (int i = 0; i < TexName::TextureCount; ++i)
-// 	{
-// 		auto name = static_cast<TexName>(i);
-// 		auto& texDesc = map[name];
-
-// 		hBuffers[i] = CreateTexture<4, ushort4, LoadTexture16>(texDesc.filepath.c_str(), buffers[i], texObj.array[i], channelDescs[i], resDescs[i], texDescs[i]);
-
-// 		// switch (texDesc.type)
-// 		// {
-// 		// 	case RGBA16: CreateTexture<4, ushort4, LoadTexture16>(texDesc.filepath.c_str(), buffers[i], texObj.array[i], channelDescs[i], resDescs[i], texDescs[i]); break;
-// 		// 	case RGBA8:  CreateTexture<4, uchar4,  LoadTexture8> (texDesc.filepath.c_str(), buffers[i], texObj.array[i], channelDescs[i], resDescs[i], texDescs[i]); break;
-// 		// }
-// 	}
-// }
-
-// void TextureManager::init()
-// {
-// 	std::unordered_map<TexName, TextureDesc> map =
-// 	{
-// 		{ GroundSoilAlbedoRoughness, { "resources/textures/soil/out/albedoRoughness.png", RGBA16 } },
-// 		{ GroundSoilNormalHeight   , { "resources/textures/soil/out/normalHeight.png"   , RGBA16 } },
-// 		{ GroundSoilAo             , { "resources/textures/soil/out/ao.png"             , RGBA16 } },
-// 	};
-
-// 	for (int i = 0; i < TexName::TextureCount; ++i)
-// 	{
-// 		auto name = static_cast<TexName>(i);
-// 		auto& texDesc = map[name];
-
-// 		int texWidth;
-// 		int texHeight;
-// 		int texChannel;
-
-// 		hBuffers[i] = LoadTexture16()(texDesc.filepath.c_str(), texWidth, texHeight, texChannel, 4);
-
-// 		channelDescs[i] = cudaCreateChannelDesc<ushort4>();
-// 		int texelSize = sizeof(ushort4);
-
-// 		GpuErrorCheck(cudaMallocArray(&buffers[i], &channelDescs[i], texWidth, texHeight));
-// 		GpuErrorCheck(cudaMemcpyToArray(buffers[i], 0, 0, hBuffers[i], texWidth * texHeight * texelSize, cudaMemcpyHostToDevice));
-
-// 		memset(&resDescs[i], 0, sizeof(cudaResourceDesc));
-// 		resDescs[i].resType            = cudaResourceTypeArray;
-// 		resDescs[i].res.array.array    = buffers[i];
-
-// 		memset(&texDescs[i], 0, sizeof(cudaTextureDesc));
-// 		texDescs[i].normalizedCoords = 1;
-//         texDescs[i].filterMode = cudaFilterModeLinear;
-//         texDescs[i].addressMode[0] = cudaAddressModeWrap;
-//         texDescs[i].addressMode[1] = cudaAddressModeWrap;
-//         texDescs[i].addressMode[2] = cudaAddressModeWrap;
-// 		texDescs[i].readMode = cudaReadModeNormalizedFloat;
-
-// 		GpuErrorCheck(cudaCreateTextureObject(&texObj.array[i], &resDescs[i], &texDescs[i], NULL));
-// 	}
-// }
 
 void RayTracer::cleanup()
 {
@@ -699,14 +623,7 @@ void RayTracer::cleanup()
 	cudaFree(aabbs);
 
 	buffer2DManager.clear();
-	// textureManager.clear();
-
 	// ---------------------- destroy texture objects --------------------------
-
-	//cudaDestroyTextureObject(sceneTextures.sandAlbedo);
-	//cudaDestroyTextureObject(sceneTextures.sandNormal);
-	//if (texArraySandAlbedo != nullptr) cudaFreeArray(texArraySandAlbedo);
-	//if (texArraySandNormal != nullptr) cudaFreeArray(texArraySandNormal);
 
 	// sky
 	//cudaDestroyTextureObject(skyTex);

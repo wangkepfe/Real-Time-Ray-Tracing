@@ -42,7 +42,7 @@ inline __device__ Float3 EqualAreaMap(float u, float v)
  __device__ Float2 EqualAreaMap(Float3 dir)
 {
 	float u = atan2f(-dir.z, -dir.x) / TWO_PI + 0.5f;
-	float v = max(dir.y, 0.0f);
+	float v = max(dir.y, 0.05f);
 	return Float2 (u, v);
 }
 

@@ -47,7 +47,8 @@ void RayTracer::PostProcessing(Int2 bufferDim, Int2 outputDim)
                 /*out*/d_exposure,
                 /*in*/d_histogram,
                 (float)(bufferSize64.x * bufferSize64.y),
-                deltaTime);
+                deltaTime,
+                postProcessParams.gain);
         }
         else
         {

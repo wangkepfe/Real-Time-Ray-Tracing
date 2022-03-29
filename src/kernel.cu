@@ -136,7 +136,7 @@ void RayTracer::UpdateFrame()
     }
 }
 
-__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Float3* normalBuffer, TexObj heightMap, int lod, BlueNoiseRandGenerator randGen, uint size)
+__global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Float3* normalBuffer, TextureAtlas* textureAtlas, int lod, BlueNoiseRandGenerator randGen, uint size)
 {
     uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -146,65 +146,66 @@ __global__ void MeshDisplace(Float3* vertexBuffer, Float3* constVertexBuffer, Fl
     Float3 vertex = constVertexBuffer[idx];
     Float3 normal = normalize(normalBuffer[idx]);
 
-    //{
-    //    Float4 randNum;
-    //    randGen.idx       = idx;
-    //    randGen.sampleIdx = 0;
-    //    randNum = randGen.Rand4(0);
+    // {
+    //     Float4 randNum;
+    //     randGen.idx       = idx;
+    //     randGen.sampleIdx = 0;
+    //     randNum = randGen.Rand4(0);
 
-    //    Float3 normal = randNum.xyz;
-    //    float offset = randNum.w;
+    //     Float3 normal = randNum.xyz;
+    //     float offset = randNum.w;
 
-    //    const float strength = 0.1f;
-    //    vertex = vertex + normal * offset * strength;
-    //}
+    //     const float strength = 0.1f;
+    //     vertex = vertex + normal * offset * strength;
+    // }
 
-    {
-        Int2 texSize = Int2(1024, 1024);
-        const float strength = 0.2f;
-        const float uvScale = 0.5f;
-        Float3 displaceX;
-        Float3 displaceY;
-        Float3 displaceZ;
-        {
-            Float2 uv(vertex.y, vertex.z);
-            uv *= uvScale;
+    // {
+    //     Int2 texSize = Int2(1024, 1024);
+    //     const float strength = 0.2f;
+    //     const float uvScale = 0.5f;
+    //     Float3 displaceX;
+    //     Float3 displaceY;
+    //     Float3 displaceZ;
+    //     {
+    //         Float2 uv(vertex.y, vertex.z);
+    //         uv *= uvScale;
 
-            // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
-            float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
-            height -= 0.5f;
+    //         float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(textureAtlas->mipmapTex[2].mip[lod], uv, texSize);
+    //         // float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
+    //         Print("height",height);
+    //         height -= 0.5f;
 
-            Print("height",height);
+    //         displaceX = Float3(1, 0, 0) * height * strength;
+    //     }
+    //     {
+    //         Float2 uv(vertex.x, vertex.z);
+    //         uv *= uvScale;
 
-            displaceX = Float3(1, 0, 0) * height * strength;
-        }
-        {
-            Float2 uv(vertex.x, vertex.z);
-            uv *= uvScale;
+    //         float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(textureAtlas->mipmapTex[2].mip[lod], uv, texSize);
+    //         // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+    //         // float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
+    //         height -= 0.5f;
 
-            // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
-            float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
-            height -= 0.5f;
+    //         displaceY = Float3(0, 1, 0) * height * strength;
+    //     }
+    //     {
+    //         Float2 uv(vertex.x, vertex.y);
+    //         uv *= uvScale;
 
-            displaceY = Float3(0, 1, 0) * height * strength;
-        }
-        {
-            Float2 uv(vertex.x, vertex.y);
-            uv *= uvScale;
+    //         float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(textureAtlas->mipmapTex[2].mip[lod], uv, texSize);
+    //         // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
+    //         // float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
+    //         height -= 0.5f;
 
-            // float height = SampleNearest<Load2DFuncUshort1<float>, float, BoundaryFuncRepeat>(heightMap, uv, texSize);
-            float height = tex2DLod<float>(heightMap, uv.x, uv.y, lod);
-            height -= 0.5f;
+    //         displaceZ = Float3(0, 0, 1) * height * strength;
+    //     }
 
-            displaceZ = Float3(0, 0, 1) * height * strength;
-        }
+    //     float wx = normal.x;
+    //     float wy = normal.y;
+    //     float wz = normal.z;
 
-        float wx = normal.x;
-        float wy = normal.y;
-        float wz = normal.z;
-
-        vertex = vertex + displaceX * wx + displaceY * wy + displaceZ * wz;
-    }
+    //     vertex = vertex + displaceX * wx + displaceY * wy + displaceZ * wz;
+    // }
 
     // if (blockIdx.x == gridDim.x * 0.5f)
     // {
@@ -299,7 +300,9 @@ void RayTracer::draw(SurfObj* renderTarget)
         SkySun<<<dim3(SUN_WIDTH / 8, SUN_HEIGHT / 8, 1), dim3(8, 8, 1)>>>(GetBuffer2D(SunBuffer), sunPdf, Int2(SUN_WIDTH, SUN_HEIGHT), sunDir, skyParams);
         Scan(sunPdf, sunCdf, sunCdfScanTmp, SUN_SIZE, SUN_SCAN_BLOCK_SIZE, 1);
 
-        cbo.sunAngleCosThetaMax = cosf(skyParams.sunAngle * M_PI / 180.0f / 2.0f);
+        float sunRadiusRadian = skyParams.sunAngle * M_PI / 180.0f / 2.0f;
+        cbo.sunArea = powf(tanf(sunRadiusRadian), 2.0f) * M_PI;
+        cbo.sunAngleCosThetaMax = cosf(sunRadiusRadian);
 
         skyParams.needRegenerate = false;
     }
@@ -318,7 +321,7 @@ void RayTracer::draw(SurfObj* renderTarget)
         // constexpr int lod = log2(texRes / vertexCount);
         constexpr int lod = 7;
 
-        MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, normalBuffer, GetTexture(SoilHeightBuffer), lod, d_randGen, numVertices);
+        MeshDisplace <<< divRoundUp(numVertices, 64), 64 >>> (vertexBuffer, constVertexBuffer, normalBuffer, buffer2DManager.textureAtlas, lod, d_randGen, numVertices);
 
         GenerateSmoothNormals <<< divRoundUp(triCountPadded, 64), 64 >>> (indexBuffer, vertexBuffer, normalBuffer, triCountPadded);
     }
@@ -345,7 +348,7 @@ void RayTracer::draw(SurfObj* renderTarget)
         GetBuffer2D(MotionVectorBuffer),
         GetBuffer2D(NoiseLevelBuffer),
         GetBuffer2D(AlbedoBuffer),
-        buffer2DManager.textures,
+        buffer2DManager.textureAtlas,
         bufferDim);
 
     GpuErrorCheck(cudaDeviceSynchronize()); GpuErrorCheck(cudaPeekAtLastError());

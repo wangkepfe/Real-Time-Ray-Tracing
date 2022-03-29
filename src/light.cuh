@@ -46,7 +46,12 @@ inline __device__ Float3 EnvLight2(
     {
         // Float2 jitterSize = Float2(1.0f) / Float2(SKY_WIDTH, SKY_HEIGHT);
         // Float2 jitter = (blueNoise * jitterSize - jitterSize * 0.5f);
-        color += SampleBicubicSmoothStep<Load2DFuncFloat4<Float3>, Float3, BoundaryFuncRepeatXClampY>(skyBuffer, EqualAreaMap(raydir), Int2(SKY_WIDTH, SKY_HEIGHT));
+        Float3 skyColor = SampleBicubicSmoothStep<Load2DFuncFloat4<Float3>, Float3, BoundaryFuncRepeatXClampY>(skyBuffer, EqualAreaMap(raydir), Int2(SKY_WIDTH, SKY_HEIGHT));
+        Float3 mistColor = Float3(0.2f);
+
+        float blenderFactor = clampf((raydir.y + 0.4f) * (1.0f / 0.5f));
+
+        color += smoothstep3f(mistColor, skyColor, blenderFactor);
     }
 
     // Sun
@@ -147,19 +152,28 @@ __device__ __inline__ void SampleLight(
         // The accumulated all sun luminance
         const float maxSunCdf = sunCdf[SUN_SIZE - 1];
 
+        const float totalSkyLum = maxSkyCdf * TWO_PI / SKY_SIZE;
+        const float totalSunLum = maxSunCdf * TWO_PI * (1.0f - cbo.sunAngleCosThetaMax) / SUN_SIZE;
+
         // Sample sky or sun pdf
-        const float sampleSkyVsSunPdf = maxSkyCdf / (maxSkyCdf + maxSunCdf);
+        const float sampleSkyVsSunPdf = totalSkyLum / (totalSkyLum + totalSunLum);
 
-        float chooseSampleSkyVsSun;
+        float chooseSampleSkyVsSun = sampleSkyVsSunPdf;
 
-        if (cbo.sampleParams.sampleSkyVsSunUseFluxWeight)
-        {
-            chooseSampleSkyVsSun = sampleSkyVsSunPdf;
-        }
-        else
-        {
-            chooseSampleSkyVsSun = cbo.sampleParams.sampleSkyVsSun;
-        }
+        // DEBUG_PRINT(maxSkyCdf);
+        // DEBUG_PRINT(maxSunCdf);
+        // DEBUG_PRINT(totalSkyLum);
+        // DEBUG_PRINT(totalSunLum);
+        // DEBUG_PRINT(sampleSkyVsSunPdf);
+
+        // if (cbo.sampleParams.sampleSkyVsSunUseFluxWeight)
+        // {
+        //     chooseSampleSkyVsSun = sampleSkyVsSunPdf;
+        // }
+        // else
+        // {
+        //     chooseSampleSkyVsSun = cbo.sampleParams.sampleSkyVsSun;
+        // }
 
         // Choose to sample sky
         if (chooseSampleSkyVsSun > randNum[1])

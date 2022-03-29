@@ -22,7 +22,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
                           SurfObj                motionVectorBuffer,
                           SurfObj                noiseLevelBuffer,
                           SurfObj                albedoBuffer,
-                          Textures               textures,
+                          TextureAtlas*          textureAtlas,
                           Int2                   renderSize)
 {
     // index
@@ -46,6 +46,8 @@ __global__ void PathTrace(ConstBuffer            cbo,
     rayState.isShadowRay    = false;
     rayState.normal         = Float3(0, -1, 0);
     rayState.albedo         = Float3(1.0f);
+    rayState.rayConeWidth   = 0.0f;
+    rayState.rayConeSpread  = GetRayConeWidth(cbo.camera, idx);
 
     // setup rand gen
     Float4 randNum[4];
@@ -61,7 +63,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // generate ray
     Float2 sampleUv;
-    GenerateRay(rayState.orig, rayState.dir, sampleUv, cbo.camera, idx, Float2(randNum[0][0], randNum[0][1]), Float2(randNum[0][2], randNum[0][3]));
+    GenerateRay(rayState.orig, rayState.dir, rayState.centerRaydir, sampleUv, cbo.camera, idx, Float2(randNum[0][0], randNum[0][1]), Float2(randNum[0][2], randNum[0][3]));
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     float outputDepth = rayState.depth;
@@ -88,7 +90,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
 
     // glossy + diffuse
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][2]);
-    DiffuseSurfaceInteraction(0, cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta1, randNum[0], randNum[1], textures);
+    DiffuseSurfaceInteraction(0, cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta1, randNum[0], randNum[1], textureAtlas);
 
     #if USE_INTERPOLATED_FAKE_NORMAL
     Float3 outputNormal = rayState.fakeNormal;
@@ -99,7 +101,7 @@ __global__ void PathTrace(ConstBuffer            cbo,
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     GlossySurfaceInteraction(cbo, rayState, sceneMaterial, randNum[0][3]);
-    DiffuseSurfaceInteraction(1, cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta0, randNum[2], randNum[3], textures);
+    DiffuseSurfaceInteraction(1, cbo, rayState, sceneMaterial, skyCdf, sunCdf, 0.1f, rayState.beta0, randNum[2], randNum[3], textureAtlas);
     RaySceneIntersect(cbo, sceneMaterial, sceneGeometry, rayState);
 
     // Light

@@ -30,7 +30,7 @@
 #include "cudaError.cuh"
 #include "settingParams.h"
 #include "debugUtil.h"
-#include "mipgen.h"
+#include "texture.h"
 
 class VoxelsGenerator;
 
@@ -51,20 +51,20 @@ class VoxelsGenerator;
 #define RENDER_SPHERE 0
 #define RENDER_SPHERE_LIGHT 0
 
-#define MAX_TRIANGLE_COUNT_ALLOWED 1024 * 1024
+#define MAX_TRIANGLE_COUNT_ALLOWED (1024 * 1024)
 #define MIN_TRIANGLE_COUNT_ALLOWED 2
 
-#define SKY_WIDTH 1024
-#define SKY_HEIGHT 1024
-#define SKY_SIZE SKY_WIDTH * SKY_HEIGHT
-#define SKY_SCAN_BLOCK_SIZE 1024
-#define SKY_SCAN_BLOCK_COUNT SKY_SIZE / SKY_SCAN_BLOCK_SIZE
+#define SKY_WIDTH 512
+#define SKY_HEIGHT 256
+#define SKY_SIZE (SKY_WIDTH * SKY_HEIGHT)
+#define SKY_SCAN_BLOCK_SIZE 256
+#define SKY_SCAN_BLOCK_COUNT (SKY_SIZE / SKY_SCAN_BLOCK_SIZE)
 
-#define SUN_WIDTH 128
-#define SUN_HEIGHT 128
-#define SUN_SIZE SUN_WIDTH * SUN_HEIGHT
-#define SUN_SCAN_BLOCK_SIZE 128
-#define SUN_SCAN_BLOCK_COUNT SUN_SIZE / SUN_SCAN_BLOCK_SIZE
+#define SUN_WIDTH 32
+#define SUN_HEIGHT 32
+#define SUN_SIZE (SUN_WIDTH * SUN_HEIGHT)
+#define SUN_SCAN_BLOCK_SIZE 32
+#define SUN_SCAN_BLOCK_COUNT (SUN_SIZE / SUN_SCAN_BLOCK_SIZE)
 
 #define RayMax 10e10f
 
@@ -225,6 +225,8 @@ struct __align__(16) ConstBuffer
 	int           tlasBvhNodesSize;
 
 	float         sunAngleCosThetaMax;
+	float         sunArea;
+
 	SampleParams  sampleParams;
 };
 
@@ -273,10 +275,12 @@ struct __align__(16) RayState
 	float      cosWo;
 
 	Float3     beta1;
-	int        unusued2;
+	float      rayConeWidth;
 
 	Float3     albedo;
-	int        unusued3;
+	float      rayConeSpread;
+
+	Float3     centerRaydir;
 };
 
 enum Buffer2DName
@@ -305,10 +309,7 @@ enum Buffer2DName
 	SunBuffer,
 
 	AlbedoBuffer,
-
-	SoilAlbedoAoBuffer,
-	SoilNormalRoughnessBuffer,
-	SoilHeightBuffer,
+	HistoryAlbedoBuffer,
 
 	Buffer2DCount,
 };
@@ -363,14 +364,48 @@ struct Buffer2D
 	cudaArray* array;
 };
 
-struct Textures
+struct MipmapTexture
 {
-	SurfObj textures[3];
-};
+	static constexpr uint numMipLevels = 11;
+	SurfObj mip[numMipLevels];
+	UInt2 mipSizes[numMipLevels];
+	cudaMipmappedArray* array;
 
-struct MipmapTextures
-{
-	TexObj tex[3];
+	void init(cudaChannelFormatDesc* pFormat,
+	          UInt2                  dim,
+			  int                    lodLevels,
+	          uint                   usageFlag = cudaArrayTextureGather)
+	{
+		GpuErrorCheck(cudaMallocMipmappedArray(&array, pFormat, make_cudaExtent(dim.x, dim.y, 0), lodLevels, usageFlag));
+
+		for (int level = 0; level < lodLevels; ++level)
+		{
+			cudaArray* arrayLevel;
+    		checkCudaErrors(cudaGetMipmappedArrayLevel(&arrayLevel, array, level));
+
+			cudaExtent levelSize;
+			checkCudaErrors(cudaArrayGetInfo(NULL, &levelSize, NULL, arrayLevel));
+			mipSizes[level].x = levelSize.width;
+			mipSizes[level].y = levelSize.height;
+
+			cudaResourceDesc resDesc = {};
+			resDesc.resType = cudaResourceTypeArray;
+			resDesc.res.array.array = arrayLevel;
+			GpuErrorCheck(cudaCreateSurfaceObject(&mip[level], &resDesc));
+		}
+	}
+
+	template<typename VectorType, typename TexelType>
+	void GenerateMipmap();
+
+	void clear()
+	{
+		for (auto& buffer : mip)
+		{
+			GpuErrorCheck(cudaDestroySurfaceObject(buffer));
+		}
+		GpuErrorCheck(cudaFreeMipmappedArray(array));
+	}
 };
 
 struct Buffer2DManager
@@ -386,75 +421,11 @@ struct Buffer2DManager
 	void clear();
 
 	std::array<Buffer2D, Buffer2DCount> buffers;
+	std::array<MipmapTexture, MipmapTextureCount> textures;
 
-
-	MipmapImage mipmapImages[3];
-
-	Textures textures;
-	MipmapTextures tex;
+	TextureAtlas h_textureAtlas;
+	TextureAtlas* textureAtlas;
 };
-
-// enum TexName {
-// 	GroundSoilAlbedoRoughness,
-// 	GroundSoilNormalHeight,
-// 	GroundSoilAo,
-
-// 	TextureCount,
-// };
-
-// union SceneTextures
-// {
-// 	struct
-// 	{
-// 		TexObj groundSoilAlbedoRoughness;
-// 		TexObj groundSoilNormalHeight;
-// 		TexObj groundSoilAo;
-// 	};
-// 	TexObj array[TextureCount];
-// };
-
-// struct TextureManager
-// {
-// 	enum TexType {
-// 		RGBA16,
-// 		RGBA8,
-// 	};
-
-// 	struct TextureDesc {
-// 		std::string filepath;
-// 		TexType type;
-// 	};
-
-// 	void init();
-
-// 	void clear()
-// 	{
-// 		for (auto tex : texObj.array)
-// 		{
-// 			GpuErrorCheck(cudaDestroyTextureObject(tex));
-// 		}
-
-// 		for (auto buffer : buffers)
-// 		{
-// 			GpuErrorCheck(cudaFreeArray(buffer));
-// 		}
-
-// 		for (uint16_t* buffer : hBuffers)
-// 		{
-// 			delete buffer;
-// 		}
-// 	}
-
-// 	std::array<cudaArray*, TextureCount> buffers = {};
-
-// 	std::array<cudaChannelFormatDesc, TextureCount> channelDescs = {};
-// 	std::array<cudaResourceDesc, TextureCount> resDescs = {};
-// 	std::array<cudaTextureDesc, TextureCount> texDescs = {};
-
-// 	std::array<uint16_t*, TextureCount> hBuffers = {};
-
-// 	SceneTextures texObj = {};
-// };
 
 
 class RayTracer
@@ -486,7 +457,6 @@ public:
 	void LoadCameraFromFile(const std::string &camFileName);
 
 	SurfObj GetBuffer2D(Buffer2DName name) { return buffer2DManager.buffers[(uint)name].buffer; }
-	TexObj GetTexture(Buffer2DName name) { return buffer2DManager.tex.tex[(uint)name - (uint)SoilAlbedoAoBuffer]; }
 
 	const Camera& GetCamera() { return cbo.camera; }
 	uint GetTriangleCount() { return triCountPadded; }
@@ -647,6 +617,6 @@ private:
 	uchar4*                     dumpFrameBuffer;
 
 	// Voxels
-	VoxelsGenerator*           pVoxelsGenerator;
+	VoxelsGenerator*            pVoxelsGenerator;
 };
 

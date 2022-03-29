@@ -479,7 +479,6 @@ __forceinline__ __host__ __device__ int    clampi(int a, int lo = 0, int hi = 1)
 __forceinline__ __host__ __device__ float  clampf(float a, float lo = 0.0f, float hi = 1.0f)   { return a < lo ? lo : a > hi ? hi : a; }
 __forceinline__ __host__ __device__ Float3 clamp3f(Float3 a, Float3 lo = Float3(0.0f), Float3 hi = Float3(1.0f)){ return Float3(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z)); }
 __forceinline__ __host__ __device__ Float4 clamp4f(Float4 a, Float4 lo = Float4(0.0f), Float4 hi = Float4(1.0f)){ return Float4(clampf(a.x, lo.x, hi.x), clampf(a.y, lo.y, hi.y), clampf(a.z, lo.z, hi.z), clampf(a.w, lo.w, hi.w)); }
-__forceinline__ __host__ __device__ float  smoothstep1f(float edge0, float edge1, float x)     { float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
 __forceinline__ __host__ __device__ float  dot(const Float2 & v1, const Float2 & v2)           { return v1.x * v2.x + v1.y * v2.y; }
 // __forceinline__ __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z; }
 __forceinline__ __host__ __device__ float  dot(const Float3 & v1, const Float3 & v2)           { return (float)InnerProduct(v1.x , v2.x , v1.y , v2.y , v1.z , v2.z); }
@@ -491,6 +490,10 @@ __forceinline__ __host__ __device__ float  lerpf(float a, float b, float w)     
 __forceinline__ __host__ __device__ Float3 reflect3f(Float3 i, Float3 n)                       { return i - 2.0f * n * dot(n,i); }
 __forceinline__ __host__ __device__ float  pow2(float a)                                       { return a * a; }
 __forceinline__ __host__ __device__ float  pow3(float a)                                       { return a * a * a; }
+
+__forceinline__ __host__ __device__ float smoothstep1f(float a, float b, float w) { return a + (w * w * (3.0f - 2.0f * w)) * (b - a); }
+__forceinline__ __host__ __device__ Float3 smoothstep3f(Float3 a, Float3 b, float w) { return a + (w * w * (3.0f - 2.0f * w)) * (b - a); }
+
 
 __forceinline__ __host__ __device__ float AngleBetween(const Float3& a, const Float3& b) { return acos(dot(a, b) / sqrtf(a.length2() * b.length2())); }
 
@@ -739,3 +742,8 @@ __device__ __forceinline__ void LocalizeSample(
 // 	while (x >>= 1) result++;
 // 	return result;
 // }
+
+__device__ __forceinline__ float luminance(Float3 v)
+{
+    return dot(v, Float3(0.2126f, 0.7152f, 0.0722f));
+}

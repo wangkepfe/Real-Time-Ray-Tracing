@@ -105,31 +105,17 @@ struct PostProcessParams
 	{
 		return {
 			{ &exposure, "Exposure", 0.01f, 100.0f, true},
-
-			{ &A, "Tonemap A", 0.0f,  1.0f  , false},
-			{ &B, "Tonemap B", 0.0f,  1.0f  , false},
-			{ &C, "Tonemap C", 0.0f,  1.0f  , false},
-			{ &D, "Tonemap D", 0.0f,  1.0f  , false},
-			{ &E, "Tonemap E", 0.0f,  1.0f  , false},
-			{ &F, "Tonemap F", 0.0f,  1.0f  , false},
-			{ &W, "Tonemap W", 1.0f, 1e10f, true },
-
-			{ &gamma, "Gamma", 1.0f, 5.0f, false }
+			{ &gain, "Gain", 1.0f, 10000.0f, true},
+			{ &maxWhite, "Max White", 1.0f, 10000.0f, true},
+			{ &gamma, "Gamma", 1.0f, 5.0f, false },
 		};
 	}
 
 	ToneMappingType toneMappingType = ToneMappingType::Reinhard;
 
 	float exposure = 1.0f;
-
-	float A = 0.15f;
-	float B = 0.50f;
-	float C = 0.10f;
-	float D = 0.20f;
-	float E = 0.02f;
-	float F = 0.30f;
-	float W = 10.0f;
-
+	float gain = 40.0f;
+	float maxWhite = 7.0f;
 	float gamma = 2.2f;
 };
 
@@ -138,13 +124,35 @@ struct DenoisingParams
 	std::vector<std::pair<float*, std::string>> GetValueList()
 	{
 		return {
-			{ &sigma_normal  , "sigma_normal" },
-			{ &sigma_depth   , "sigma_depth" },
-			{ &sigma_material, "sigma_material" }
+			{ &local_denoise_sigma_normal  , "local_denoise_sigma_normal" },
+			{ &local_denoise_sigma_depth   , "local_denoise_sigma_depth" },
+			{ &local_denoise_sigma_material, "local_denoise_sigma_material" },
+
+			{ &large_denoise_sigma_normal  , "large_denoise_sigma_normal" },
+			{ &large_denoise_sigma_depth   , "large_denoise_sigma_depth" },
+			{ &large_denoise_sigma_material, "large_denoise_sigma_material" },
+
+			{ &temporal_denoise_sigma_normal  , "temporal_denoise_sigma_normal" },
+			{ &temporal_denoise_sigma_depth   , "temporal_denoise_sigma_depth" },
+			{ &temporal_denoise_sigma_material, "temporal_denoise_sigma_material" },
+
+			{ &noise_threshold_local, "noise_threshold_local"},
+			{ &noise_threshold_large, "noise_threshold_large"},
 		};
 	}
 
-	float sigma_normal   = 100.0f;
-	float sigma_depth    = 0.1f;
-	float sigma_material = 100.0f;
+	float local_denoise_sigma_normal   = 100.0f;
+	float local_denoise_sigma_depth    = 0.1f;
+	float local_denoise_sigma_material = 100.0f;
+
+	float large_denoise_sigma_normal   = 100.0f;
+	float large_denoise_sigma_depth    = 0.01f;
+	float large_denoise_sigma_material = 100.0f;
+
+	float temporal_denoise_sigma_normal   = 100.0f;
+	float temporal_denoise_sigma_depth    = 0.1f;
+	float temporal_denoise_sigma_material = 100.0f;
+
+	float noise_threshold_local    = 0.001f;
+	float noise_threshold_large    = 0.001f;
 };

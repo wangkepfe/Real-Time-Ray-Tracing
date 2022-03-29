@@ -105,7 +105,6 @@ void UpdateUI(GLFWwindow* window)
                 *item.first = max(*item.first, 0.00001f);
             }
         }
-
     }
 
     // if (ImGui::CollapsingHeader("Sky2", ImGuiTreeNodeFlags_None))

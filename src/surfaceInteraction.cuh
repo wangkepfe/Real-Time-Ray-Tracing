@@ -45,7 +45,7 @@ __device__ inline void DiffuseSurfaceInteraction(
     Float3& beta,
 	Float4& randNum,
     Float4& randNum2,
-    Textures textures)
+    TextureAtlas*          textureAtlas)
 {
     // check for termination and hit light
     if (rayState.hitLight == true || rayState.isDiffuse == false || rayState.isOccluded == true) { return; }
@@ -65,14 +65,19 @@ __device__ inline void DiffuseSurfaceInteraction(
     Float3 surfaceNormal = rayState.normal;
 #endif
 
-    // texture
+
     Float3 albedo = mat.albedo;
     float ao = 1.0f;
-    Float3 texNormal;
+    Float3 texNormal = normal;
     float roughness = 1.0f;
+
+    // texture
     {
-        Int2 texSize = Int2(1024, 1024);
+        Int2 texSize = textureAtlas->mipmapTex[0].size[0];
         const float uvScale = 0.5f;
+
+        float lod = log2f(rayState.rayConeWidth * uvScale * Float2(texSize.x, texSize.y).length());
+
         Float3 albedoX;
         Float3 albedoY;
         Float3 albedoZ;
@@ -88,38 +93,59 @@ __device__ inline void DiffuseSurfaceInteraction(
         {
             Float2 uv(rayState.pos.y, rayState.pos.z);
             uv *= uvScale;
-            Float4 texColor = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[0], uv, texSize);
+            Float4 texColor = SampleBicubicSmoothStepLod<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textureAtlas->mipmapTex[0], uv, lod);
             albedoX = texColor.xyz;
             albedoX = pow3f(albedoX, 2.2f);
             aoX = texColor.w;
 
-            Float4 texColor2 = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[1], uv, texSize);
+            Float4 texColor2 = SampleBicubicSmoothStepLod<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textureAtlas->mipmapTex[1], uv, lod);
             normalX = texColor2.xyz - 0.5f;
             roughnessX = texColor2.w;
+
+            Float3 w = Float3(0, 1, 0);
+            if (abs(normal.y) > 0.999f)
+                w = Float3(0, 0, 1);
+            Float3 u = cross(normal, w);
+            Float3 v = cross(normal, u);
+            normalX = normalize(u * normalX.x + v * normalX.y + normal * normalX.z);
         }
         {
             Float2 uv(rayState.pos.x, rayState.pos.z);
             uv *= uvScale;
-            Float4 texColor = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[0], uv, texSize);
+            Float4 texColor = SampleBicubicSmoothStepLod<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textureAtlas->mipmapTex[0], uv, lod);
             albedoY = texColor.xyz;
             albedoY = pow3f(albedoY, 2.2f);
             aoY = texColor.w;
 
-            Float4 texColor2 = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[1], uv, texSize);
+            Float4 texColor2 = SampleBicubicSmoothStepLod<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textureAtlas->mipmapTex[1], uv, lod);
             normalY = texColor2.xyz - 0.5f;
             roughnessY = texColor2.w;
+
+            Float3 w = Float3(1, 0, 0);
+            if (abs(normal.x) > 0.999f)
+                w = Float3(0, 0, 1);
+            Float3 u = cross(normal, w);
+            Float3 v = cross(normal, u);
+            normalY = normalize(u * normalY.x + v * normalY.y + normal * normalY.z);
         }
         {
             Float2 uv(rayState.pos.x, rayState.pos.y);
             uv *= uvScale;
-            Float4 texColor = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[0], uv, texSize);
+            Float4 texColor = SampleBicubicSmoothStepLod<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textureAtlas->mipmapTex[0], uv, lod);
             albedoZ = texColor.xyz;
             albedoZ = pow3f(albedoZ, 2.2f);
             aoZ = texColor.w;
 
-            Float4 texColor2 = SampleNearest<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textures.textures[1], uv, texSize);
+            Float4 texColor2 = SampleBicubicSmoothStepLod<Load2DFuncUshort4<Float4>, Float4, BoundaryFuncRepeat>(textureAtlas->mipmapTex[1], uv, lod);
             normalZ = texColor2.xyz - 0.5f;
             roughnessZ = texColor2.w;
+
+            Float3 w = Float3(0, 1, 0);
+            if (abs(normal.y) > 0.999f)
+                w = Float3(1, 0, 0);
+            Float3 u = cross(normal, w);
+            Float3 v = cross(normal, u);
+            normalZ = normalize(u * normalZ.x + v * normalZ.y + normal * normalZ.z);
         }
 
         float wx = surfaceNormal.x * surfaceNormal.x;
@@ -130,25 +156,16 @@ __device__ inline void DiffuseSurfaceInteraction(
         ao = aoX * wx + aoY * wy + aoZ * wz;
         texNormal = normalize(normalX * wx + normalY * wy + normalZ * wz);
         roughness = roughnessX * wx + roughnessY * wy + roughnessZ * wz;
-    }
-    if (bounceNumber == 0)
-        rayState.albedo = albedo;
 
-    // Normal process
-    {
-        Float3 w = Float3(1, 0, 0);
-        if (abs(normal.x) > 0.999f)
-            w = Float3(0, 1, 0);
-        w = cross(normal, w);
-        Float3 u = cross(normal, w);
-        Float3 v = cross(normal, u);
-        texNormal = normalize(u * texNormal.x + v * texNormal.y + normal * texNormal.z);
-
-        const float normalMapStrength = 1.0f;
-
-        normal = lerp3f(normal, texNormal, normalMapStrength);
-
+        //const float normalMapStrength = 1.0f;
+        //normal = lerp3f(normal, texNormal, normalMapStrength);
+        normal = texNormal;
         rayState.fakeNormal = normal;
+    }
+
+    if (bounceNumber == 0)
+    {
+        rayState.albedo = albedo * (1.0f + abs(dot(normal, rayState.centerRaydir)));
     }
 
     Float3 rayDir = rayState.dir;
@@ -218,24 +235,24 @@ __device__ inline void DiffuseSurfaceInteraction(
     constexpr float minFinalPdf = 1e-5f;
     constexpr float freeBounceProbability = 0.5f;
 
-    if (randNum.z < freeBounceProbability)
-    {
-        if (dot(rayState.normal, surfSampleDir) < 0)
-        {
-            rayState.isOccluded = true;
-            return;
-        }
+    // if (randNum.z < freeBounceProbability)
+    // {
+    //     if (dot(rayState.normal, surfSampleDir) < 0)
+    //     {
+    //         rayState.isOccluded = true;
+    //         return;
+    //     }
 
-        // choose surface scatter sample
-        GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
+    //     // choose surface scatter sample
+    //     GetCosThetaWi(surfSampleDir, normal, cosThetaWi);
 
-        float finalPdf = surfaceSamplePdf;
-        beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, minFinalPdf);
+    //     float finalPdf = surfaceSamplePdf;
+    //     beta = surfaceSampleBsdf * cosThetaWi / max(finalPdf, minFinalPdf);
 
-        rayState.dir = surfSampleDir;
-    }
-    else
-    {
+    //     rayState.dir = surfSampleDir;
+    // }
+    // else
+    // {
         if (randNum.w < powerHeuristicSurface)
         {
             if (dot(rayState.normal, surfSampleDir) < 0)
@@ -284,7 +301,7 @@ __device__ inline void DiffuseSurfaceInteraction(
             // DEBUG_PRINT(lightSampleSurfaceBsdf);
             // DEBUG_PRINT(beta);
         }
-    }
+    // }
 
     NAN_DETECTER(beta);
 
